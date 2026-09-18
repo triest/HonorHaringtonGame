@@ -480,3 +480,15 @@ damage-type-зависимое ослабление sidewall, визуализа
 * Архив `Honorverse_Docs.zip` и распакованная `Honorverse_Docs/`
   удалены из папки проекта после переноса содержимого — не часть
   исходников (см. CANON_RULES.md "Десятая сверка").
+
+## Unreleased — Milestone 10 начат: Formation Command, "wall of battle" (§61)
+
+* `formation_state.gd` (`FormationState`): ведущий + member_offsets в
+  локальных координатах ведущего.
+* `simulation_world.gd`: `formations`, `add_formation()`,
+  `_resolve_formation_keeping(dt)` — станция-киппинг с мёртвой зоной,
+  безопасный no-op без ведущего, disengage-отступление перекрывает
+  удержание строя.
+* `test_formation.gd` — 8 новых проверок.
+* Полный набор: 22 файла тестов, 191+ проверка, все зелёные, без
+  регрессий.

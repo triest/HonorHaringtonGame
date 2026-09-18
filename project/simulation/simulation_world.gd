@@ -43,6 +43,7 @@ const PointDefenseResolution = preload("res://simulation/point_defense_resolutio
 const WeaponResolution = preload("res://simulation/weapon_resolution.gd")
 const TacticalAI = preload("res://simulation/tactical_ai.gd")
 const MissileTube = preload("res://simulation/missile_tube.gd")
+const FormationState = preload("res://simulation/formation_state.gd")
 
 var clock: SimClock
 
@@ -54,6 +55,7 @@ var pd_mounts: Dictionary = {}        # ship_id -> Array[PointDefenseMount]
 var ecm_states: Dictionary = {}       # ship_id -> ECMState (optional)
 var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> SensorContact]
 var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: minimal hostility model, see class doc)
+var formations: Dictionary = {}       # formation_id -> FormationState (§27/§28/§29, Milestone 10 first slice)
 
 ## ASSUMPTION (§26 "retreat"/"disengage", no canonical figure found): a
 ## ship whose HullState integrity fraction drops to or below this stops
@@ -114,6 +116,18 @@ func add_pd_mount(ship_id: String, mount) -> void:
 func set_ecm(ship_id: String, ecm_state) -> void:
 	ecm_states[ship_id] = ecm_state
 
+## Milestone 10 first slice: register a formation. `guide_ship_id` need
+## not exist yet at call time (checked live each tick by
+## `_resolve_formation_keeping`), so scenario setup order is flexible.
+func add_formation(formation_id: String, guide_ship_id: String) -> FormationState:
+	var formation := FormationState.new()
+	formation.guide_ship_id = guide_ship_id
+	formations[formation_id] = formation
+	return formation
+
+func get_formation(formation_id: String) -> FormationState:
+	return formations.get(formation_id)
+
 ## ТЗ §26: minimal hostility bookkeeping. Two ships are hostile to each
 ## other only if BOTH have a non-empty team assigned AND the teams
 ## differ -- a ship with no team set is neutral (never selected as a
@@ -166,6 +180,7 @@ func tick_simulation(dt: float) -> void:
 	_update_missiles(dt)
 	_resolve_counter_missile_intercepts()
 	_resolve_point_defense(dt)
+	_resolve_formation_keeping(dt)
 	_resolve_damage_response(dt)
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
@@ -251,6 +266,49 @@ func _resolve_point_defense(dt: float) -> void:
 
 		for mount in mounts:
 			PointDefenseResolution.engage(mount, ship, target_missile, dt, target_contact)
+
+## Milestone 10 (Formation Command) first slice, AGENTS.md §61 "wall of
+## battle / formation fighting": every non-guide member of a formation
+## thrusts to hold a fixed station (offset in the GUIDE's own local
+## frame, so the formation rotates with the guide rather than staying
+## fixed to world axes) relative to its guide ship. Deliberately simple:
+## thrust direction only (toward the desired world station), no separate
+## velocity-matching/damping term yet, so a member can overshoot and
+## oscillate around station rather than settling smoothly -- an honest
+## gap, not hidden. A formation whose guide ship no longer exists (e.g.
+## destroyed) is simply skipped this tick -- there is no fallback
+## guide/reform logic yet (§29 "reform formations" remains open).
+##
+## Runs BEFORE `_resolve_damage_response` so a critically damaged member
+## retreating overrides its formation station-keeping thrust for that
+## tick (disengaging takes priority over holding the wall).
+func _resolve_formation_keeping(dt: float) -> void:
+	for formation_id in formations.keys():
+		var formation: FormationState = formations[formation_id]
+		var guide: ShipPhysicsState = ships.get(formation.guide_ship_id)
+		if guide == null:
+			continue
+
+		for member_id in formation.member_ids():
+			if member_id == formation.guide_ship_id:
+				continue
+			var member: ShipPhysicsState = ships.get(member_id)
+			if member == null:
+				continue
+
+			var offset_local: Vector3 = formation.member_offsets[member_id]
+			var desired_world_position: Vector3 = guide.position + (guide.orientation * offset_local)
+			var to_station: Vector3 = desired_world_position - member.position
+
+			# ASSUMPTION: a small dead zone avoids thrust jitter once a
+			# member is essentially on station -- no canonical figure,
+			# chosen as a small fraction of a typical formation spacing.
+			if to_station.length_squared() <= 1.0:
+				member.commanded_thrust_local = Vector3.ZERO
+				continue
+
+			var to_station_world: Vector3 = to_station.normalized()
+			member.commanded_thrust_local = member.orientation.inverse() * to_station_world
 
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting

@@ -4,9 +4,10 @@ extends Node
 ## ТЗ §42 Simulation Architecture / Milestone 1 ("Engine skeleton + 3D
 ## world + simulation loop"): the root of "Simulation". Owns all ships and
 ## missiles and, each fixed SimClock tick, drives EVERY previously-built
-## module together in one deterministic pass -- sensors, missile
-## guidance/flight/detonation, counter-missiles, point defense, and ship
-## physics. Has no knowledge of rendering.
+## module together in one deterministic pass -- sensors, tactical AI
+## target selection, missile guidance/flight/detonation, counter-missiles,
+## point defense, ship-to-ship weapons fire, and ship physics. Has no
+## knowledge of rendering.
 ##
 ## HONEST STATUS: this is the first place all of the following actually
 ## run together tick-by-tick, instead of existing only as isolated,
@@ -15,16 +16,21 @@ extends Node
 ##   calls a ship's own jammer on/off), ShipSubsystems (§25, read via
 ##   ShipPhysicsState.subsystems), MissileGuidance/MissileState (§18/§19),
 ##   MissileResolution (§21), CounterMissileResolution (§20),
-##   PointDefenseResolution (§22), ShipPhysicsState.integrate (§12).
-## What this is NOT: Tactical AI (§26). There is no target/weapon
-## SELECTION logic here beyond one explicitly-documented placeholder rule
-## (point defense picks the nearest active missile CURRENTLY targeting
-## that ship -- see `_resolve_point_defense`). Nothing here decides which
-## ship a missile should be launched at, or fires ship-to-ship weapons
-## automatically; `weapon_mounts`/`fire_weapon` exist so a caller (a
-## scenario script, or eventually real AI) can trigger a shot, but this
-## class does not choose targets for them itself. That is Milestone 9,
-## not this one.
+##   PointDefenseResolution (§22), TacticalAI (§26, target selection only),
+##   WeaponResolution (§17, now fired automatically per §26 "use
+##   weapons"), ShipPhysicsState.integrate (§12).
+##
+## §26 Tactical AI status: target SELECTION for point defense AND for
+## ship-to-ship weapons now goes through `TacticalAI`, which reads ONLY
+## sensor contacts (never true position/identity) -- this also FIXES an
+## earlier bug in this file's own point-defense placeholder, which used
+## to scan `missiles` by true position/identity, itself a "no cheat
+## vision" violation of §26. What is still NOT here: threat WEIGHTING
+## beyond nearest-contact, formation management, maneuvering/distance
+## selection, missile launch decisions, damage/loss response, retreat/
+## disengage. `teams` is a minimal hostility model (different, non-empty
+## team = hostile) so target selection has something to select AGAINST;
+## it is not itself part of §26, just the bookkeeping §26 needs.
 class_name SimulationWorld
 
 const ShipPhysicsState = preload("res://simulation/ship_physics_state.gd")
@@ -35,6 +41,7 @@ const MissileState = preload("res://simulation/missile_state.gd")
 const CounterMissileResolution = preload("res://simulation/counter_missile_resolution.gd")
 const PointDefenseResolution = preload("res://simulation/point_defense_resolution.gd")
 const WeaponResolution = preload("res://simulation/weapon_resolution.gd")
+const TacticalAI = preload("res://simulation/tactical_ai.gd")
 
 var clock: SimClock
 
@@ -44,6 +51,7 @@ var weapon_mounts: Dictionary = {}    # ship_id -> Array[WeaponMount]
 var pd_mounts: Dictionary = {}        # ship_id -> Array[PointDefenseMount]
 var ecm_states: Dictionary = {}       # ship_id -> ECMState (optional)
 var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> SensorContact]
+var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: minimal hostility model, see class doc)
 
 var missiles: Dictionary = {}         # missile_id -> MissileState
 var missile_owners: Dictionary = {}   # missile_id -> owning ship_id (String, may be "")
@@ -74,6 +82,7 @@ func remove_ship(ship_id: String) -> void:
 	pd_mounts.erase(ship_id)
 	ecm_states.erase(ship_id)
 	sensor_contacts.erase(ship_id)
+	teams.erase(ship_id)
 
 func get_ship(ship_id: String) -> ShipPhysicsState:
 	return ships.get(ship_id)
@@ -90,6 +99,27 @@ func add_pd_mount(ship_id: String, mount) -> void:
 func set_ecm(ship_id: String, ecm_state) -> void:
 	ecm_states[ship_id] = ecm_state
 
+## ТЗ §26: minimal hostility bookkeeping. Two ships are hostile to each
+## other only if BOTH have a non-empty team assigned AND the teams
+## differ -- a ship with no team set is neutral (never selected as a
+## weapon/PD target), not an accidental default-hostile.
+func set_team(ship_id: String, team: String) -> void:
+	teams[ship_id] = team
+
+func is_hostile(ship_id_a: String, ship_id_b: String) -> bool:
+	var team_a = teams.get(ship_id_a, "")
+	var team_b = teams.get(ship_id_b, "")
+	return team_a != "" and team_b != "" and team_a != team_b
+
+func _hostile_ship_ids(ship_id: String) -> Array:
+	var result: Array = []
+	for other_id in ships.keys():
+		if other_id == ship_id:
+			continue
+		if is_hostile(ship_id, other_id):
+			result.append(other_id)
+	return result
+
 func add_missile(missile_id: String, missile, owner_ship_id: String = "") -> void:
 	missiles[missile_id] = missile
 	missile_owners[missile_id] = owner_ship_id
@@ -98,8 +128,10 @@ func remove_missile(missile_id: String) -> void:
 	missiles.erase(missile_id)
 	missile_owners.erase(missile_id)
 
-## Explicit shot trigger -- NOT automatic target selection (see class doc).
-## A caller (scenario script / future AI) decides attacker/target/mount.
+## Explicit shot trigger. Still callable directly (e.g. by a scenario
+## script that wants to override AI target selection for one shot);
+## `_resolve_weapons_ai` now also calls this automatically once a target
+## has been AI-selected (see below).
 func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 	var attacker = ships.get(attacker_ship_id)
 	var target = ships.get(target_ship_id)
@@ -119,6 +151,7 @@ func tick_simulation(dt: float) -> void:
 	_update_missiles(dt)
 	_resolve_counter_missile_intercepts()
 	_resolve_point_defense(dt)
+	_resolve_weapons_ai(dt)
 	_integrate_ships(dt)
 
 func _cleanup_inactive_missiles() -> void:
@@ -181,11 +214,12 @@ func _resolve_counter_missile_intercepts() -> void:
 		if missile.target is MissileState:
 			CounterMissileResolution.check_intercept(missile, missile.target)
 
-## ТЗ §22 Point Defense. Target SELECTION here is a documented PLACEHOLDER
-## (not tactical AI, §26): each ship's PD mounts all engage the single
-## nearest currently-active missile whose `.target` is that ship. A real
-## AI would prioritize by time-to-impact, salvo size, ship value, etc. --
-## none of that exists yet.
+## ТЗ §22 Point Defense + §26 Tactical AI. Target selection now goes
+## through `TacticalAI.select_pd_target()`, which reads ONLY this ship's
+## own sensor contacts (never a missile's true position/identity
+## directly) -- fixing the earlier ground-truth-scanning placeholder.
+## Prioritization beyond "nearest usable contact" (salvo size,
+## time-to-impact, etc.) is still not implemented -- see tactical_ai.gd.
 func _resolve_point_defense(dt: float) -> void:
 	for ship_id in ships.keys():
 		var mounts: Array = pd_mounts.get(ship_id, [])
@@ -193,27 +227,43 @@ func _resolve_point_defense(dt: float) -> void:
 			continue
 
 		var ship: ShipPhysicsState = ships[ship_id]
-		var nearest_missile = null
-		var nearest_missile_id = null
-		var nearest_distance: float = INF
-		for missile_id in missiles.keys():
-			var missile = missiles[missile_id]
-			if not missile.is_active():
-				continue
-			if missile.target != ship:
-				continue
-			var d: float = ship.position.distance_to(missile.position)
-			if d < nearest_distance:
-				nearest_distance = d
-				nearest_missile = missile
-				nearest_missile_id = missile_id
-
 		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
-		var sensor_contact = contacts.get(nearest_missile_id) if nearest_missile_id != null else null
+		var selection: Dictionary = TacticalAI.select_pd_target(ship, contacts)
+		var target_missile = selection.get("missile")
+		var target_contact = selection.get("contact")
 
 		for mount in mounts:
-			PointDefenseResolution.engage(mount, ship, nearest_missile, dt, sensor_contact)
+			PointDefenseResolution.engage(mount, ship, target_missile, dt, target_contact)
+
+## ТЗ §17 Weapons + §26 Tactical AI ("select targets" / "use weapons").
+## Each ship with at least one weapon mount and a team assigned picks the
+## nearest usable hostile contact (via `TacticalAI.select_weapon_target`,
+## sensor-limited) and fires every ready, arc-capable mount at it. A ship
+## with no team, or no hostile contacts, does not fire -- there is no
+## default-hostile fallback (see `is_hostile`).
+func _resolve_weapons_ai(dt: float) -> void:
+	for ship_id in ships.keys():
+		var mounts: Array = weapon_mounts.get(ship_id, [])
+		if mounts.is_empty():
+			continue
+		if not teams.has(ship_id) or teams[ship_id] == "":
+			continue
+
+		var ship: ShipPhysicsState = ships[ship_id]
+		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+		var hostile_ids: Array = _hostile_ship_ids(ship_id)
+		if hostile_ids.is_empty():
+			continue
+
+		var selection: Dictionary = TacticalAI.select_weapon_target(ship, contacts, hostile_ids)
+		var target_ship_id = selection.get("ship_id")
+		if target_ship_id == null:
+			continue
+
+		for mount in mounts:
+			fire_weapon(ship_id, mount, target_ship_id)
 
 func _integrate_ships(dt: float) -> void:
 	for ship_id in ships.keys():
 		ships[ship_id].integrate(dt)
+

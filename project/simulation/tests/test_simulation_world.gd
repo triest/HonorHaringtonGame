@@ -1,8 +1,9 @@
 extends SceneTree
 ## Headless test runner for SimulationWorld's first end-to-end tick loop
-## (Milestone 1 completion / ТЗ §42): sensors + missile guidance/flight/
-## detonation + counter-missiles + point defense + ship physics all
-## driven together deterministically, tick by tick.
+## (Milestone 1 completion / ТЗ §42): sensors + tactical AI target
+## selection (§26) + missile guidance/flight/detonation + counter-missiles
+## + point defense + ship-to-ship weapons fire + ship physics all driven
+## together deterministically, tick by tick.
 ## Run via: godot --headless --script res://simulation/tests/test_simulation_world.gd
 
 const SimulationWorld = preload("res://simulation/simulation_world.gd")
@@ -11,6 +12,8 @@ const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const HullState = preload("res://simulation/hull_state.gd")
 const MissileState = preload("res://simulation/missile_state.gd")
 const PointDefenseMount = preload("res://simulation/point_defense_mount.gd")
+const WeaponData = preload("res://simulation/weapon_data.gd")
+const WeaponMount = preload("res://simulation/weapon_mount.gd")
 const ContactState = preload("res://simulation/contact_state.gd")
 
 var _failures: int = 0
@@ -107,7 +110,64 @@ func _test_point_defense_engages_and_can_intercept() -> void:
 		if missile.is_intercepted():
 			break
 
-	_assert(missile.is_intercepted(), "point defense should be able to detect (nearest-missile placeholder selection) and intercept an incoming missile through the world loop")
+	_assert(missile.is_intercepted(), "point defense should be able to detect (via TacticalAI's sensor-limited selection, §26) and intercept an incoming missile through the world loop")
+
+func _test_ai_fires_weapons_at_hostile_but_not_neutral() -> void:
+	var world := SimulationWorld.new()
+
+	var alpha := _make_ship(Vector3(1000.0, 0, 0))
+	var beta := _make_ship(Vector3.ZERO)  # hostile to alpha, to starboard/port on the X axis (broadside geometry)
+	beta.defense.port_sidewall_condition = 0.4  # a fully healthy (1.0) sidewall blocks 100% of transmitted damage by design; degrade it so this test can observe a hit landing
+	beta.defense.starboard_sidewall_condition = 0.4
+	var neutral := _make_ship(Vector3(1.0, 0, 0))  # much closer to alpha, but no team assigned
+
+	world.add_ship("alpha", alpha)
+	world.add_ship("beta", beta)
+	world.add_ship("neutral", neutral)
+
+	world.set_team("alpha", "red")
+	world.set_team("beta", "blue")
+	# "neutral" deliberately gets no team.
+
+	var weapon := WeaponData.new()
+	weapon.max_range_m = 500_000.0
+	weapon.damage_per_hit = 100.0
+	weapon.recharge_time_s = 0.0
+	var mount := WeaponMount.new(weapon, WeaponMount.broadside_arc())
+	world.add_weapon_mount("alpha", mount)
+
+	var beta_hull := HullState.new()
+	world.hulls["beta"] = beta_hull
+	var starting_integrity: float = beta_hull.integrity
+
+	for i in range(3):
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(beta_hull.integrity < starting_integrity, "alpha's AI-selected weapon fire should have damaged the hostile ship beta, not the much-closer but teamless neutral ship")
+
+func _test_ai_does_not_fire_without_a_team() -> void:
+	var world := SimulationWorld.new()
+	var attacker := _make_ship(Vector3(1000.0, 0, 0))
+	var target := _make_ship(Vector3.ZERO)
+	world.add_ship("attacker", attacker)
+	world.add_ship("target", target)
+	# No teams assigned to either ship.
+
+	var weapon := WeaponData.new()
+	weapon.max_range_m = 500_000.0
+	weapon.damage_per_hit = 100.0
+	weapon.recharge_time_s = 0.0
+	var mount := WeaponMount.new(weapon, WeaponMount.broadside_arc())
+	world.add_weapon_mount("attacker", mount)
+
+	var target_hull := HullState.new()
+	world.hulls["target"] = target_hull
+	var starting_integrity: float = target_hull.integrity
+
+	for i in range(3):
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(target_hull.integrity == starting_integrity, "a ship with no team assigned should not have its AI fire weapons at anyone (no default-hostile fallback)")
 
 func _test_remove_ship_and_missile() -> void:
 	var world := SimulationWorld.new()
@@ -127,6 +187,8 @@ func _init() -> void:
 	_test_missile_flies_and_gets_a_sensor_contact()
 	_test_missile_detonates_on_target_and_damages_hull()
 	_test_point_defense_engages_and_can_intercept()
+	_test_ai_fires_weapons_at_hostile_but_not_neutral()
+	_test_ai_does_not_fire_without_a_team()
 	_test_remove_ship_and_missile()
 
 	print("")

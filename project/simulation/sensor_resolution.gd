@@ -54,7 +54,10 @@ const SubsystemType = preload("res://simulation/subsystem_type.gd")
 
 ## ASSUMPTION: default passive detection range. No canonical figure found;
 ## chosen to comfortably exceed the missile terminal_detonation_range_m
-## default (50,000 km) so contacts are not created mid-engagement only.
+## default (50 km = 50,000 m -- CORRECTED, an earlier comment here said
+## "50,000 km", a 1000x unit slip; the code value itself was always
+## correct, see missile_state.gd) so contacts are not created
+## mid-engagement only.
 const DEFAULT_SENSOR_RANGE_M: float = 2_000_000_000.0 # 2,000,000 km
 
 ## ASSUMPTION: continuous detection time required before DETECTED upgrades

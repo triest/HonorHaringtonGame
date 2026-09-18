@@ -42,12 +42,14 @@ const CounterMissileResolution = preload("res://simulation/counter_missile_resol
 const PointDefenseResolution = preload("res://simulation/point_defense_resolution.gd")
 const WeaponResolution = preload("res://simulation/weapon_resolution.gd")
 const TacticalAI = preload("res://simulation/tactical_ai.gd")
+const MissileTube = preload("res://simulation/missile_tube.gd")
 
 var clock: SimClock
 
 var ships: Dictionary = {}            # ship_id -> ShipPhysicsState
 var hulls: Dictionary = {}            # ship_id -> HullState (optional)
 var weapon_mounts: Dictionary = {}    # ship_id -> Array[WeaponMount]
+var missile_tubes: Dictionary = {}    # ship_id -> Array[MissileTube] (§26 "launch missiles")
 var pd_mounts: Dictionary = {}        # ship_id -> Array[PointDefenseMount]
 var ecm_states: Dictionary = {}       # ship_id -> ECMState (optional)
 var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> SensorContact]
@@ -61,6 +63,7 @@ const CRITICAL_HULL_FRACTION: float = 0.3
 
 var missiles: Dictionary = {}         # missile_id -> MissileState
 var missile_owners: Dictionary = {}   # missile_id -> owning ship_id (String, may be "")
+var _next_ai_missile_id: int = 0      # counter for AI-launched missile ids (see _resolve_missile_launch_ai)
 
 func _ready() -> void:
 	clock = SimClock.new()
@@ -76,6 +79,8 @@ func add_ship(ship_id: String, state: ShipPhysicsState, hull = null) -> void:
 		hulls[ship_id] = hull
 	if not weapon_mounts.has(ship_id):
 		weapon_mounts[ship_id] = []
+	if not missile_tubes.has(ship_id):
+		missile_tubes[ship_id] = []
 	if not pd_mounts.has(ship_id):
 		pd_mounts[ship_id] = []
 	if not sensor_contacts.has(ship_id):
@@ -85,6 +90,7 @@ func remove_ship(ship_id: String) -> void:
 	ships.erase(ship_id)
 	hulls.erase(ship_id)
 	weapon_mounts.erase(ship_id)
+	missile_tubes.erase(ship_id)
 	pd_mounts.erase(ship_id)
 	ecm_states.erase(ship_id)
 	sensor_contacts.erase(ship_id)
@@ -98,6 +104,9 @@ func get_hull(ship_id: String):
 
 func add_weapon_mount(ship_id: String, mount) -> void:
 	weapon_mounts[ship_id].append(mount)
+
+func add_missile_tube(ship_id: String, tube) -> void:
+	missile_tubes[ship_id].append(tube)
 
 func add_pd_mount(ship_id: String, mount) -> void:
 	pd_mounts[ship_id].append(mount)
@@ -159,6 +168,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_point_defense(dt)
 	_resolve_damage_response(dt)
 	_resolve_weapons_ai(dt)
+	_resolve_missile_launch_ai(dt)
 	_integrate_ships(dt)
 
 func _cleanup_inactive_missiles() -> void:
@@ -294,6 +304,69 @@ func _resolve_weapons_ai(dt: float) -> void:
 
 		for mount in mounts:
 			fire_weapon(ship_id, mount, target_ship_id)
+
+## §26 "launch missiles" -- first real launch DECISION (not just firing
+## already-mounted weapons). Every tube always advances its own cooldown
+## (`tube.advance(dt)`), even for a ship with no team/hostiles/that is
+## disengaging, so ammo/cooldown bookkeeping stays correct regardless of
+## whether the AI is currently choosing to shoot. Target selection reuses
+## `TacticalAI.select_weapon_target` (same nearest-usable-hostile-contact
+## rule, same "no cheat vision" -- distance is measured to the CONTACT's
+## estimated position, not the target's true position) rather than a
+## separate missile-specific selector, since there is no missile-specific
+## targeting criterion implemented yet (see tactical_ai.gd HONEST SCOPE).
+## A critically damaged/disengaging ship (see _resolve_damage_response)
+## does not launch new missiles, same as it does not fire weapons.
+func _resolve_missile_launch_ai(dt: float) -> void:
+	for ship_id in ships.keys():
+		var tubes: Array = missile_tubes.get(ship_id, [])
+		if tubes.is_empty():
+			continue
+		for tube in tubes:
+			tube.advance(dt)
+
+		if not teams.has(ship_id) or teams[ship_id] == "":
+			continue
+		if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
+			continue  # disengaging -- see _resolve_damage_response
+
+		var ship: ShipPhysicsState = ships[ship_id]
+		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+		var hostile_ids: Array = _hostile_ship_ids(ship_id)
+		if hostile_ids.is_empty():
+			continue
+
+		var selection: Dictionary = TacticalAI.select_weapon_target(ship, contacts, hostile_ids)
+		var target_ship = selection.get("ship")
+		var target_contact = selection.get("contact")
+		if target_ship == null or target_contact == null:
+			continue
+
+		var distance: float = ship.position.distance_to(target_contact.estimated_position)
+		for tube in tubes:
+			if not tube.is_ready():
+				continue
+			if distance > tube.max_range_m:
+				continue
+			_launch_missile_from_tube(ship_id, ship, target_ship, tube)
+
+## Constructs and registers a new offensive MissileState launched by
+## `attacker` at `target`, then marks the launching tube as spent.
+## Inherits the launching ship's velocity (a missile does not start from
+## rest relative to the galaxy, only relative to its launch platform) --
+## everything else uses MissileState's own defaults (drive/warhead/rod
+## configuration), same as every other missile created in this codebase
+## via `MissileState.new()`.
+func _launch_missile_from_tube(attacker_ship_id: String, attacker: ShipPhysicsState, target, tube) -> void:
+	var missile := MissileState.new()
+	missile.position = attacker.position
+	missile.velocity = attacker.velocity
+	missile.target = target
+
+	_next_ai_missile_id += 1
+	var missile_id: String = "ai_missile_%d" % _next_ai_missile_id
+	add_missile(missile_id, missile, attacker_ship_id)
+	tube.mark_launched()
 
 func _integrate_ships(dt: float) -> void:
 	for ship_id in ships.keys():

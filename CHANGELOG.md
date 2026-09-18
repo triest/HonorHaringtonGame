@@ -452,3 +452,16 @@ damage-type-зависимое ослабление sidewall, визуализа
 * `test_tactical_ai_retreat.gd` — 13 новых проверок.
 * Полный набор: 20 файлов тестов, 168+ проверок, все зелёные, без
   регрессий.
+
+## Unreleased — Milestone 9 продвинут: "launch missiles" (§26)
+
+* `missile_tube.gd` (`MissileTube`): ammo/cooldown/дальность пусковой
+  установки, ASSUMPTION-плейсхолдеры.
+* `simulation_world.gd`: `missile_tubes`, `add_missile_tube()`,
+  `_resolve_missile_launch_ai(dt)` + `_launch_missile_from_tube()` — AI
+  реально решает запускать ракеты по враждебным целям в пределах
+  дальности трубы, тем же sensor-contact-only критерием, что и оружие;
+  не запускает при отсутствии команды/враждебных/при отступлении.
+* `test_missile_launch_ai.gd` — 15 новых проверок.
+* Полный набор: 21 файл тестов, 183+ проверки, все зелёные, без
+  регрессий.

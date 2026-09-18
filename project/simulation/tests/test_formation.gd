@@ -6,6 +6,7 @@ extends SceneTree
 
 const SimulationWorld = preload("res://simulation/simulation_world.gd")
 const FormationState = preload("res://simulation/formation_state.gd")
+const FormationOrder = preload("res://simulation/formation_order.gd")
 const ShipPhysicsState = preload("res://simulation/ship_physics_state.gd")
 const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const HullState = preload("res://simulation/hull_state.gd")
@@ -478,6 +479,135 @@ func _test_member_already_tracking_guide_rotation_gets_no_spurious_thrust() -> v
 
 	_assert(wing.commanded_thrust_local == Vector3.ZERO, "a member already moving to track the guide's rotation about its own station point should not receive spurious correction thrust")
 
+
+## §29 Formation Orders / §35 Command Queue (this pass): a formation with
+## no issued order must behave EXACTLY as before this mechanic existed --
+## the guide's thrust is whatever the scenario set it to, untouched.
+func _test_no_order_leaves_guide_thrust_untouched() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.commanded_thrust_local = Vector3(0.3, 0.0, 0.0)
+	world.add_ship("guide", guide)
+	world.add_formation("red_wall", "guide")
+
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(guide.commanded_thrust_local == Vector3(0.3, 0.0, 0.0), "with no formation order issued, the guide's own commanded thrust must be left completely untouched")
+
+func _test_change_course_order_turns_guide_velocity_and_completes() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.velocity = Vector3(100.0, 0.0, 0.0)
+	world.add_ship("guide", guide)
+	var formation := world.add_formation("red_wall", "guide")
+
+	formation.issue_order(FormationOrder.change_course(guide, Vector3(0.0, 1.0, 0.0)))
+
+	for i in range(240):  # 4s of sim time -- plenty for a 100 m/s turn at 100 m/s^2
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.current_order == null, "the change-course order should have completed and cleared itself well within 4s")
+	# Completion tolerance is heading_tolerance_rad (~1.1 degrees), so the
+	# residual +X component can be up to speed*sin(tolerance) ~= 2 m/s --
+	# assert against that band, not a tighter number the law never promises.
+	_assert(absf(guide.velocity.x) < 3.0, "the guide's velocity should have rotated almost entirely off the original +X heading")
+	_assert(guide.velocity.y > 95.0, "the guide's velocity should now point almost entirely along the ordered +Y heading")
+	_assert(absf(guide.velocity.length() - 100.0) < 1.0, "changing course alone should preserve the guide's original speed (~100 m/s), not change it")
+
+func _test_change_speed_order_accelerates_guide_and_completes() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.velocity = Vector3(50.0, 0.0, 0.0)
+	world.add_ship("guide", guide)
+	var formation := world.add_formation("red_wall", "guide")
+
+	formation.issue_order(FormationOrder.change_speed(guide, 200.0))
+
+	for i in range(240):
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.current_order == null, "the change-speed order should have completed and cleared itself")
+	_assert(absf(guide.velocity.length() - 200.0) < 1.0, "the guide should have accelerated to essentially the ordered 200 m/s")
+	_assert(guide.velocity.x > 0.0, "change-speed alone should preserve the guide's original heading (+X)")
+
+func _test_hold_formation_order_never_auto_completes_and_zeros_thrust() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.commanded_thrust_local = Vector3(1.0, 0.0, 0.0)  # leftover thrust from some earlier order
+	world.add_ship("guide", guide)
+	var formation := world.add_formation("red_wall", "guide")
+
+	formation.issue_order(FormationOrder.hold_formation())
+
+	for i in range(10):
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(guide.commanded_thrust_local == Vector3.ZERO, "HOLD_FORMATION should actively zero the guide's own maneuver thrust")
+	_assert(formation.current_order != null, "HOLD_FORMATION is a standing order -- it must not auto-dequeue itself after any number of ticks")
+
+func _test_issue_order_now_interrupts_queued_and_current_orders() -> void:
+	var formation := FormationState.new()
+	formation.guide_ship_id = "guide"
+	var guide := _make_ship(Vector3.ZERO)
+
+	formation.issue_order(FormationOrder.change_speed(guide, 50.0))
+	formation.current_order = FormationOrder.change_speed(guide, 10.0)
+	_assert(formation.order_queue.size() == 1, "sanity: one order queued behind the current one")
+
+	var urgent := FormationOrder.change_speed(guide, 500.0)
+	formation.issue_order_now(urgent)
+
+	_assert(formation.current_order == urgent, "issue_order_now should immediately replace the current order")
+	_assert(formation.order_queue.is_empty(), "issue_order_now should drop whatever was still queued behind the interrupted order")
+
+## Cross-module check (also exercises formation-keeping + a multi-order
+## queue together, per AGENTS.md guidance that module boundaries are
+## where real bugs hide): a wing member must keep following the guide
+## through a TWO-order queue (accelerate to 100, then further to 300),
+## proving the queue actually advances past the first order's completion
+## instead of getting stuck, while station-keeping keeps working
+## unmodified throughout.
+func _test_order_queue_advances_past_first_order_while_member_still_follows() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing := _make_ship(Vector3(500.0, 0, 0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(500.0, 0, 0))
+
+	formation.issue_orders([
+		FormationOrder.change_speed(guide, 100.0),
+		FormationOrder.change_speed(guide, 300.0),
+	])
+
+	var saw_first_order_complete_midflight: bool = false
+	for i in range(600):  # 10s -- (100 + 200) / 100 m/s^2 ~= 3s of thrust, plenty of margin
+		world.tick_simulation(1.0 / 60.0)
+		if formation.order_queue.is_empty() and formation.current_order != null and absf(guide.velocity.length() - 100.0) < 5.0:
+			saw_first_order_complete_midflight = true
+
+	_assert(saw_first_order_complete_midflight, "the first queued order (to 100 m/s) should complete and hand off to the second BEFORE the run ends")
+	_assert(formation.current_order == null, "both queued orders should have completed by the end of the run")
+	_assert(absf(guide.velocity.length() - 300.0) < 1.0, "the guide should have ended up at the SECOND order's target speed (300 m/s), proving the queue advanced past the first")
+	_assert(wing.position.distance_to(guide.position) < 600.0, "the wing member should still be tracking near its station on the guide throughout the whole multi-order maneuver")
+
+## §29 "withdraw"/"disengage" composite (turn away, then accelerate away).
+func _test_withdraw_orders_turn_then_accelerate_away() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.velocity = Vector3(100.0, 0.0, 0.0)  # closing on the enemy along +X
+	world.add_ship("guide", guide)
+	var formation := world.add_formation("red_wall", "guide")
+
+	formation.issue_orders(FormationOrder.withdraw_orders(guide, Vector3(-1.0, 0.0, 0.0), 300.0))
+
+	for i in range(600):  # 10s: ~2s to reverse 200 m/s of course + ~5s to build to 300 m/s
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.current_order == null and formation.order_queue.is_empty(), "both withdraw-composite orders should have completed")
+	_assert(guide.velocity.x < -290.0, "the guide should now be moving briskly in -X, away from the threat it was closing on")
+
 func _init() -> void:
 	_test_formation_state_basics()
 	_test_member_thrusts_toward_station()
@@ -496,6 +626,13 @@ func _init() -> void:
 	_test_second_transfer_replans_from_refreshed_design_after_fallback()
 	_test_rotating_guide_sweeps_station_and_member_gets_matching_thrust()
 	_test_member_already_tracking_guide_rotation_gets_no_spurious_thrust()
+	_test_no_order_leaves_guide_thrust_untouched()
+	_test_change_course_order_turns_guide_velocity_and_completes()
+	_test_change_speed_order_accelerates_guide_and_completes()
+	_test_hold_formation_order_never_auto_completes_and_zeros_thrust()
+	_test_issue_order_now_interrupts_queued_and_current_orders()
+	_test_order_queue_advances_past_first_order_while_member_still_follows()
+	_test_withdraw_orders_turn_then_accelerate_away()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

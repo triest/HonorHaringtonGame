@@ -44,6 +44,7 @@ const WeaponResolution = preload("res://simulation/weapon_resolution.gd")
 const TacticalAI = preload("res://simulation/tactical_ai.gd")
 const MissileTube = preload("res://simulation/missile_tube.gd")
 const FormationState = preload("res://simulation/formation_state.gd")
+const FormationOrder = preload("res://simulation/formation_order.gd")
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
 
 var clock: SimClock
@@ -204,6 +205,7 @@ func tick_simulation(dt: float) -> void:
 	_update_missiles(dt)
 	_resolve_counter_missile_intercepts()
 	_resolve_point_defense(dt)
+	_resolve_formation_orders(dt)
 	_resolve_formation_keeping(dt)
 	_resolve_damage_response(dt)
 	_resolve_weapons_ai(dt)
@@ -359,6 +361,68 @@ func _resolve_point_defense(dt: float) -> void:
 
 		for mount in mounts:
 			PointDefenseResolution.engage(mount, ship, target_missile, dt, target_contact)
+
+## §29 Formation Orders / §35 Command Queue (Milestone 10, this pass):
+## translates a formation's active FormationOrder into the GUIDE ship's
+## own `commanded_thrust_local`, before ordinary station-keeping (below)
+## makes every member chase wherever the guide ends up. A formation with
+## no current/queued order is a complete no-op here -- the guide's thrust
+## is left exactly as whatever set it before (scenario setup, or nothing
+## at all), identical to every prior pass's behavior.
+##
+## Execution law: rather than bang-bang-always-full-thrust (which, given
+## this codebase's existing ship accelerations -- often hundreds of g --
+## would overshoot a modest target velocity change wildly in a single
+## tick and then oscillate forever chasing the flipped error) or a
+## PD-with-tuned-gains controller (which needs per-scenario tuning, see
+## the station-keeping K_P_STATION/K_D_STATION above), this uses an
+## EXACT-STOP clamp: accelerate at full available thrust MAGNITUDE only
+## up to whatever this tick's `dt` can deliver without passing the
+## target velocity (`error.length() / dt`), so the guide always reaches
+## (never overshoots) its ordered course/speed, converging in a bounded
+## number of ticks with no oscillation and no tuning constants. This is
+## an ENGINEERING CHOICE (ASSUMPTION), not itself Honorverse canon -- no
+## source specifies how helm crews execute a course/speed order; see
+## ASSUMPTIONS.md.
+func _resolve_formation_orders(dt: float) -> void:
+	for formation_id in formations.keys():
+		var formation: FormationState = formations[formation_id]
+		var guide: ShipPhysicsState = ships.get(formation.guide_ship_id)
+		if guide == null:
+			continue
+
+		if formation.current_order == null:
+			if formation.order_queue.is_empty():
+				continue
+			formation.current_order = formation.order_queue.pop_front()
+
+		var order: FormationOrder = formation.current_order
+
+		# HOLD_FORMATION is a standing order (§29 "hold formation"): it
+		# never auto-completes/dequeues on its own -- it stays active,
+		# actively zeroing the guide's own maneuver thrust every tick,
+		# until something else explicitly replaces it (issue_order_now)
+		# or a NEW order is queued behind it.
+		if order.kind == FormationOrder.Kind.HOLD_FORMATION:
+			guide.commanded_thrust_local = Vector3.ZERO
+			continue
+
+		if order.is_complete(guide):
+			formation.current_order = null
+			guide.commanded_thrust_local = Vector3.ZERO
+			continue
+
+		var max_accel: float = guide.effective_max_acceleration()
+		if max_accel <= 0.0:
+			continue
+
+		var velocity_error: Vector3 = order.target_velocity_mps - guide.velocity
+		var error_mag: float = velocity_error.length()
+		if error_mag <= 0.0001:
+			continue
+		var desired_accel_mag: float = min(max_accel, error_mag / dt)
+		var desired_accel: Vector3 = velocity_error.normalized() * desired_accel_mag
+		guide.commanded_thrust_local = guide.orientation.inverse() * (desired_accel / max_accel)
 
 ## Milestone 10 (Formation Command) -- velocity-matching pass, ТЗ §29/
 ## §32 "maintain... relative position; velocity matching". Builds on the

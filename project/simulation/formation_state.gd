@@ -79,6 +79,18 @@ var guide_lost_since: float = -1.0
 ## ASSUMPTIONS.md.
 var design_offsets: Dictionary = {}
 
+## §29 Formation Orders / §35 Command Queue (this pass): orders issued to
+## this formation's GUIDE ship. `current_order` is the one actively being
+## executed (translated into the guide's `commanded_thrust_local` by
+## SimulationWorld._resolve_formation_orders each tick); `order_queue`
+## holds further orders (§35: "Orders can be queued") to start once the
+## current one completes. Both empty is the default/rest state --
+## members still hold station on the guide exactly as before this
+## mechanic existed; a formation with no orders behaves identically to
+## pre-Milestone-10-Formation-Orders code (see FormationOrder class doc).
+var current_order = null
+var order_queue: Array = []
+
 func set_station(ship_id: String, offset_local: Vector3) -> void:
 	member_offsets[ship_id] = offset_local
 
@@ -87,6 +99,26 @@ func remove_member(ship_id: String) -> void:
 
 func member_ids() -> Array:
 	return member_offsets.keys()
+
+## §35 Command Queue: append an order to run once earlier queued orders
+## (and the current one, if any) complete.
+func issue_order(order) -> void:
+	order_queue.append(order)
+
+func issue_orders(orders: Array) -> void:
+	for order in orders:
+		order_queue.append(order)
+
+## Interrupt whatever is currently executing (or queued) and start this
+## order immediately -- e.g. an urgent "disengage" that shouldn't wait
+## for an in-progress "change course" to finish first.
+func issue_order_now(order) -> void:
+	order_queue.clear()
+	current_order = order
+
+func clear_orders() -> void:
+	order_queue.clear()
+	current_order = null
 
 ## §33: set (or replace) the explicit chain-of-command order. Duplicated
 ## defensively so later mutation of the caller's array does not silently

@@ -608,6 +608,142 @@ func _test_withdraw_orders_turn_then_accelerate_away() -> void:
 	_assert(formation.current_order == null and formation.order_queue.is_empty(), "both withdraw-composite orders should have completed")
 	_assert(guide.velocity.x < -290.0, "the guide should now be moving briskly in -X, away from the threat it was closing on")
 
+## §29 "change formation": reassigning member_offsets should take effect
+## immediately (no gradual "maneuver" on the order itself -- the order
+## just retasks the target station) and the order should self-complete
+## the same tick it is applied, leaving nothing queued/current behind it.
+func _test_change_formation_reassigns_offsets_and_completes_immediately() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing := _make_ship(Vector3(500.0, 0, 0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(500.0, 0, 0))  # line-ahead
+
+	formation.issue_order(FormationOrder.change_formation({"wing": Vector3(0, 0, 800.0)}))  # reform to line-abreast
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.current_order == null, "CHANGE_FORMATION should self-complete the tick it is applied")
+	_assert(formation.order_queue.is_empty(), "CHANGE_FORMATION should not leave anything else queued")
+	_assert(formation.member_offsets["wing"] == Vector3(0, 0, 800.0), "the wing's station offset should be updated to the newly ordered one")
+
+## A CHANGE_FORMATION order naming only SOME members should leave anyone
+## not mentioned exactly where they already were -- a real "open up
+## spacing on the left wing" order shouldn't silently un-station the
+## right wing.
+func _test_change_formation_leaves_unmentioned_members_untouched() -> void:
+	var formation := FormationState.new()
+	formation.guide_ship_id = "guide"
+	formation.set_station("left", Vector3(-500.0, 0, 0))
+	formation.set_station("right", Vector3(500.0, 0, 0))
+	var guide := _make_ship(Vector3.ZERO)
+
+	var world := SimulationWorld.new()
+	world.add_ship("guide", guide)
+	world.formations["red_wall"] = formation
+	formation.issue_order(FormationOrder.change_formation({"left": Vector3(-1500.0, 0, 0)}))
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.member_offsets["left"] == Vector3(-1500.0, 0, 0), "the named ship's station should move to the ordered offset")
+	_assert(formation.member_offsets["right"] == Vector3(500.0, 0, 0), "an unmentioned ship's station must be left exactly as it was")
+
+## CHANGE_FORMATION should also work as "take station" for a ship not
+## previously a member at all -- §29 does not distinguish "reform" from
+## "assign a newcomer a station", both are just "this ship's offset is
+## now X" (see FormationOrder.new_offsets_local's doc comment).
+func _test_change_formation_can_add_a_new_member() -> void:
+	var formation := FormationState.new()
+	formation.guide_ship_id = "guide"
+	var guide := _make_ship(Vector3.ZERO)
+	var world := SimulationWorld.new()
+	world.add_ship("guide", guide)
+	world.formations["red_wall"] = formation
+
+	_assert(formation.member_ids().is_empty(), "sanity: no members yet")
+	formation.issue_order(FormationOrder.change_formation({"latecomer": Vector3(300.0, 0, 0)}))
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.member_offsets.has("latecomer"), "CHANGE_FORMATION should be able to add a brand-new member's station")
+
+## Cross-module end-to-end check (module boundaries are where real bugs
+## hide, per AGENTS.md guidance): after a CHANGE_FORMATION order reassigns
+## a member's station, the EXISTING station-keeping PD controller
+## (unmodified by this pass) must actually fly that member to the NEW
+## world position over subsequent ticks -- proving the order really
+## re-tasks live formation-keeping, not just a Dictionary nobody reads.
+func _test_change_formation_member_actually_flies_to_new_station() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing := _make_ship(Vector3(500.0, 0, 0))  # starts on its OLD line-ahead station
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(500.0, 0, 0))
+
+	for i in range(300):
+		world.tick_simulation(1.0 / 60.0)
+	_assert(wing.position.distance_to(Vector3(500.0, 0, 0)) < 5.0, "sanity: wing should already be settled near its original station")
+
+	var starting_distance_to_new: float = wing.position.distance_to(Vector3(0, 0, 800.0))
+	formation.issue_order(FormationOrder.change_formation({"wing": Vector3(0, 0, 800.0)}))  # reform to line-abreast, well off the old line
+	# The overdamped station-keeping PD law (K_P_STATION=0.02) converges
+	# slowly by design (see _resolve_formation_keeping's doc comment) --
+	# calibrated empirically: a ~940m re-station takes on the order of a
+	# few minutes of sim time to fully settle within a few meters, not
+	# seconds. 18000 ticks (300s) is comfortably past that, matching the
+	# calibration used to pick this figure.
+	for i in range(18000):
+		world.tick_simulation(1.0 / 60.0)
+	var ending_distance_to_new: float = wing.position.distance_to(Vector3(0, 0, 800.0))
+
+	_assert(ending_distance_to_new < 5.0, "the wing should have actually flown to its NEWLY ordered station, not stayed on the old one")
+	_assert(ending_distance_to_new < starting_distance_to_new, "sanity: it should have gotten meaningfully closer to the new station than where it started")
+
+## Cross-module end-to-end check: a deliberate CHANGE_FORMATION reshape
+## must become the formation's new "design" baseline, so a LATER leader
+## transfer (§33) re-plans survivors around the SHAPE JUST ORDERED, not
+## silently reverting to whatever geometry predated the reshape.
+func _test_change_formation_becomes_new_design_for_later_leader_transfer() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing_a := _make_ship(Vector3(500.0, 0, 0))
+	var wing_b := _make_ship(Vector3(-500.0, 0, 0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing_a", wing_a)
+	world.add_ship("wing_b", wing_b)
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing_a", Vector3(500.0, 0, 0))   # original line-ahead design
+	formation.set_station("wing_b", Vector3(-500.0, 0, 0))
+	formation.set_succession_order(["wing_b"])  # wing_b, not wing_a, takes over
+
+	# Reshape wing_a only (wing_b untouched -- see the "leaves unmentioned
+	# members untouched" test above) BEFORE any leader transfer has ever
+	# happened (design_offsets starts empty -- this must not resurrect the
+	# OLD line-ahead shape as "the design" once a transfer does happen).
+	formation.issue_order(FormationOrder.change_formation({"wing_a": Vector3(0, 0, 800.0)}))
+	world.tick_simulation(1.0 / 60.0)
+	_assert(formation.design_offsets.get("wing_a") == Vector3(0, 0, 800.0), "sanity: the reshape should already have become the formation's design baseline")
+
+	# Now the guide is lost (destroyed/removed) -- after the recognition
+	# delay, command should transfer to wing_b per the succession order,
+	# exercising the real §33 pipeline end-to-end rather than calling the
+	# transfer function directly.
+	world.remove_ship("guide")
+	for i in range(400):  # > COMMAND_TRANSFER_DELAY_S (3s) at 1/60s steps
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.guide_ship_id == "wing_b", "sanity: command should have transferred to wing_b per the succession order")
+	# wing_a's replanned offset around the new guide (wing_b) should be
+	# derived from the RESHAPED design[wing_a] = (0,0,800), i.e.
+	# (0,0,800) - (-500,0,0) = (500,0,800) -- NOT (1000,0,0), which is
+	# what you'd get replanning from the stale PRE-reshape design
+	# ((500,0,0) - (-500,0,0)). This is the discriminating check that a
+	# deliberate reshape really overwrites the design baseline used by
+	# later leader transfers.
+	_assert(formation.member_offsets.has("wing_a"), "wing_a should be carried forward as an ordinary member after the transfer")
+	_assert(formation.member_offsets["wing_a"].distance_to(Vector3(500.0, 0, 800.0)) < 0.01, "leader transfer after a reshape should re-plan from the RESHAPED design, not the pre-reshape one")
+
 func _init() -> void:
 	_test_formation_state_basics()
 	_test_member_thrusts_toward_station()
@@ -633,6 +769,11 @@ func _init() -> void:
 	_test_issue_order_now_interrupts_queued_and_current_orders()
 	_test_order_queue_advances_past_first_order_while_member_still_follows()
 	_test_withdraw_orders_turn_then_accelerate_away()
+	_test_change_formation_reassigns_offsets_and_completes_immediately()
+	_test_change_formation_leaves_unmentioned_members_untouched()
+	_test_change_formation_can_add_a_new_member()
+	_test_change_formation_member_actually_flies_to_new_station()
+	_test_change_formation_becomes_new_design_for_later_leader_transfer()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

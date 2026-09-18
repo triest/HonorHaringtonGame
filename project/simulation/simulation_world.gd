@@ -407,6 +407,17 @@ func _resolve_formation_orders(dt: float) -> void:
 			guide.commanded_thrust_local = Vector3.ZERO
 			continue
 
+		# §29 "change formation": a re-tasking order, not a guide maneuver --
+		# it does not touch commanded_thrust_local at all (the guide's course
+		# continues whatever it was already doing). Applied once, then
+		# immediately dequeued; see _apply_change_formation's doc comment for
+		# why the actual flying-into-station is left to the pre-existing
+		# station-keeping PD controller rather than a new maneuver mechanic.
+		if order.kind == FormationOrder.Kind.CHANGE_FORMATION:
+			_apply_change_formation(formation, order)
+			formation.current_order = null
+			continue
+
 		if order.is_complete(guide):
 			formation.current_order = null
 			guide.commanded_thrust_local = Vector3.ZERO
@@ -423,6 +434,40 @@ func _resolve_formation_orders(dt: float) -> void:
 		var desired_accel_mag: float = min(max_accel, error_mag / dt)
 		var desired_accel: Vector3 = velocity_error.normalized() * desired_accel_mag
 		guide.commanded_thrust_local = guide.orientation.inverse() * (desired_accel / max_accel)
+
+## §29 "change formation" (this pass): applies a CHANGE_FORMATION order's
+## `new_offsets_local` to `formation.member_offsets` (only the ships
+## named as keys are reassigned -- see FormationOrder.new_offsets_local's
+## doc comment; anyone else already in the formation keeps their current
+## station untouched), then captures the RESULTING full shape as the
+## formation's new `design_offsets` baseline.
+##
+## Deliberately does NOT teleport any ship or touch anyone's
+## commanded_thrust_local -- retargeting `member_offsets` is the entire
+## effect. The existing station-keeping PD controller in
+## `_resolve_formation_keeping` (unchanged by this pass) picks up the new
+## target next tick and flies each member there exactly as it already
+## flies members onto their design stations after a leader transfer --
+## this order is "what the new shape is", not "how to get there".
+## ENGINEERING CHOICE (ASSUMPTION), not canon: no Honorverse source
+## describes the mechanics of a "reform formation" order; reusing the
+## same convergence law formation-keeping already uses (rather than a
+## bespoke maneuver/timeline for reshaping) is simplicity/consistency
+## (§43), not a numeric claim -- see ASSUMPTIONS.md.
+##
+## Overwriting `design_offsets` with the POST-order shape (not just
+## leaving the old design in place) is deliberate: a deliberate reshape
+## is itself a new "plan" for the formation, so a LATER leader transfer
+## should re-plan survivors around the shape just ordered, not silently
+## revert to whatever shape predates this order.
+func _apply_change_formation(formation: FormationState, order: FormationOrder) -> void:
+	for ship_id in order.new_offsets_local.keys():
+		formation.member_offsets[ship_id] = order.new_offsets_local[ship_id]
+
+	var refreshed_design: Dictionary = {formation.guide_ship_id: Vector3.ZERO}
+	for ship_id in formation.member_offsets.keys():
+		refreshed_design[ship_id] = formation.member_offsets[ship_id]
+	formation.design_offsets = refreshed_design
 
 ## Milestone 10 (Formation Command) -- velocity-matching pass, ТЗ §29/
 ## §32 "maintain... relative position; velocity matching". Builds on the

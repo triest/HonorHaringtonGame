@@ -12,16 +12,20 @@ extends RefCounted
 ## (members keep following the guide exactly as before -- an order
 ## changes where the wall is going, not how the wall holds together).
 ##
-## Deliberately covers only the two purely-kinematic order kinds from
-## §29's list: CHANGE_COURSE and CHANGE_SPEED (which together also cover
+## Covers the two purely-kinematic order kinds from §29's list
+## (CHANGE_COURSE and CHANGE_SPEED, which together also cover
 ## "accelerate"/"decelerate", both just CHANGE_SPEED with a higher/lower
-## target). HOLD_FORMATION is the explicit "stop maneuvering" order.
-## §29 items that require target/weapon context (attack, select target,
+## target), the explicit "stop maneuvering" order (HOLD_FORMATION), and
+## (this pass) §29's "change formation" itself: CHANGE_FORMATION
+## re-tasks the formation's STATION GEOMETRY (member_offsets), not the
+## guide's course -- e.g. reforming a line-ahead into a line-abreast, or
+## opening/closing spacing, without anyone leaving the formation. §29
+## items that require target/weapon context (attack, select target,
 ## target distribution, missile use, counter-missile posture, defensive
 ## posture, evasive maneuver) or the full command hierarchy (§28) are
 ## OUT of scope for this slice -- honestly left open, see
 ## ASSUMPTIONS.md/CHANGELOG.md. "approach" and "withdraw"/"disengage" are
-## provided as convenience composites of the two primitive kinds (see
+## provided as convenience composites of the two kinematic kinds (see
 ## `withdraw_orders` below), not new primitive kinds.
 ##
 ## INTERPRETATION, not canon: "change course" here retargets the guide's
@@ -34,21 +38,36 @@ extends RefCounted
 ## heading; modeling nose-orientation control is a separate, not-yet-
 ## built mechanic (no code anywhere currently drives `angular_velocity`
 ## from an AI/order -- see ASSUMPTIONS.md). See ASSUMPTIONS.md for the
-## exact-stop acceleration clamp used to execute these orders without
-## oscillation.
+## exact-stop acceleration clamp used to execute CHANGE_COURSE/
+## CHANGE_SPEED without oscillation, and for CHANGE_FORMATION's
+## "re-task the target, let existing station-keeping fly it" design.
 class_name FormationOrder
 
 enum Kind {
 	HOLD_FORMATION,
 	CHANGE_COURSE,
 	CHANGE_SPEED,
+	CHANGE_FORMATION,
 }
 
 var kind: int = Kind.HOLD_FORMATION
 
 ## World-space target velocity for CHANGE_COURSE/CHANGE_SPEED. Unused
-## (left at zero) for HOLD_FORMATION.
+## (left at zero) for HOLD_FORMATION/CHANGE_FORMATION.
 var target_velocity_mps: Vector3 = Vector3.ZERO
+
+## §29 "change formation": ship_id -> Vector3 NEW desired station offset,
+## expressed in the guide's own local/body frame (same convention as
+## FormationState.member_offsets/design_offsets). Unused (left empty)
+## for the other three Kinds. Only ships present as KEYS here have their
+## station reassigned -- a ship already in the formation but not
+## mentioned keeps its current offset (a "change formation" order need
+## not re-specify every station if only some are moving, e.g. opening
+## spacing on one wing). A key not currently in the formation is simply
+## added as a new member at that station (§29 does not distinguish
+## "reform" from "take station" -- both are just "this ship's assigned
+## offset is now X").
+var new_offsets_local: Dictionary = {}
 
 ## ASSUMPTION: no canonical "order achieved" tolerance exists -- these
 ## are small, game-feel thresholds (a few degrees / a slow walking pace)
@@ -111,11 +130,28 @@ static func hold_formation() -> FormationOrder:
 	order.kind = Kind.HOLD_FORMATION
 	return order
 
+## §29 "change formation": reassign station offsets (guide's local/body
+## frame) for the ships named as keys in `offsets_local`. Duplicated
+## defensively so later mutation of the caller's Dictionary doesn't
+## silently change an already-issued order behind its back.
+static func change_formation(offsets_local: Dictionary) -> FormationOrder:
+	var order := FormationOrder.new()
+	order.kind = Kind.CHANGE_FORMATION
+	order.new_offsets_local = offsets_local.duplicate()
+	return order
+
 ## True once `guide`'s actual velocity is within tolerance of this
 ## order's target. HOLD_FORMATION never completes on its own (it is a
 ## standing order, replaced only by issuing something else) -- callers
-## must not call this for HOLD_FORMATION expecting auto-dequeue; see
-## SimulationWorld._resolve_formation_orders, which special-cases it.
+## must not call this for HOLD_FORMATION expecting auto-dequeue.
+## CHANGE_FORMATION is a re-tasking order, not a maneuver the GUIDE
+## flies -- it is considered complete the instant it is applied (see
+## SimulationWorld._resolve_formation_orders/_apply_change_formation);
+## the actual flying of members into their newly-assigned stations is
+## left entirely to the pre-existing station-keeping PD controller in
+## `_resolve_formation_keeping`, exactly as it already flies members to
+## their design stations after a leader transfer -- reusing that mature,
+## already-tested convergence code rather than inventing a second one.
 func is_complete(guide) -> bool:
 	match kind:
 		Kind.HOLD_FORMATION:

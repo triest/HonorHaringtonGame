@@ -32,8 +32,13 @@ Create a standalone Windows 3D tactical combat simulator set in the Honor Harrin
 * **Reference missile performance (CANON examples for SPECIFIC classes,
   NOT universal constants -- ТЗ §11 forbids one MAX_SPEED/acceleration for
   all missiles):**
-  * Mark 23 MDM (multi-drive missile), half-acceleration mode:
-    ~48,000 G, powered envelope ~63,000,000 km.
+  * Mark 23 MDM (multi-drive missile): full-acceleration mode ~96,000 G,
+    powered envelope ~15,000,000 km; half-acceleration mode ~48,000 G,
+    powered envelope ~63,000,000 km (both CANON, Honorverse Wiki
+    "Manticoran missile technology", verified 2026-09-18 -- see
+    CANON_RULES.md "Девятая сверка"). Full accel = faster/shorter reach,
+    half accel = slower/longer reach -- same throttling trade-off already
+    modeled by `MissileState.set_throttle()`.
   * Mark 31 counter-missile: ~130,000 G for ~75 seconds, effective range
     just under 3,600,000 km.
   * Viper anti-LAC missile: ~130,000 G, "fire and forget" with an
@@ -67,6 +72,24 @@ Wiki 2026-09-18 -- see AGENTS.md §18.1 for full detail/citations):
 * **Launch clearance:** missiles must clear the LAUNCHING SHIP's own
   wedge before activating their own drive/wedge -- this is the reason
   mass-driver launch tubes exist.
+
+### 2.2.2. COUNTER-MISSILES
+* **Kill mechanic:** mutual impeller-wedge overlap destroys BOTH the
+  counter-missile and the incoming missile it intercepts -- NOT a
+  collision or a warhead detonation (counter-missiles carry no warhead).
+  Distinct from Point Defense (§2.2.3), which is a ship-mounted
+  laser-cluster weapon requiring multiple hits.
+* **Typical engagement ranges:** ~1-4 million km (CANON example range,
+  Honorverse Wiki "Manticoran missile technology", verified 2026-09-18).
+* Implementation: `CounterMissileResolution.check_intercept()`,
+  `INTERCEPT_KILL_RADIUS_M` (ASSUMPTION placeholder, see ASSUMPTIONS.md).
+
+### 2.2.3. POINT DEFENSE
+* Ship-mounted laser-cluster defense, layered ALONGSIDE (not instead of)
+  counter-missiles and ECM (CANON: "thickened the defensive envelope").
+  Reaction time before engagement, multiple hits required to kill, own
+  recharge cycle -- a large enough salvo can saturate a single mount.
+  Implementation: `PointDefenseMount`/`PointDefenseResolution`.
 
 ### 2.3. SENSORS AND ELECTRONIC WARFARE (ECM)
 * **Detection Pipeline:** Active Wedge Radiance -> Gravitic Sensor Threshold -> Track Identification.

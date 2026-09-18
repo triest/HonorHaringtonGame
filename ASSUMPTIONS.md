@@ -341,7 +341,7 @@ enemy's passive scanners"). Канон НЕ даёт конкретных циф
 цитата):
 
 * `SensorResolution.DEFAULT_SENSOR_RANGE_M` = 2 000 000 км — выбрано
-  заведомо больше `terminal_detonation_range_m` (50 000 км по умолчанию
+  заведомо больше `terminal_detonation_range_m` (50 км = 50 000 м по умолчанию
   у ракеты), чтобы контакты создавались не только в момент терминальной
   фазы боя.
 * `DETECTED_TO_TRACKED_TIME_S` = 6с — время устойчивого контакта для

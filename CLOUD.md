@@ -103,3 +103,8 @@ Wiki 2026-09-18 -- see AGENTS.md §18.1 for full detail/citations):
 
 ### 2.6. REPLAY & SCENARIO ENGINE
 * **State Snapshotting:** The system records initial constraints, periodic state vector deltas, and timestamped player/AI orders to reconstruct the entire 3D map accurately during playback.
+
+### 2.7. COMBAT PHILOSOPHY — "NELSON IN A SKIRT" (AGENTS.md §61)
+* **Design mandate, not a mechanic in itself:** Honor Harrington is a deliberate spiritual successor to Horatio Nelson; the simulator should feel like Nelsonian naval warfare translated into space, not arcade dogfighting or perfect-information RTS.
+* Decisive-engagement mindset; geometry (position/closing vectors/aspect) as the "weather gauge"; wall-of-battle formation fighting as the primary combat mode; concentration of force (crossing the T, doubling, local superiority) as a first-class viable tactic; bold decisions under incomplete information rewarded over perfect-knowledge caution; player as commander (observe -> decide -> order -> monitor), not pilot; subordinate initiative under loss of comms without the force dissolving into chaos.
+* Practical steer for open §26/Milestone 10 gaps (formation command, threat weighting beyond nearest-contact, squadron coordination): resolve them in this direction when canon/ТЗ are silent, and mark such choices as design-mandate-driven, not canon.

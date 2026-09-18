@@ -465,3 +465,18 @@ damage-type-зависимое ослабление sidewall, визуализа
 * `test_missile_launch_ai.gd` — 15 новых проверок.
 * Полный набор: 21 файл тестов, 183+ проверки, все зелёные, без
   регрессий.
+
+## Unreleased — ТЗ дополнено: AGENTS.md §61 "Combat Philosophy — 'Nelson in a Skirt'"
+
+* Из второго `Honorverse_Docs.zip` (примечания пользователя по боям) в
+  AGENTS.md добавлена новая §61 — формальный design mandate: decisive
+  battle mindset, geometry-as-weather-gauge, wall-of-battle formation
+  fighting, concentration of force, calculated risk under incomplete
+  information, commander-not-pilot, initiative within the plan.
+* Краткий кросс-референс добавлен в CLOUD.md §2.7.
+* ASSUMPTIONS.md: прежняя неформальная заметка про Nelson/Age-of-Sail
+  обновлена — статус повышен до "раздел ТЗ" (было устное указание
+  пользователя, теперь формальный §61).
+* Архив `Honorverse_Docs.zip` и распакованная `Honorverse_Docs/`
+  удалены из папки проекта после переноса содержимого — не часть
+  исходников (см. CANON_RULES.md "Десятая сверка").

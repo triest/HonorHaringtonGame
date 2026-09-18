@@ -1619,3 +1619,42 @@ The player should feel like the commander of a large military space force rather
 The central goal is:
 
 **A complete autonomous 3D tactical Honorverse combat simulator with formation-level and individual-ship command.**
+
+---
+
+# 61. Combat Philosophy — “Nelson in a Skirt”
+
+Honor Harrington was deliberately written as a spiritual successor to Horatio Nelson.  
+The simulator must therefore reproduce the *feel* of Nelsonian naval warfare translated into the Honorverse, not generic space-opera dogfighting.
+
+### What this means in practice
+
+1. **Decisive battle mindset**  
+   The system should reward seeking and forcing a decisive engagement under favourable geometric conditions, not endless skirmishing or hit-and-run as the default optimal strategy.
+
+2. **Geometry is the weather gauge**  
+   Relative position, closing vectors, wedge orientation and the ability to present or deny aspects are the space equivalent of the weather gauge. A commander who understands and exploits geometry should have a clear advantage.
+
+3. **Wall of battle / formation fighting**  
+   The primary mode of fleet combat is coordinated formation action (the “wall”). Individual ships exist inside a larger tactical plan. Breaking formation without reason should be costly; holding or reforming the wall under fire should be a meaningful skill.
+
+4. **Concentration of force**  
+   Bringing superior weight of fire onto a portion of the enemy line (crossing the T, doubling, local superiority) must be a viable and powerful tactic, just as it was for Nelson.
+
+5. **Aggressive but calculated risk**  
+   The best results come from bold decisions taken with incomplete information, not from perfect knowledge or from pure caution. The information model (limited sensors, delayed reports, communication limits) exists to force the player into this space.
+
+6. **Commander, not pilot**  
+   The player’s primary loop is observation → decision → order → monitoring. Direct control of a single ship is an occasional, deliberate exception, not the default mode of play.
+
+7. **Initiative within the plan**  
+   Subordinate ships and formations should be able to exercise limited initiative (especially under loss of communications or when local conditions demand it) without the entire force dissolving into chaos. This mirrors the Nelsonian expectation that captains understand the admiral's intent.
+
+### Design consequences
+
+- Formation AI and command hierarchy are not secondary features; they are core to the intended experience.
+- Sensor and communication limits are not “realism chrome”; they are what create the decision space Nelson operated in.
+- Missile and energy-weapon geometry must make positioning and aspect matter.
+- The UI and camera should support the commander's view (fleet / task-force / squadron) more naturally than the fighter-pilot view.
+
+If a proposed feature or simplification moves the game toward arcade dogfighting or toward perfect-information real-time strategy, it is working against the project's intended character.

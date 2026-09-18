@@ -1,0 +1,331 @@
+# CANON_RULES.md - Honorverse Tactical Specifications
+
+## 1. IMPELLER WEDGE GEOMETRY & MECHANICS [CANON]
+* **Top/Bottom Impenetrability:** The top and bottom hyper-spatial stress bands (the Impeller Wedge) create an absolute gravitational barrier. No physical entity or energy weapon can penetrate the wedge. Any object entering the wedge is instantaneously destroyed by tidal gravitational forces.
+* **Vulnerable Throats:** The front (bow) and rear (stern) openings of the wedge are completely unprotected by the wedge itself. These are the critical vectors for axial energy weapons (chaser armaments) and missile ingress.
+* **Krennikov Coupler Limits:** Ships cannot engage hyper-drive or maintain normal sub-light acceleration if the impeller wedge bands overlap or suffer harmonic failure. 
+
+## 2. SIDEWALLS [CANON]
+* **Spatial Distortion Shields:** Sidewalls are artificial gravitational shear zones projected along the port and starboard beams. They do not block attacks through raw capacity (HP Pools), but distort and refract incoming energy beams and missile laserheads.
+* **Overloading & Burnout:** A sidewall can be overloaded by concentrated energy weapon strikes or high-yield laserhead detonations. An overloaded sidewall generator burns out, leaving the underlying hull section entirely exposed to subsequent salvos.
+
+## 3. MISSILE & LASERHEAD WEAPONS [CANON]
+* **Offensive Profiles:** Missiles accelerate at thousands of gravities ($G$), rapidly entering high relativistic fractions of $c$ (up to $0.7c$ or higher depending on the technological era).
+* **Laserhead Functionality:** Missiles do not detonate upon physical contact. At the terminal phase, they detonate at distances of thousands of kilometers, pumping their nuclear fusion energy into focused X-ray lasing rods (Laserheads) directed at the target's vulnerable vectors.
+
+## 4. COUNTER-MISSILES & POINT DEFENSE [CANON]
+* **Counter-Missiles (CM):** Active interceptors launched to detonate near incoming missiles, using spatial distortions to break their tracking or destroy them prematurely.
+* **Laser Clusters & Point Defense:** Active close-in laser mounts that track and destroy incoming missiles that penetrate the outer CM screens.
+
+## 5. SENSORS & ECM [CANON]
+* **Gravitic Sensors:** Detection relies primarily on gravitic sensors that read the immense spatial distortions of an active impeller wedge. A ship with an active wedge cannot hide its presence within normal system ranges.
+* **Electronic Countermeasures (ECM):** Systems like "Ghost Rider" project multiple false gravitic signatures, distorting the target tracking systems of missiles and enemy ships.
+
+## 6. SUBSYSTEM DAMAGE [CANON]
+* **Component Degradation:** Damage directly incapacitates specific nodes: impeller rings (degrading max acceleration), sidewall generators (reducing shield coverage), missile tubes (dropping salvo density), and control rooms (introducing telemetry lag).
+
+## 7. FORMATIONS & COMMAND HIERARCHY [CANON]
+* **Tactical Layout:** Ships fly in strict vertical wall-of-battle formations to interlock their sidewalls and protect each other's open throats. 
+* **Command Lag:** Orders are bound by the speed of light ($c$). In grand fleet actions across millions of kilometers, changes in formation doctrine or target priority take real simulation time to propagate down the command chain.
+
+---
+
+## Проверка чисел (сверка с Honorverse Wiki, 2026-09-18)
+
+* **Ускорение ракет:** в CANON выше указано "thousands of gravities" —
+  это верно по порядку величины, но не точно. Конкретный пример из книг:
+  ракета калибра капитал-шипа поздних технологий (Peep Wars-эры)
+  "could accelerate at 46,000 G for perhaps 180 seconds before its drive
+  burned out" (Honorverse Wiki, статья Missile). ЗНАЧЕНИЕ ЗАВИСИТ ОТ
+  ЭПОХИ/КЛАССА РАКЕТЫ — нельзя брать 46,000G как универсальную константу
+  для всех ракет всех эпох; статус для конкретных цифр — CANON только для
+  цитируемого примера, для остальных эпох — UNKNOWN, делать configurable.
+* **Дистанция поражения laserhead:** в CANON выше "thousands of kilometers"
+  — по источнику точнее: боеголовка детонирует, разводящие штанги (lasing
+  rods) выдвигаются на ~100 метров перед боеголовкой, "meaningful damage
+  could be dealt to anything within 25,000 kilometers of the detonation".
+  Уточнить как CANON (пример) с явной пометкой "конкретное число варьируется
+  по классу боеголовки/эпохе — UNKNOWN для точного значения по умолчанию".
+* Источник: https://honorverse.fandom.com/wiki/Missile (фан-вики —
+  приоритет 4 по AGENTS.md §4, использовать как вспомогательный источник,
+  не как замену первоисточнику книг; при расхождении с текстом книг —
+  книги приоритетнее).
+
+TODO: остальные пункты этого файла (Krennikov Coupler, ECM "Ghost Rider",
+overloading механика sidewall) пока НЕ сверены с первоисточником — не
+считать окончательным каноном, пока не перепроверено по тексту книг или
+более надёжному справочнику.
+
+---
+
+## Вторая сверка (Honorverse Wiki, 2026-09-18) — оставшиеся пункты
+
+* **Wedge: непробиваемость сверху/снизу + уничтожение объектов внутри клина.**
+  Статус: CONFIRMED CANON (Honorverse Wiki, статья Missile: "impenetrable
+  wedges above and below the ship"). Оставить как есть.
+
+* **Уязвимые throats (нос/корма).** CONFIRMED CANON, согласуется с общей
+  механикой клина по всем найденным источникам. Оставить как есть.
+
+* **"Krennikov Coupler" (ограничение работы гипер-двигателя/impeller при
+  перекрытии полос клина).** НЕ НАЙДЕНО ни в одном источнике (Honorverse
+  Wiki "Impeller drive", целевой поиск по термину "Krennikov" — ноль
+  релевантных совпадений). Статус понижен с CANON до **UNKNOWN /
+  вероятно придуманный термин** — не использовать как канон без прямой
+  цитаты из книги. Если механика "нельзя одновременно держать hyper-drive
+  и impeller / клинья не должны пересекаться" нужна геймплейно — это
+  ASSUMPTION/INTERPRETATION, а не CANON, пока не найдена цитата.
+
+* **Sidewalls — общий механизм (искажение/ослабление луча, не HP-пул).**
+  CONFIRMED CANON (Honorverse Wiki, статья Sidewall: "barrier of gravitic
+  distortion... attenuating any energy attack"; явно указано, что sidewall
+  "incapable of making a ship invulnerable").
+
+* **Sidewalls — overload/burnout генератора.** НЕ ПОДТВЕРЖДЕНО — во
+  фрагменте статьи Sidewall нет упоминания overload/burnout. Статус:
+  CANON → **понижен до INTERPRETATION**, пока не найдена прямая цитата.
+  Механику можно оставить как игровой дизайн, но помечать как
+  INTERPRETATION, не CANON.
+
+* **Новые канонические детали (были упущены в исходной версии файла),
+  добавить в реализацию:**
+  - Поднятый носовой/кормовой sidewall блокирует использование impeller
+    для ускорения, пока стенка активна (компромисс скорость vs защита
+    носа/кормы). CONFIRMED CANON (Honorverse Wiki, Sidewall).
+  - Двухступенчатая носовая стенка ("two-stage bow wall"): первая ступень
+    уязвима к лучам под острым углом атаки, а также ракеты могут
+    "проскользнуть" мимо неё до детонации, т.к. эта стенка представляет
+    собой круг диаметром лишь вдвое больше макс. ширины корпуса. CONFIRMED
+    CANON, источник тот же. Это существенная деталь для §10 (направление
+    атаки) — стоит учесть в геометрии носовой защиты отдельно от
+    бортовых sidewalls.
+
+* **Ghost Rider (ECM).** Существование и общее назначение (программа РЭБ
+  Royal Manticoran Navy, изначально для капитал-шипов, расширена на
+  Shrike/Ferret-класс лёгких кораблей, дала линейку "продвинутых
+  ракет/дронов") — CONFIRMED CANON (Honorverse Wiki, статья Ghost Rider).
+  Конкретный механизм "проецирует множественные ложные гравитационные
+  сигнатуры" — НЕ подтверждён в найденном фрагменте, статус: понижен
+  CANON → **INTERPRETATION** до отдельной проверки.
+
+* **Gravitic sensors (детектирование клина, нельзя скрыть активный
+  клин).** НЕ УДАЛОСЬ ПРОВЕРИТЬ — страница Honorverse Wiki "Gravitic
+  sensor" не отдавалась (402 ошибка при обоих запросах). Статус остаётся
+  **INTERPRETATION** (правдоподобно по духу сеттинга, но не подтверждено
+  цитатой в этой сессии) — перепроверить отдельно, когда будет
+  реализовываться Milestone сенсоров.
+
+* **Wall-of-battle формация / command lag со скоростью света.** Общая идея
+  ("wall of battle" — устойчивый канонический термин серии) правдоподобна,
+  но в этой сессии не подтверждена прямой цитатой. Статус: **INTERPRETATION**,
+  перепроверить при реализации Milestone формаций/AI.
+
+Источники второй сверки:
+- https://honorverse.fandom.com/wiki/Impeller_drive (поиск термина Krennikov)
+- https://honorverse.fandom.com/wiki/Ghost_Rider
+- https://honorverse.fandom.com/wiki/Sidewall
+- https://honorverse.fandom.com/wiki/Missile (повторно, для wedge)
+
+Итог: из 7 пунктов, требовавших проверки — 4 подтверждены как CANON (wedge
+top/bottom, throats, sidewall общий механизм, sidewall блокирует ускорение
++ двухступенчатая носовая стенка, Ghost Rider как программа), 1 понижен
+до UNKNOWN (Krennikov Coupler — вероятно вымышленный термин, не найден
+ни в одном источнике), 2 понижены до INTERPRETATION (sidewall overload/
+burnout, детальный механизм Ghost Rider), 2 остались непроверенными
+(gravitic sensor range, wall-of-battle/command lag) — перепроверить при
+реализации соответствующих Milestone.
+
+---
+
+## Третья сверка (Honorverse Wiki, 2026-09-18) — механика laserhead по запросу пользователя
+
+По просьбе пользователя доработаны AGENTS.md §21 и CLOUD.md §2.2 —
+подробная последовательность подрыва laserhead, подтверждено CANON:
+
+* Штанги (lasing rods) физически ОТДЕЛЯЮТСЯ от корпуса ракеты при выходе
+  на финальный боевой курс, у каждой свои двигатели и сенсоры, наводятся
+  независимо, занимают позицию ~100м перед боеголовкой.
+* Кольцо гравитационных генераторов за боеголовкой фокусирует взрыв в
+  гауссов импульс, направленный на штанги — это и есть механизм "накачки"
+  рентгеновского лазера.
+* Количество и тип штанг — характеристика конкретного класса боеголовки,
+  не универсальная константа: Mark 23 (капитал-ракета) = 6 штанг 500х40см
+  по одной цели; Mark 13 (суббоеприпас) = 6 независимо наводимых
+  суббоеприпасов Mark 73, каждый может бить по своей точке/цели.
+* Реальные примеры характеристик ракет (тоже НЕ универсальные константы):
+  Mark 23 MDM ~48 000G / ~63 млн км дальности на половинном ускорении;
+  Mark 31 контрракета ~130 000G / 75с / ~3.6 млн км; Viper — fire-and-forget
+  с бортовым ИИ, без телеметрии с корабля; Apollo — control missile с
+  FTL-телеметрией координирует залп из 8 обычных MDM в реальном времени.
+
+Источники: https://honorverse.fandom.com/wiki/Missile,
+https://honorverse.fandom.com/wiki/Manticoran_missile_technology
+
+Статус относительно текущей реализации (`missile_resolution.gd`,
+`missile_state.gd`): реализация пока НЕ обновлена под эту детальную
+механику (одна направленная атака из позиции ракеты вместо честного
+разведения штанг ~100м с независимым наведением) — явно
+INTERPRETATION-упрощение, см. ASSUMPTIONS.md. Обновление реализации —
+следующий по очереди проход разработки, не сделано в этом проходе (проход
+был про доработку ТЗ по прямому запросу пользователя, не про код).
+
+---
+
+## Четвёртая сверка (Honorverse Wiki, статья Missile, 2026-09-18) — физика полёта и поражающие факторы, по запросу пользователя
+
+* **Трёхфазная модель полёта ракеты** (powered flight → throttled/
+  stepped-down → ballistic coast) — CONFIRMED CANON. Пример: 46 000G/180с
+  даёт powered range "over six million kilometers"; проверка по формуле
+  0.5*a*t² даёт ~7.3 млн км — согласуется с цитатой (сама формула не
+  канон, это инженерная проверка правдоподобия числа).
+* **Дросселирование двигателя** (снижение ускорения ради увеличения
+  времени горения/дальности, ценой большего времени на реакцию цели) —
+  CONFIRMED CANON.
+* **Баллистическая фаза после выгорания — ракету легко избежать** —
+  CONFIRMED CANON, уже реализовано в коде (missile coasts, no course
+  correction after burnout).
+* **Многоступенчатые MDM** (независимые ступени двигателя, отстрел
+  последовательно или с «дрейфом» между ступенями) — CONFIRMED CANON.
+  Мантикорские конструкции — до 3 ступеней, хевенитские — до 2 (из-за
+  габаритов конденсаторного кольца). НЕ РЕАЛИЗОВАНО в коде (текущая
+  модель — одна ступень/один burn timer).
+* **Вращение ракеты в полёте** для затруднения работы point defense
+  (тот же принцип защиты клином сверху/снизу, что у кораблей, в масштабе
+  ракеты) — CONFIRMED CANON. Не реализовано визуально/геометрически
+  (ориентация ракеты сейчас жёстко следует за вектором скорости, без
+  вращения вокруг этой оси).
+* **Ракета должна выйти за пределы клина своего корабля-носителя перед
+  активацией собственного клина/двигателя — отсюда пусковые трубы/
+  mass driver** — CONFIRMED CANON. Не реализовано (нет модели пусковой
+  трубы/старта).
+* **Незащищённые ракеты в подвесных pod ("проксимити-килл")** —
+  CONFIRMED CANON, релевантно для будущей модели повреждения контейнеров
+  боезапаса. Не реализовано.
+* **Laserhead эффективнее против sidewalls, чем чистый термоядерный
+  заряд** — CONFIRMED CANON. ВАЖНО для поражающих факторов: означает,
+  что тип боеголовки должен влиять на коэффициент ослабления sidewall, а
+  не только состояние (condition) самого sidewall. ТЕКУЩАЯ РЕАЛИЗАЦИЯ
+  (`ship_defense_state.gd`) НЕ учитывает тип атакующего оружия — одна
+  формула ослабления для всех. Задокументированный пробел, не молчаливая
+  неточность.
+
+Источник: https://honorverse.fandom.com/wiki/Missile (два целевых fetch
+в этом проходе, по физике полёта отдельно и по поражающим факторам
+отдельно).
+
+---
+
+## Пятая сверка — форма корпуса корабля (для процедурной 3D-модели, по запросу пользователя)
+
+* **"Flattened spindle" (сплющенное веретено)** — CONFIRMED CANON: корпус
+  сужается на носу/корме (там расположены impeller-узлы, создающие клин),
+  расширяется в средней части (вооружение/экипаж).
+* **"Hammerhead"** — военные корабли имеют характерные расширения-наросты
+  на носовой/кормовой оконечностях (в отличие от гражданских судов, у
+  которых их нет) — CONFIRMED CANON. Там же концентрируются chase-оружие,
+  point defense и чувствительные сенсорные решётки (нос/корма не защищены
+  клином — см. §9/§10).
+* **Размещение вооружения**: главный калибр — по бортам (под защитой
+  sidewalls), нос/корма — chase-оружие и point defense (там же, где
+  hammerhead). Согласуется с уже реализованной геометрией атаки
+  (`attack_geometry.gd`).
+* Форма подразумевает сплющенность (шире, чем выше) — согласуется с тем,
+  что клин защищает именно сверху/снизу (§9), то есть высота — самое
+  уязвимое измерение по площади, которое имеет смысл минимизировать.
+
+Источник: https://en-academic.com/dic.nsf/enwiki/2910958 (зеркало
+Wikipedia-контента Honorverse Wiki, сама Honorverse Wiki отдала 402 при
+прямом запросе).
+
+Статус: используется как основа для процедурной 3D-заглушки корпуса
+(`hull_mesh_builder.gd`), НЕ для копирования конкретного фан-артового
+силуэта (§7: fan art не является источником для геометрии).
+
+---
+
+## Шестая сверка — Point Defense (перед реализацией §22)
+
+* **PD — часть многослойной обороны** ("thickened the defensive envelope"
+  совместно с контрракетами и ECM, интеграция с платформами Keyhole) —
+  CONFIRMED CANON (Honorverse Wiki, Space Weapons Technology). Реализация
+  должна отражать это как один из нескольких защитных слоёв, не
+  единственное решение — согласуется с уже реализованными контрракетами
+  (Milestone 6a) как отдельным, параллельным слоем защиты.
+* Дистанция вовлечения, число необходимых попаданий, время реакции —
+  НЕ НАЙДЕНЫ в источниках. Все числа в реализации — ASSUMPTION placeholder.
+* Keyhole platforms (упомянуты как расширяющие защитный периметр) — НЕ
+  реализовано, отдельная фича вне текущего охвата.
+
+Источник: https://honorverse.fandom.com/wiki/Space_Weapons_Technology
+
+---
+
+## Седьмая сверка — Sensors/ECM, ПЕРВОИСТОЧНИК (On Basilisk Station, глава 3, до этого не проверялось)
+
+Впервые в этой сессии удалось прочитать текст САМОЙ КНИГИ (через
+зеркало chapters на stuff.mit.edu), а не только вики — по приоритету
+источников (AGENTS.md §4) это выше вики.
+
+* **Корабль МОЖЕТ спрятаться от пассивных сенсоров, заглушив импеллер**
+  ("shutting down her impellers and dropping off the enemy's passive
+  scanners") — CONFIRMED CANON, ПЕРВОИСТОЧНИК. ЭТО ОТМЕНЯЕТ мою более
+  раннюю запись (третья сверка, INTERPRETATION-статус "нельзя скрыть
+  активный клин") — та запись была основана на предположении по духу
+  сеттинга без цитаты и была явно помечена как неподтверждённая; теперь
+  заменяется прямо противоположным подтверждённым фактом. Тактическое
+  ограничение — разгон с нуля требует времени (ускорение не мгновенно,
+  §12), то есть "невидимость" ценой манёвренности.
+* **Двойная полоса клина + sidewall между ними мешает точному считыванию**
+  ("Hostile sensors might be able to analyze the outermost band, but they
+  couldn't get accurate readings on the inner ones") — CONFIRMED CANON,
+  ПЕРВОИСТОЧНИК. Означает: даже обнаружив клин противника, наблюдатель
+  не получает автоматически точные характеристики корабля — согласуется
+  с состояниями UNCERTAIN/ESTIMATED в §23.
+* **Электронные "досье" на суда противника** ("each side had complete
+  files on the electronic signatures of the other side's units") —
+  CONFIRMED CANON: конкретные известные корабли (например флагманы)
+  могут быть опознаны по уникальной сигнатуре — IFF/распознавание по
+  базе данных, не мгновенное "всеведение".
+* **Ракеты при пуске дают отчётливый, легко обнаруживаемый след**
+  ("missile traces streaking towards...") — CONFIRMED CANON.
+
+Источник: https://stuff.mit.edu/afs/sipb/user/jhawk/baen/www.baen.com/chapters/basilisk_3.htm
+(легальное зеркало текста книги "On Basilisk Station", David Weber —
+издатель Baen ранее сам распространял ознакомительные главы бесплатно).
+
+## Восьмая сверка — ECM/РЭБ (§24), Honorverse Wiki "Electronic warfare"
+
+Источник: https://honorverse.fandom.com/wiki/Electronic_warfare (вторичный
+источник — вики, НЕ книжный первоисточник; попытка проверить по книге не
+делалась в этот проход, честно помечено как разрыв в верификации).
+
+Подтверждено вики (цитаты):
+* Корабли несут "a complex suite of electronic warfare systems" с тремя
+  элементами: (1) глушилки и ложные цели "used to defeat or confuse
+  incoming missiles"; (2) стелс-возможности, скрывающие излучение
+  корабля; (3) мощные бортовые вычислительные комплексы + эмиттеры,
+  позволяющие "confuse incoming fire".
+* Ложные цели (decoy drones) развёртываются СНАРУЖИ корабля, но
+  требования по питанию у них настолько высокие, что собственного
+  питания не хватает — они держатся рядом на тракторном луче и
+  получают питание по лучу, из-за чего одновременно развернуть можно
+  "only a handful of them at a time" (ограниченный ресурс, не
+  бесконечный расходник).
+* Keyhole — "an advanced ECM system", применяется на уровне эскадры.
+
+Инженерная реализация (`ecm_state.gd`, `sensor_resolution.gd`):
+глушение моделируется как СОКРАЩЕНИЕ эффективной дальности обнаружения
+наблюдателя против цели (не плоский -20% к шансу попадания — ТЗ §24
+прямо запрещает такой шорткат без обоснования более глубокой моделью);
+ложные цели моделируются как альтернативный "возврат" сенсора —
+наблюдатель захватывает БЛИЖАЙШИЙ к себе возврат (истинная цель или
+одна из decoy), детерминированно, без RNG (ТЗ §43 запрещает
+unseeded-рандом). Оба механизма — ASSUMPTION/INTERPRETATION поверх
+подтверждённого вики-источника, конкретные числа (множитель дальности
+0.4, максимум decoy = 4) не из канона, см. ASSUMPTIONS.md.
+
+Честно НЕ проверено: точный масштаб эффекта РЭБ (насколько именно
+"confuse incoming fire" снижает эффективность — не количественно, а
+качественно); есть ли у РЭБ отдельный физический принцип (не гравика,
+а радар/лазер-наведение); первоисточник (книжный текст) для этого
+раздела не найден в этот проход.

@@ -1,0 +1,1621 @@
+# CLOUD.md
+
+# Honorverse 3D Tactical Combat Simulator
+
+## 1. Project Mission
+
+Create a standalone Windows 3D tactical combat simulator set in the Honor Harrington / Honorverse universe.
+
+The project is intended to become a finished, playable local application rather than a prototype, mockup, technical demonstration, or collection of disconnected systems.
+
+Claude is a development tool only.
+
+The final application MUST NOT require Claude, an LLM, AI API, cloud service, external game server, API key, or internet connection at runtime.
+
+The application must run locally on Windows.
+
+---
+
+# 2. Core Design Goals
+
+The simulator must provide:
+
+* true 3D simulation;
+* inertial high-speed space combat;
+* Honorverse-style impeller wedge;
+* sidewalls;
+* missile combat;
+* counter-missiles;
+* laserheads;
+* point defense;
+* sensors;
+* ECM;
+* subsystem damage;
+* tactical AI;
+* formation command;
+* individual ship command;
+* command hierarchy;
+* limited battlefield information;
+* replay;
+* scenarios;
+* deterministic simulation;
+* data-driven ships and weapons.
+
+The game should feel like commanding a military space force, not like flying an arcade space fighter.
+
+---
+
+# 3. Runtime Independence
+
+The finished application must NOT require:
+
+* Claude;
+* ChatGPT;
+* any LLM;
+* generative AI;
+* cloud AI;
+* external AI APIs;
+* external game servers;
+* account authentication;
+* matchmaking;
+* internet access;
+* API keys.
+
+Any development-time AI tooling is irrelevant to runtime.
+
+---
+
+# 4. Honorverse Canon
+
+The simulator must follow the Honorverse books as closely as practical.
+
+Every important rule must be classified as one of:
+
+* `CANON`
+* `INTERPRETATION`
+* `ASSUMPTION`
+* `UNKNOWN`
+
+Do not present an assumption as canon.
+
+If exact information is unavailable:
+
+1. do not invent false precision;
+2. make the value configurable where appropriate;
+3. document the decision in `ASSUMPTIONS.md`;
+4. explain why the assumption was required.
+
+Source priority:
+
+1. Honorverse books;
+2. official David Weber / publisher materials;
+3. confirmed reference material;
+4. careful interpretation;
+5. fan-created material only as supplementary reference.
+
+Fan art is NOT authoritative evidence for ship geometry.
+
+The project must maintain:
+
+* `CANON_RULES.md`
+* `ASSUMPTIONS.md`
+
+---
+
+# 5. Required Documentation
+
+The repository must contain:
+
+```text
+README.md
+BUILD.md
+ARCHITECTURE.md
+CANON_RULES.md
+ASSUMPTIONS.md
+CHANGELOG.md
+CLOUD.md
+AGENTS.md
+```
+
+Documentation must be updated when implementation changes materially.
+
+---
+
+# 6. True 3D Simulation
+
+3D is mandatory.
+
+The simulation itself must operate in full:
+
+```text
+X
+Y
+Z
+```
+
+There must NOT be a hidden 2D combat simulation rendered in 3D.
+
+Full 3D entities include:
+
+* ships;
+* missiles;
+* counter-missiles;
+* laserheads;
+* sensor contacts;
+* weapon trajectories;
+* defensive systems;
+* impeller wedges;
+* tactical vectors.
+
+Simulation state must support:
+
+* position;
+* velocity;
+* acceleration;
+* orientation;
+* angular velocity;
+* angular acceleration;
+* relative position;
+* relative velocity;
+* distance;
+* closure velocity.
+
+Use `Vector3`/equivalent for spatial state and `Quaternion`/equivalent for orientation where appropriate.
+
+---
+
+# 7. Ship Representation
+
+Ships must correspond to Honorverse ships rather than generic science-fiction vessels.
+
+Ship implementation should reflect, where canon information exists:
+
+* hull shape;
+* proportions;
+* dimensions;
+* mass;
+* impeller wedge geometry;
+* sidewall geometry;
+* weapon placement;
+* missile tubes;
+* point-defense systems;
+* sensors;
+* communications;
+* defensive systems;
+* propulsion;
+* technological era;
+* faction-specific differences.
+
+Textual descriptions from the books take priority over fan art.
+
+Unknown visual details may be interpreted, but the interpretation must be documented.
+
+---
+
+# 8. Ship Database
+
+Ship data must be data-driven.
+
+A ship class should be able to define:
+
+* canonical name;
+* class;
+* faction;
+* era;
+* dimensions;
+* mass;
+* acceleration;
+* propulsion;
+* compensator;
+* wedge;
+* sidewalls;
+* armament;
+* missile tubes;
+* missile capacity;
+* counter-missile capability;
+* point-defense;
+* sensors;
+* ECM;
+* communications;
+* subsystem layout;
+* visual description;
+* canonical references;
+* confidence/uncertainty.
+
+Do not invent exact numerical values when the source does not establish them.
+
+---
+
+# 9. Impeller Wedge
+
+The impeller wedge is a fundamental part of both movement and combat.
+
+It is NOT:
+
+* a visual effect;
+* a generic energy shield;
+* an HP pool;
+* a cosmetic mesh.
+
+The wedge must be represented by real 3D geometry and orientation.
+
+For the standard model, the wedge creates extremely strong / effectively impenetrable protected planes above and below the ship.
+
+This leaves important attack directions associated with:
+
+* bow;
+* stern;
+* port broadside;
+* starboard broadside.
+
+Broadside protection must additionally account for sidewalls.
+
+The implementation must therefore distinguish:
+
+```text
+Wedge
+    ↓
+Top / Bottom protection
+
+Ship geometry
+    ↓
+Bow / Stern
+
+Sidewalls
+    ↓
+Broadside protection
+```
+
+Do NOT reduce all of this to `shieldHP`.
+
+---
+
+# 10. Wedge Orientation
+
+The wedge is attached to the ship's orientation.
+
+When ship orientation changes:
+
+* wedge orientation changes;
+* protected planes change;
+* vulnerable directions change;
+* weapon engagement geometry changes;
+* tactical opportunities change.
+
+For every attack, calculate the 3D attack vector relative to the target's orientation.
+
+Determine whether the attack approaches from:
+
+* top;
+* bottom;
+* bow;
+* stern;
+* port;
+* starboard.
+
+The combat system must then apply the appropriate rules.
+
+---
+
+# 11. Spacecraft Kinematics
+
+Honorverse ships are high-performance inertial spacecraft.
+
+The simulation must support:
+
+* enormous acceleration;
+* accelerations on the order of hundreds of g where appropriate;
+* very high velocities;
+* velocities representing significant fractions of the speed of light;
+* enormous engagement distances;
+* high relative velocities.
+
+Exact values must be tied to the particular ship, technology, and available canonical information.
+
+Do not use a universal arcade value such as:
+
+```text
+MAX_SPEED = 100
+```
+
+for all ships.
+
+---
+
+# 12. Inertial Movement
+
+Movement must follow:
+
+```text
+Thrust
+→ Acceleration
+→ Velocity
+→ Position
+```
+
+Stopping thrust must not automatically stop the ship.
+
+The physical model must account for:
+
+* mass;
+* thrust;
+* acceleration;
+* current velocity;
+* orientation;
+* propulsion condition;
+* compensator;
+* damage.
+
+Ships must not behave like aircraft in atmosphere.
+
+---
+
+# 13. Relative Velocity
+
+Relative velocity is fundamental to combat.
+
+For two objects:
+
+```text
+relativeVelocity = targetVelocity - attackerVelocity
+```
+
+Use relative velocity for:
+
+* missile interception;
+* target prediction;
+* time-to-intercept;
+* threat evaluation;
+* evasive maneuvering;
+* tactical AI;
+* engagement analysis.
+
+Distance alone is insufficient.
+
+---
+
+# 14. High-Speed Simulation
+
+The simulation must support velocities representing significant fractions of `c`.
+
+The implementation must be designed with:
+
+* large velocities;
+* large accelerations;
+* large distances;
+* floating-point precision;
+* fixed timestep;
+* deterministic calculation
+
+in mind.
+
+Use double precision where appropriate.
+
+If origin rebasing or local reference frames become necessary, implement them rather than artificially shrinking the simulation scale.
+
+---
+
+# 15. Speed of Light
+
+The speed of light is a fundamental physical constant.
+
+The numerical implementation must not accidentally produce uncontrolled speeds above `c` because of integration errors.
+
+If an approximation is required, document it in `ASSUMPTIONS.md`.
+
+Do not introduce a fake arbitrary speed cap simply because the engine is easier to implement that way.
+
+---
+
+# 16. Sidewalls
+
+Sidewalls are a real defensive system.
+
+They must have:
+
+* 3D geometry;
+* orientation;
+* operational state;
+* damage state;
+* interaction with incoming attacks.
+
+Sidewalls must not simply be:
+
+```text
+shieldHP = 1000
+```
+
+They must interact with the direction and geometry of an attack.
+
+---
+
+# 17. Weapons
+
+Weapons must be data-driven.
+
+Possible systems include:
+
+* energy weapons;
+* missiles;
+* laserheads;
+* point-defense;
+* counter-missiles.
+
+Weapon resolution must consider:
+
+* range;
+* relative geometry;
+* target orientation;
+* wedge;
+* sidewalls;
+* sensors;
+* tracking;
+* ECM;
+* damage;
+* weapon state.
+
+---
+
+# 18. Missiles
+
+Every missile is a real 3D simulation entity.
+
+Minimum missile state:
+
+```text
+Position
+Velocity
+Acceleration
+Orientation
+Target
+GuidanceState
+SensorState
+TerminalState
+ECMState
+Lifetime
+WarheadState
+```
+
+A missile must NOT simply animate from launcher to target.
+
+It must participate in simulation.
+
+## 18.1. Flight physics (CANON, verified against Honorverse Wiki "Missile", 2026-09-18)
+
+Missile flight is a THREE-PHASE model, not a single constant-acceleration
+burn to a fixed range:
+
+```text
+1. POWERED FLIGHT -- drive burns at its configured acceleration for its
+   configured burn time. A cited capital-ship example: 46,000 G for
+   ~180 seconds, giving a powered flight RANGE (not just duration) of
+   "over six million kilometers". (Sanity check: 0.5 * a * t^2 with
+   a = 46,000 * 9.80665 m/s^2, t = 180s gives ~7.3 million km, consistent
+   with the cited "over six million" -- this formula is a reasonable
+   engineering check for any class's numbers, not itself a canon
+   citation.)
+2. THROTTLED / STEPPED-DOWN OPERATION -- drives are "frequently
+   adjustable": acceleration can be reduced to extend powered burn time
+   (trading peak acceleration for powered range/endurance), at the cost
+   of giving the target more time to react and throw up defenses. This
+   is a genuine tactical trade-off the AI/player should be able to make,
+   not just a flavor detail.
+3. BALLISTIC PHASE -- once the drive burns out (or is never re-lit),
+   the missile coasts with NO further maneuver capability. It is "very
+   easy to avoid a missile which could no longer maneuver" -- a
+   ballistic missile past its powered range is a known, exploitable
+   weakness, not a bug if a target evades it.
+```
+
+Multi-drive missiles (MDMs) additionally use STAGING: independent drive
+sections that fire sequentially, optionally coasting between stages, to
+extend the total powered envelope beyond what a single drive/single burn
+could achieve. Manticoran designs used up to three stages; Havenite
+designs were limited to two stages by capacitor-ring bulk. STAGING IS NOT
+YET IMPLEMENTED in the codebase (single-burn model only) -- this is a
+documented gap, not silently ignored; see ASSUMPTIONS.md.
+
+Additional CANON flight details:
+* A missile must activate its own wedge without interference from its
+  launching ship's wedge -- this is WHY mass drivers/launch tubes exist:
+  to fling the missile clear of the ship's own wedge before the missile's
+  drive/wedge activates.
+* Missiles SPIN in flight specifically to make it harder for point-defense
+  lasers to get a clear shot past their own impeller wedge (a missile's
+  wedge, like a ship's, blocks top/bottom axes -- spinning denies PD a
+  stable non-wedge-protected angle). This is a concrete mechanical reason
+  for missile spin, not a cosmetic animation choice, and should inform
+  point-defense hit-chance modeling in that Milestone.
+* Missiles carried externally in pods (not yet inside a launch sequence)
+  are NOT protected by the carrying ship's armor, sidewalls, or wedge --
+  they are vulnerable to "proximity kills" in that state. Relevant for a
+  future Milestone modeling pod/magazine damage, not yet implemented.
+
+---
+
+# 19. Missile Guidance
+
+Missile guidance must use actual simulation information.
+
+It should account for:
+
+* target position;
+* estimated target position;
+* target velocity;
+* relative velocity;
+* sensor update interval;
+* tracking quality;
+* ECM;
+* target maneuver;
+* loss of contact;
+* terminal phase;
+* countermeasures.
+
+Do not implement guidance as merely:
+
+```text
+direction = target.position - missile.position
+```
+
+---
+
+# 20. Counter-Missiles
+
+Counter-missiles are real 3D entities.
+
+They must:
+
+* launch from ships;
+* receive target information;
+* track incoming missiles;
+* calculate interception;
+* maneuver;
+* account for sensor information;
+* interact with ECM;
+* produce a real intercept result.
+
+---
+
+# 21. Laserheads
+
+Laserheads must be represented as actual combat entities/events consistent with the implemented Honorverse model.
+
+Do not treat a laserhead as an arbitrary generic sci-fi projectile without documenting the chosen interpretation.
+
+## 21.1. Detonation sequence (CANON, verified against Honorverse Wiki "Missile" and "Manticoran missile technology", 2026-09-18)
+
+A laserhead engagement is a distinct multi-step event, not an instant "missile touches ship -> damage" collision:
+
+```text
+1. Missile reaches final attack bearing (terminal course established)
+2. Lasing rods EJECT from bays on the missile's sides
+3. Each rod maneuvers independently (own thrusters + sensors) to align
+   with the target -- rods are NOT rigidly fixed to the missile body
+4. Rods settle roughly 100 meters ahead of the warhead, between the
+   warhead and the target
+5. A ring of gravity generators mounted behind the warhead activates
+6. The ring's gravitic lenses focus the nuclear detonation into a
+   Gaussian-shaped pulse aimed at the rods
+7. The nuclear x-ray pulse pumps each rod, producing a focused
+   gamma-ray/X-ray laser beam per rod
+8. Each rod's beam is independently aimable at the target's exposed
+   vector (this is the mechanism behind the "hits from a specific
+   sector" resolution already implemented in ship_defense_state.gd /
+   attack_geometry.gd)
+```
+
+Implementation consequence: a laserhead hit is not one instantaneous ray
+from the missile's own position (the current MVP implementation in
+`missile_resolution.gd` uses the missile's position directly as an
+INTERPRETATION-level simplification, explicitly documented as such in
+ASSUMPTIONS.md). A more accurate simulation would spawn the ejected rods
+as short-lived entities ~100m ahead of the warhead and resolve each rod's
+beam from ITS OWN position/aim vector. This refinement is not required for
+the MVP milestone but should be tracked as a documented TODO, not silently
+skipped.
+
+## 21.2. Rod count and warhead types (CANON, examples from specific missile classes -- NOT universal constants, ТЗ §11/§48)
+
+* Mark 23 capital missile warhead: 6x lasing rods, each 500cm x 40cm.
+* Mark 13 submunition warhead: 6x Mark 73 independently targetable laser
+  submunition vehicles (3m each) -- a DIFFERENT, distributed warhead
+  design where each submunition can engage a distinct point/target rather
+  than all rods focusing on one ship.
+
+These are documented examples for specific missile classes/eras. Do not
+hardcode "every missile has exactly 6 rods" -- rod count, rod dimensions,
+and warhead type (single-target multi-rod vs multi-target submunition)
+must be data-driven per missile class (ТЗ §8, §48), defaulting to UNKNOWN
+where a specific class's data is not established.
+
+## 21.25. Damage character vs. sidewalls (CANON, verified this session)
+
+The laserhead beam is explicitly "more effective at penetrating sidewalls
+than a pure fusion explosive." This is a CANON statement that laserheads
+are NOT a generic damage number -- they have a specific advantage against
+the sidewall defense layer specifically, as opposed to other warhead/
+damage types (a pure kinetic or fusion warhead would be relatively WORSE
+against sidewalls, by implication). Implementation consequence: when a
+data-driven damage-type system is introduced (a later Milestone, per
+§8/§48), sidewall attenuation in `ship_defense_state.gd` should vary by
+attacker damage TYPE, not just by sidewall condition -- laserhead hits
+should attenuate less through a sidewall than an equivalent-yield
+non-laser warhead would. NOT YET IMPLEMENTED: the current
+`ship_defense_state.gd` attenuation model is damage-type-agnostic (one
+formula for all attackers). This is a documented, honest gap, not a
+silent inaccuracy -- see ASSUMPTIONS.md.
+
+## 21.3. Effective range (CANON)
+
+Meaningful damage can be dealt to anything within 25,000 km of the
+detonation point; longer rods produce less beam divergence and allow
+greater stand-off engagement range. This is the AREA-EFFECT radius after
+detonation, not the terminal detonation TRIGGER range (the distance at
+which the missile decides to detonate) -- those are two different
+parameters and must not be conflated in code. The current MVP's
+`terminal_detonation_range_m` (50 km placeholder, see ASSUMPTIONS.md) is
+the trigger range and remains UNKNOWN/ASSUMPTION; the 25,000 km figure is
+CANON but describes a different thing and is not yet used anywhere in the
+implementation.
+
+## 21.4. What is still UNKNOWN (do not invent)
+
+* Exact detonation trigger logic (closing rate threshold? fixed range?
+  target-selected optimum range against known defenses?) -- not specified
+  in the sources checked this session.
+  * Beam energy/damage yield per rod, and how it should map to a
+  simulation "damage" number.
+* Whether/how ECM affects rod targeting accuracy specifically (as opposed
+  to missile guidance in general, ТЗ §19/§24).
+
+---
+
+# 22. Point Defense
+
+Point-defense systems must operate based on:
+
+* sensor information;
+* detection;
+* tracking;
+* weapon availability;
+* geometry;
+* range;
+* reaction time;
+* target state;
+* ship damage;
+* ECM/countermeasures where applicable.
+
+---
+
+# 23. Sensors
+
+The battlefield must NOT automatically be fully visible.
+
+Sensor contacts must have states such as:
+
+```text
+UNKNOWN
+DETECTED
+TRACKED
+ESTIMATED
+UNCERTAIN
+LOST
+```
+
+A contact can contain:
+
+* estimated position;
+* estimated velocity;
+* uncertainty;
+* last update;
+* sensor source;
+* confidence.
+
+The player sees what their forces know.
+
+AI sees what its forces know.
+
+Neither side gets automatic access to hidden world state.
+
+---
+
+# 24. ECM
+
+ECM must be a real system.
+
+It must affect, where appropriate:
+
+* detection;
+* tracking;
+* targeting;
+* missile guidance;
+* sensor confidence;
+* countermeasures.
+
+ECM must NOT simply be:
+
+```text
+hitChance -= 20%
+```
+
+unless such a modifier is the documented consequence of a deeper simulation model.
+
+---
+
+# 25. Damage
+
+Damage must be subsystem based.
+
+Minimum systems:
+
+* propulsion;
+* maneuvering;
+* sensors;
+* communications;
+* weapons;
+* missile systems;
+* counter-missile systems;
+* point defense;
+* power;
+* structural integrity;
+* defensive systems.
+
+Subsystem damage must change actual ship capabilities.
+
+Examples:
+
+```text
+sensor damage
+→ degraded tracking
+
+communications damage
+→ degraded command/reporting
+
+propulsion damage
+→ degraded acceleration
+
+missile system damage
+→ reduced missile capability
+```
+
+---
+
+# 26. Tactical AI
+
+AI must be tactical, not a collection of scripted animations.
+
+AI should be able to:
+
+* detect contacts;
+* evaluate threats;
+* select targets;
+* manage formations;
+* maneuver;
+* select distance;
+* use weapons;
+* launch missiles;
+* use counter-missiles;
+* use point defense;
+* respond to damage;
+* respond to destroyed ships;
+* reform formations;
+* retreat;
+* disengage.
+
+AI must use the same basic information restrictions as the player.
+
+No cheat vision.
+
+---
+
+# 27. Tactical Command System
+
+The central gameplay model uses two command levels.
+
+## Level 1
+
+Command formations:
+
+* element;
+* division;
+* squadron;
+* task force;
+* fleet.
+
+## Level 2
+
+Direct command of an individual ship.
+
+The player should feel like a commander rather than someone manually piloting dozens of ships.
+
+---
+
+# 28. Command Hierarchy
+
+Default hierarchy:
+
+```text
+Fleet
+ └── Task Force
+      └── Squadron
+           └── Division
+                └── Element
+                     └── Ship
+```
+
+The hierarchy must be configurable because organizational structures can differ by faction and era.
+
+---
+
+# 29. Formation Orders
+
+Formation-level orders include:
+
+* change course;
+* change speed;
+* accelerate;
+* decelerate;
+* hold formation;
+* change formation;
+* approach;
+* withdraw;
+* attack;
+* select target;
+* target distribution;
+* missile use;
+* counter-missile posture;
+* defensive posture;
+* evasive maneuver;
+* disengage;
+* reform.
+
+These are intentions.
+
+The Formation AI translates them into ship-level actions.
+
+---
+
+# 30. Individual Ship Orders
+
+Individual ship orders include:
+
+* course;
+* acceleration;
+* speed;
+* orientation;
+* target;
+* target priority;
+* weapon mode;
+* missile launch;
+* counter-missile policy;
+* point-defense policy;
+* sensor mode;
+* ECM mode;
+* defensive posture;
+* retreat;
+* disengage;
+* return to formation.
+
+---
+
+# 31. Individual Override
+
+An individual ship can temporarily override its formation's order.
+
+Example:
+
+```text
+Formation:
+    Hold Formation
+
+Ship A:
+    Intercept Incoming Missile
+```
+
+After completion:
+
+```text
+Ship A:
+    Return To Formation Control
+```
+
+The override must be represented in simulation state.
+
+---
+
+# 32. Formation AI
+
+Formation AI must maintain:
+
+* relative position;
+* formation geometry;
+* velocity matching;
+* collision avoidance;
+* command hierarchy;
+* leader status;
+* reforming;
+* response to damaged ships;
+* response to destroyed ships.
+
+A formation is not simply a group of ships sharing the same position or velocity.
+
+Each ship remains an independent physical entity.
+
+---
+
+# 33. Formation Leader
+
+Each formation may have a leader.
+
+If the leader is destroyed or incapacitated:
+
+1. determine successor;
+2. transfer command;
+3. update formation state;
+4. account for communication limitations;
+5. continue according to doctrine/orders.
+
+Do not magically transfer information unavailable to subordinate ships.
+
+---
+
+# 34. Target Assignment
+
+Support:
+
+### Group target
+
+The formation receives a target.
+
+### Automatic target distribution
+
+AI assigns targets across ships.
+
+### Manual assignment
+
+Example:
+
+```text
+Ship A → Target X
+Ship B → Target Y
+Ship C → Target X
+```
+
+Target assignment must account for:
+
+* available information;
+* weapon capability;
+* distance;
+* geometry;
+* threat;
+* ship state.
+
+---
+
+# 35. Command Queue
+
+Orders can be queued:
+
+```text
+Change Course
+→ Accelerate
+→ Form Line
+→ Approach Target
+→ Missile Salvo
+→ Turn Away
+→ Reform
+```
+
+Orders are intentions executed by AI.
+
+They are not scripted teleportation or animation sequences.
+
+---
+
+# 36. Information and Communications
+
+The commander knows only information available through:
+
+* own sensors;
+* subordinate sensors;
+* communications;
+* formation reports;
+* command chain;
+* received battle reports.
+
+Communication loss must matter.
+
+A formation must not receive instantaneous omniscient updates.
+
+---
+
+# 37. Battle Reports
+
+Reports can include:
+
+* contact detected;
+* missile launch detected;
+* incoming missile;
+* target destroyed;
+* subsystem damaged;
+* ship damaged;
+* ship lost;
+* formation broken;
+* command lost;
+* retreat initiated.
+
+Reports should have simulation timestamps.
+
+---
+
+# 38. Tactical UI
+
+Provide:
+
+* Fleet View;
+* Task Force View;
+* Squadron View;
+* Division View;
+* Ship View;
+* Free/Cinematic Camera.
+
+Display where information is known:
+
+* ships;
+* formations;
+* movement vectors;
+* velocity;
+* acceleration;
+* orientation;
+* range;
+* missile tracks;
+* counter-missiles;
+* sensor contacts;
+* threats;
+* system status;
+* commands;
+* battle reports.
+
+---
+
+# 39. Selection
+
+Support:
+
+* single selection;
+* multi-selection;
+* formation selection;
+* by type;
+* by side;
+* by state;
+* by role.
+
+---
+
+# 40. Direct Ship Command
+
+Direct ship command remains tactical.
+
+It must allow the player to issue:
+
+* course;
+* acceleration;
+* speed;
+* target;
+* weapon mode;
+* missile launch;
+* counter-missile policy;
+* point-defense policy;
+* sensor mode;
+* ECM mode;
+* defensive posture;
+* retreat;
+* disengage.
+
+The system must not force the player to manually steer every individual ship.
+
+---
+
+# 41. Tactical AI and Geometry
+
+AI must consider:
+
+```text
+enemy position
+enemy velocity
+enemy orientation
+enemy wedge
+enemy sidewalls
+relative velocity
+weapon geometry
+missile geometry
+own acceleration capability
+own damage
+sensor uncertainty
+```
+
+Distance alone is insufficient.
+
+---
+
+# 42. Simulation Architecture
+
+Logical subsystems:
+
+```text
+Simulation
+Physics
+Combat
+Weapons
+Missiles
+Sensors
+Damage
+AI
+Commands
+Scenarios
+Replay
+Data
+UI
+Rendering
+```
+
+Simulation must be independent from UI and rendering.
+
+Rendering must display simulation state rather than define combat rules.
+
+---
+
+# 43. Deterministic Simulation
+
+Given identical:
+
+* initial state;
+* seed;
+* commands;
+* timestep;
+
+the simulation should produce the same result.
+
+Randomness must be seeded.
+
+---
+
+# 44. Time Control
+
+Support:
+
+* pause;
+* single-step;
+* 1x;
+* 2x;
+* 5x;
+* 10x;
+* 25x;
+* 100x.
+
+Changing simulation speed must not change physical rules.
+
+---
+
+# 45. Replay
+
+Replay records simulation rather than video.
+
+Store as practical:
+
+* initial state;
+* random seed;
+* commands;
+* events;
+* timestamps;
+* snapshots.
+
+Support:
+
+* play;
+* pause;
+* speed;
+* event navigation;
+* trajectories;
+* missile tracks;
+* hits;
+* damage;
+* destruction.
+
+Seek should be implemented through snapshots if practical.
+
+---
+
+# 46. Scenarios
+
+Minimum scenarios:
+
+1. Duel
+2. Missile Duel
+3. Squadron Engagement
+4. Fleet Engagement
+5. Custom Scenario
+
+Development should progress:
+
+```text
+1v1
+→ 2v2
+→ small groups
+→ squadron
+→ large fleet
+```
+
+---
+
+# 47. Scenario Editor
+
+After the core MVP:
+
+* add ship;
+* select class;
+* select faction;
+* set position;
+* set velocity;
+* set orientation;
+* assign formation;
+* assign orders;
+* save;
+* load.
+
+---
+
+# 48. Data-Driven Design
+
+Do not hardcode ship characteristics into combat code.
+
+Data should define:
+
+* ships;
+* weapons;
+* missiles;
+* factions;
+* formations;
+* scenarios;
+* technology;
+* AI parameters.
+
+---
+
+# 49. Performance
+
+Architecture must support potentially large numbers of:
+
+* ships;
+* missiles;
+* counter-missiles;
+* laserheads;
+* sensor contacts.
+
+Use where appropriate:
+
+* fixed timestep;
+* spatial partitioning;
+* object pooling;
+* LOD;
+* batching;
+* event-driven updates.
+
+Do not prematurely optimize without profiling.
+
+---
+
+# 50. Visual Style
+
+The visual style should be:
+
+* serious;
+* military;
+* hard science-fiction;
+* large scale;
+* cinematic;
+* realistic;
+* readable.
+
+Avoid:
+
+* Star Wars-like dogfighting;
+* arcade flight;
+* cartoon aesthetics;
+* tiny arena-like battles.
+
+The scale of space should feel enormous.
+
+---
+
+# 51. Assets
+
+Do not introduce runtime dependence on generative AI services.
+
+Use:
+
+* original assets;
+* procedural assets;
+* free assets;
+* properly licensed assets.
+
+Check licenses before inclusion.
+
+---
+
+# 52. Testing
+
+Tests must cover at minimum:
+
+* vector math;
+* physics;
+* inertial movement;
+* high acceleration;
+* wedge geometry;
+* sidewalls;
+* weapon geometry;
+* missile guidance;
+* counter-missile interception;
+* sensors;
+* ECM;
+* point defense;
+* subsystem damage;
+* deterministic simulation;
+* command hierarchy;
+* formation AI;
+* individual overrides;
+* scenario loading;
+* replay.
+
+---
+
+# 53. Debug Tools
+
+Debug mode may expose:
+
+* true battlefield state;
+* wedge planes;
+* sidewalls;
+* velocity vectors;
+* acceleration vectors;
+* relative velocity;
+* attack vectors;
+* missile trajectories;
+* sensor truth;
+* AI decisions;
+* command state.
+
+Debug information must not be available as omniscient information in normal gameplay.
+
+---
+
+# 54. External Dependencies
+
+Runtime dependencies must be local and distributable.
+
+Do not require:
+
+* Claude;
+* LLM;
+* cloud AI;
+* internet;
+* external API;
+* API keys;
+* external game server.
+
+Third-party libraries must have compatible licenses.
+
+---
+
+# 55. No Premature MMO
+
+Do not implement unless separately required:
+
+* multiplayer;
+* accounts;
+* backend;
+* matchmaking;
+* cloud saves;
+* online services;
+* MMO infrastructure.
+
+The initial product is a local single-player tactical simulator.
+
+---
+
+# 56. Development Milestones
+
+Recommended order:
+
+### Milestone 1
+
+Engine skeleton + 3D world + simulation loop.
+
+### Milestone 2
+
+Two ships + inertial physics.
+
+### Milestone 3
+
+Wedge + sidewalls + ship orientation.
+
+### Milestone 4
+
+Energy weapons.
+
+### Milestone 5
+
+Missiles + guidance.
+
+### Milestone 6
+
+Counter-missiles + point defense.
+
+### Milestone 7
+
+Sensors + ECM.
+
+### Milestone 8
+
+Subsystem damage.
+
+### Milestone 9
+
+Tactical AI.
+
+### Milestone 10
+
+Formation command.
+
+### Milestone 11
+
+Individual ship command + overrides.
+
+### Milestone 12
+
+Replay.
+
+### Milestone 13
+
+Scenarios.
+
+### Milestone 14
+
+2v2 + squadron.
+
+### Milestone 15
+
+Large fleet engagements.
+
+### Milestone 16
+
+Scenario editor.
+
+### Milestone 17
+
+Performance + polish + final Windows build.
+
+---
+
+# 57. First Working Combat Milestone
+
+The first meaningful combat milestone must become a real 1v1 tactical engagement.
+
+It must eventually contain:
+
+```text
+3D world
++
+2 independent ships
++
+inertial physics
++
+high acceleration
++
+orientation
++
+impeller wedge
++
+sidewalls
++
+sensors
++
+targeting
++
+energy weapons
++
+missiles
++
+missile guidance
++
+counter-missiles
++
+point defense
++
+ECM
++
+subsystem damage
++
+AI
++
+tactical commands
++
+pause
++
+step
++
+time scaling
++
+battle log
++
+replay
+```
+
+Do not declare the project complete because a ship mesh is visible in a 3D scene.
+
+---
+
+# 58. Temporary Simplifications
+
+Temporary simplifications are allowed during intermediate milestones only if:
+
+1. they are explicitly identified;
+2. they do not masquerade as finished functionality;
+3. they are tracked;
+4. they are replaced before the relevant Definition of Done.
+
+Do not permanently replace important Honorverse mechanics with generic placeholders.
+
+---
+
+# 59. Definition of Done
+
+The final project is complete only when:
+
+* Windows build works;
+* application launches;
+* true 3D simulation works;
+* inertial movement works;
+* high-speed movement works;
+* wedge geometry works;
+* sidewalls work;
+* weapons work;
+* missiles are real simulation entities;
+* counter-missiles work;
+* point defense works;
+* sensors work;
+* ECM works;
+* subsystem damage works;
+* tactical AI works;
+* formation command works;
+* individual ship command works;
+* command overrides work;
+* replay works;
+* scenarios work;
+* automated tests exist;
+* documentation is present;
+* no critical TODOs remain;
+* runtime does not depend on Claude, LLM, cloud AI, external APIs, or internet.
+
+A UI element existing is not proof that its underlying functionality is complete.
+
+---
+
+# 60. Product Goal
+
+The final experience should follow:
+
+```text
+Observe
+→ Decide
+→ Issue Orders
+→ Monitor
+→ Adapt
+→ Take Direct Control When Necessary
+```
+
+The player should feel like the commander of a large military space force rather than the pilot of an arcade spacecraft.
+
+The central goal is:
+
+**A complete autonomous 3D tactical Honorverse combat simulator with formation-level and individual-ship command.**

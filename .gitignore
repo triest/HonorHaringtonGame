@@ -1,0 +1,3 @@
+project/.godot/
+*.tmp
+Claude outputs/*.py

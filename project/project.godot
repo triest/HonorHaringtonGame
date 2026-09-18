@@ -1,0 +1,20 @@
+; Engine configuration file.
+; Honorverse 3D Tactical Combat Simulator
+
+config_version=5
+
+[application]
+
+config/name="Honorverse Tactical Simulator"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://icon.svg"
+
+[physics]
+
+common/physics_ticks_per_second=60
+3d/physics_engine="GodotPhysics3D"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"

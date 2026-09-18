@@ -23,6 +23,7 @@ class_name ShipPhysicsState
 
 const KinematicsUtils = preload("res://simulation/kinematics_utils.gd")
 const SPEED_OF_LIGHT_MPS: float = KinematicsUtils.SPEED_OF_LIGHT_MPS
+const SubsystemType = preload("res://simulation/subsystem_type.gd")
 
 ## Position in simulation-space meters (double precision required at scale;
 ## see docs/ASSUMPTIONS.md re: origin rebasing, ТЗ §14).
@@ -59,7 +60,9 @@ var max_width_m: float = 90.0
 var max_height_m: float = 60.0
 
 ## Propulsion/compensator condition in [0.0, 1.0]; degraded by damage
-## (ТЗ §12, §25). 1.0 = fully functional.
+## (ТЗ §12, §25). 1.0 = fully functional. PRE-DATES `subsystems` below --
+## kept as-is for backward compatibility (every existing caller/test sets
+## these directly); see `subsystems` doc comment for how the two combine.
 var propulsion_condition: float = 1.0
 var compensator_condition: float = 1.0
 
@@ -67,8 +70,25 @@ var compensator_condition: float = 1.0
 ## "no defense system modeled yet" (e.g. missiles/debris), not "wedge down".
 var defense: ShipDefenseState = null
 
+## ТЗ §25 Damage: optional ShipSubsystems (the canonical, complete
+## 11-subsystem container -- see ship_subsystems.gd). Null (the default)
+## means "no subsystem damage modeling for this ship", identical to
+## pre-§25 behavior. When present, `effective_max_acceleration()` ALSO
+## scales by this ship's own PROPULSION and MANEUVERING subsystem
+## condition, ON TOP OF (multiplied with, not replacing)
+## `propulsion_condition`/`compensator_condition` above -- this is the
+## direct implementation of the ТЗ §25 example "propulsion damage ->
+## degraded acceleration" via the canonical container, without having to
+## migrate the older fields (a deliberately deferred unification, see
+## ASSUMPTIONS.md).
+var subsystems = null
+
 func effective_max_acceleration() -> float:
-	return max_acceleration_mps2 * propulsion_condition * compensator_condition
+	var result: float = max_acceleration_mps2 * propulsion_condition * compensator_condition
+	if subsystems != null:
+		result *= subsystems.get_condition(SubsystemType.Type.PROPULSION)
+		result *= subsystems.get_condition(SubsystemType.Type.MANEUVERING)
+	return result
 
 ## Advances this ship's physical state by exactly one fixed simulation tick.
 ## Thrust -> acceleration -> velocity -> position (ТЗ §12).

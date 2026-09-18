@@ -82,6 +82,44 @@ func _test_formation_with_missing_guide_is_skipped_safely() -> void:
 
 	_assert(wing.commanded_thrust_local == Vector3.ZERO, "with no guide ship present, formation-keeping should be a safe no-op rather than crashing or moving the member")
 
+func _test_member_on_station_but_closing_gets_braking_thrust() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	# Wing sits exactly on its assigned station but is still moving
+	# relative to the (stationary) guide -- the first slice's pure
+	# position-error law would command ZERO thrust here (dead zone on
+	# position alone) and let the wing coast straight through station.
+	var wing := _make_ship(Vector3(500.0, 0, 0))
+	wing.velocity = Vector3(50.0, 0, 0)  # drifting further away from the guide
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(500.0, 0, 0))
+
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(wing.commanded_thrust_local != Vector3.ZERO, "a member on-station but with a velocity mismatch must still get a braking/matching thrust, not be left coasting")
+	var thrust_world: Vector3 = wing.orientation * wing.commanded_thrust_local
+	_assert(thrust_world.x < -0.01, "the correction should oppose the wing's excess velocity relative to the guide (brake back towards it)")
+
+func _test_member_far_out_converges_over_many_ticks() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing := _make_ship(Vector3(20_000.0, 0, 0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(500.0, 0, 0))
+
+	var starting_distance: float = wing.position.distance_to(Vector3(500.0, 0, 0))
+	for i in range(600):
+		world.tick_simulation(1.0 / 60.0)
+	var ending_distance: float = wing.position.distance_to(Vector3(500.0, 0, 0))
+
+	_assert(ending_distance < starting_distance, "a member far out of station should move measurably closer to it over time under the PD law")
+
 func _test_disengaging_member_retreat_overrides_formation_keeping() -> void:
 	var world := SimulationWorld.new()
 	var guide := _make_ship(Vector3.ZERO)
@@ -117,6 +155,8 @@ func _init() -> void:
 	_test_member_settles_near_station_and_stops_jittering()
 	_test_formation_with_missing_guide_is_skipped_safely()
 	_test_disengaging_member_retreat_overrides_formation_keeping()
+	_test_member_on_station_but_closing_gets_braking_thrust()
+	_test_member_far_out_converges_over_many_ticks()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

@@ -267,22 +267,30 @@ func _resolve_point_defense(dt: float) -> void:
 		for mount in mounts:
 			PointDefenseResolution.engage(mount, ship, target_missile, dt, target_contact)
 
-## Milestone 10 (Formation Command) first slice, AGENTS.md §61 "wall of
-## battle / formation fighting": every non-guide member of a formation
-## thrusts to hold a fixed station (offset in the GUIDE's own local
-## frame, so the formation rotates with the guide rather than staying
-## fixed to world axes) relative to its guide ship. Deliberately simple:
-## thrust direction only (toward the desired world station), no separate
-## velocity-matching/damping term yet, so a member can overshoot and
-## oscillate around station rather than settling smoothly -- an honest
-## gap, not hidden. A formation whose guide ship no longer exists (e.g.
-## destroyed) is simply skipped this tick -- there is no fallback
-## guide/reform logic yet (§29 "reform formations" remains open).
+## Milestone 10 (Formation Command) -- velocity-matching pass, ТЗ §29/
+## §32 "maintain... relative position; velocity matching". Builds on the
+## first slice (see CHANGELOG.md): every non-guide member of a formation
+## now thrusts using a proportional-derivative law (position error AND
+## velocity error towards the guide), replacing the earlier direction-
+## only bang-bang thrust -- this closes the first slice's documented
+## honest gap ("no separate velocity-matching/damping term yet, so a
+## member can overshoot and oscillate around station"). ASSUMPTION:
+## K_P_STATION/K_D_STATION are an engineering PD-controller tuning
+## choice (heavily overdamped -- no canonical Honorverse station-keeping
+## formula exists), not itself Honorverse canon -- see ASSUMPTIONS.md.
+## Still NOT modeled (open items, unchanged from the first slice): the
+## guide's own ANGULAR velocity sweeping a nonzero-offset slot through an
+## arc (this only matches the guide's LINEAR velocity), and a fallback/
+## succession when the guide ship no longer exists (still simply skipped
+## this tick; §33 leader succession remains open).
 ##
 ## Runs BEFORE `_resolve_damage_response` so a critically damaged member
 ## retreating overrides its formation station-keeping thrust for that
 ## tick (disengaging takes priority over holding the wall).
 func _resolve_formation_keeping(dt: float) -> void:
+	const K_P_STATION: float = 0.02
+	const K_D_STATION: float = 0.9
+
 	for formation_id in formations.keys():
 		var formation: FormationState = formations[formation_id]
 		var guide: ShipPhysicsState = ships.get(formation.guide_ship_id)
@@ -299,16 +307,26 @@ func _resolve_formation_keeping(dt: float) -> void:
 			var offset_local: Vector3 = formation.member_offsets[member_id]
 			var desired_world_position: Vector3 = guide.position + (guide.orientation * offset_local)
 			var to_station: Vector3 = desired_world_position - member.position
+			var velocity_error: Vector3 = guide.velocity - member.velocity
 
 			# ASSUMPTION: a small dead zone avoids thrust jitter once a
-			# member is essentially on station -- no canonical figure,
-			# chosen as a small fraction of a typical formation spacing.
-			if to_station.length_squared() <= 1.0:
+			# member is essentially on station AND already velocity-
+			# matched with the guide -- no canonical figure, chosen as a
+			# small fraction of a typical formation spacing / a barely-
+			# measurable speed difference.
+			if to_station.length_squared() <= 1.0 and velocity_error.length_squared() <= 0.0001:
 				member.commanded_thrust_local = Vector3.ZERO
 				continue
 
-			var to_station_world: Vector3 = to_station.normalized()
-			member.commanded_thrust_local = member.orientation.inverse() * to_station_world
+			var max_accel: float = member.effective_max_acceleration()
+			if max_accel <= 0.0:
+				continue
+
+			var desired_accel: Vector3 = to_station * K_P_STATION + velocity_error * K_D_STATION
+			if desired_accel.length() > max_accel:
+				desired_accel = desired_accel.normalized() * max_accel
+
+			member.commanded_thrust_local = member.orientation.inverse() * (desired_accel / max_accel)
 
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting

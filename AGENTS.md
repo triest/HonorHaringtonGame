@@ -1658,3 +1658,128 @@ The simulator must therefore reproduce the *feel* of Nelsonian naval warfare tra
 - The UI and camera should support the commander's view (fleet / task-force / squadron) more naturally than the fighter-pilot view.
 
 If a proposed feature or simplification moves the game toward arcade dogfighting or toward perfect-information real-time strategy, it is working against the project's intended character.
+
+---
+
+# 62. Inertia, Ship Mass, and Time Scale
+
+## 62.1 Mass must matter, not just be a stored number
+
+Every warship carries a real `mass_kg` (ТЗ §8 Ship Database). Mass MUST
+be a load-bearing part of the physics, not decoration:
+
+* the same impeller/compensator technology generation produces LOWER
+  attainable acceleration for a more massive hull, all else equal --
+  this is a direct consequence of thrust-to-mass ratio, not an
+  arbitrary per-class dial;
+* heavier ships must feel correspondingly more sluggish to accelerate,
+  decelerate, and change heading than lighter ones of the same
+  generation;
+* a lighter, stripped-down hull built purely for speed (a courier or
+  dispatch boat, sacrificing armor/weapons/crew space for a smaller,
+  cheaper impeller/compensator load) is canonically able to reach much
+  higher acceleration than a comparably-generation warship -- see
+  §62.3.
+
+CANON basis for ship mass by class (Honorverse Wiki "Ship Types",
+verified 2026-09-18):
+
+| Class                  | Typical mass range        |
+|------------------------|----------------------------|
+| Destroyer (DD)         | ~65,000-80,000 tons (later classes, e.g. Roland, reach light-cruiser range) |
+| Light Cruiser (CL)     | ~90,000-150,000 tons       |
+| Heavy Cruiser (CA)     | ~160,000-350,000 tons      |
+| Battlecruiser (BC)     | ~780,000-2,500,000 tons    |
+| Battleship (BB)        | ~2,000,000-4,000,000 tons  |
+| Superdreadnought (SD)  | ~7,000,000-9,000,000 tons  |
+
+Exact mass MUST remain per-ship-class data (ТЗ §8/§48 Data-Driven
+Design), not a hardcoded constant, and MUST be tied to a specific ship
+class definition when the ship database exists, not invented per-ship.
+
+## 62.2 Inertial compensator -- why acceleration is limited, and by what
+
+CANON basis (Honorverse Wiki "Inertial compensator", verified
+2026-09-18): the inertial compensator reduces the acceleration a crew
+and internal equipment experience by turning the ship's own impeller
+wedge into what the source calls an "inertial sump." This is the
+mechanism that makes survivable high-g combat maneuvering possible at
+all -- without it, the true accelerations warships achieve would kill
+their crews instantly.
+
+Canon figures to ground the model:
+
+* gravity generators ALONE (i.e. without an impeller wedge to use as
+  the sump) can only handle up to ~50 G, limiting achievable ship
+  acceleration to roughly 51 G under that degraded mode;
+* without a wedge, compensation is much less effective: a cited example
+  states a 150 G acceleration could only be reduced to an apparent 5 G
+  felt by the crew (illustrating how much of the "sump" effect depends
+  on having the wedge active, i.e. `defense.wedge_up`);
+* pre-war Manticoran/Havenite doctrine mandated operating at no more
+  than 80% of maximum compensator effectiveness as a safety margin;
+  both sides abandoned this conservative margin during the First
+  Manticoran-Havenite War in favor of more aggressive acceleration
+  profiles -- i.e. accepting more risk for more combat performance is
+  itself a canonical DOCTRINE CHOICE, not a fixed constant;
+* compensator failure during significant acceleration is lethal to the
+  crew immediately -- there is no "soft" failure mode.
+
+Design consequences for this simulator:
+
+* `ShipPhysicsState.compensator_condition` (already implemented) is the
+  right place to model degraded compensator performance from damage;
+  `defense.wedge_up` gating the compensator's effectiveness (per the
+  "50G without wedge vs. much higher with wedge" canon figure above) is
+  an explicit, citable design target for a future pass, not yet wired.
+* A "safety margin" slider/doctrine choice (operate at e.g. 80% of
+  rated compensator capability for safety vs. closer to 100% for combat
+  performance, at increased catastrophic-failure risk) is a legitimate,
+  canon-grounded future mechanic for Tactical AI (§26) and/or player
+  doctrine options -- NOT implemented yet, tracked as an open item.
+* Missiles are NOT subject to this constraint the same way (no crew to
+  protect) -- this is exactly why missile drives can run at tens of
+  thousands of G (see §18/missile_state.gd, CANON ~46,000 G / ~96,000 G
+  examples) while crewed warships cannot: the compensator problem is a
+  CREWED-hull-specific limitation, not a universal drive limitation.
+
+## 62.3 Acceleration figures by hull type
+
+CANON basis (Honorverse Wiki "Ship Types", verified 2026-09-18):
+dispatch boats/couriers are explicitly documented as reaching up to
+~800 G -- consistent with §62.1 (minimal mass, no combat load, built
+purely for speed). No specific canonical G figures were found in this
+pass for destroyer-through-superdreadnought classes specifically; those
+remain UNKNOWN pending further source-checking and MUST stay
+configurable per ship class (§8/§48), not hardcoded, until real figures
+are found and logged in ASSUMPTIONS.md/CANON_RULES.md.
+
+## 62.4 Time scale
+
+Two distinct notions of "time" apply to this simulator, and they MUST
+NOT be confused:
+
+1. **Simulation tick rate** (ТЗ §42/§43): a fixed, deterministic
+   timestep (currently 60Hz, see `SimClock`) that every physics/combat
+   calculation advances by. This rate is an ENGINEERING choice, not
+   canon, and must never vary based on frame rate, load, or player
+   input -- determinism (§43) depends on it staying fixed.
+2. **Playback/observation speed** (ТЗ §44 Time Control: pause, single-
+   step, 1x/2x/5x/10x/25x/100x): a PURELY presentational multiplier on
+   how many fixed ticks are advanced per real second of wall-clock time
+   shown to the player. Changing this multiplier MUST NOT change
+   physical rules, combat outcomes, or determinism (§44 already states
+   this) -- it changes how fast the player WATCHES a deterministic
+   simulation unfold, never what that simulation computes.
+
+Scope boundary (clarifying an area §44/§45 leave implicit): this
+simulator models TACTICAL combat time -- real seconds to at most a few
+hours of in-universe time, at fixed 60Hz resolution. It does NOT model
+the much larger-scale time compression of interstellar hyper transit
+(days/weeks between star systems in the books). Compressed strategic/
+transit time, if ever wanted (e.g. for a campaign layer), is UNKNOWN/
+out of scope for this simulator and would need its own design pass --
+it must not be implemented by just cranking the §44 playback multiplier
+to extreme values, which would silently break tactical-scale physics
+assumptions (missile burn times, sensor detection windows, etc. are all
+tuned for real-time-scale tactical engagements).

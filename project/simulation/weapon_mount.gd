@@ -34,7 +34,9 @@ static func stern_chaser_arc() -> Array:
 var weapon: WeaponData
 var arc_sectors: Array = []  # Array[AttackGeometry.Sector]
 var cooldown_remaining_s: float = 0.0
-var condition: float = 1.0  # 1.0 = fully functional; damaged by §25 later.
+var condition: float = 1.0  # 1.0 = fully functional; synced each tick from the
+                                  # mounting ship's own WEAPONS subsystem condition by
+                                  # SimulationWorld._sync_subsystem_driven_conditions() (§25).
 
 func _init(p_weapon: WeaponData = null, p_arc: Array = []) -> void:
 	weapon = p_weapon

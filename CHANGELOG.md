@@ -591,3 +591,88 @@ damage-type-зависимое ослабление sidewall, визуализа
   текущих тактических (не флотских) дистанциях проекта разница
   ничтожна, честно зафиксировано, а не тихо выдано за один и тот же
   механизм.
+
+## Unreleased — Milestone 10 gap closed: 4 of 8 subsystems without a damage consumer now wired (§25)
+
+* `simulation_world.gd`: новая `_sync_subsystem_driven_conditions()`,
+  вызывается первым шагом каждого тика. Синхронизирует
+  `WeaponMount.condition` / `PointDefenseMount.condition` /
+  `MissileTube.condition` (новое поле) из собственных подсистем
+  корабля-носителя (`WEAPONS`/`POINT_DEFENSE`/`MISSILE_SYSTEMS`) — это
+  прямая реализация того, что уже было заложено в комментариях этих
+  полей ("damaged by §25 later" / "not yet modeled here"), просто
+  никогда не подключено. Корабль без `ShipSubsystems` (subsystems ==
+  null) не затрагивается — полная обратная совместимость.
+* `weapon_resolution.gd`/`point_defense_resolution.gd` уже читали
+  `mount.condition` — теперь оно реально живое, а не всегда 1.0:
+  повреждённая WEAPONS пропорционально снижает урон выстрела
+  (`damage_per_hit * mount.condition`), полностью уничтоженная
+  обнуляет `is_ready()`; POINT_DEFENSE при `condition <= 0` отключает
+  `is_ready()` (честно задокументировано как hard on/off, не
+  непрерывная деградация — см. обновлённый class doc
+  point_defense_resolution.gd).
+* `missile_tube.gd`: новое поле `condition` + `is_ready()` теперь также
+  требует `condition > 0.0` (MISSILE_SYSTEMS подключена).
+* `counter_missile_resolution.gd`: `check_intercept()` получил новый
+  опциональный параметр `counter_missile_system_condition` (по
+  умолчанию 1.0, полностью обратная совместимость с каждым
+  существующим вызовом) — масштабирует эффективный радиус
+  wedge-overlap перехвата (`INTERCEPT_KILL_RADIUS_M * condition`).
+  INTERPRETATION задокументирована в class doc: представляет
+  бортовой fire-control launching-корабля, обеспечивающий терминальные
+  поправки наведения уже выпущенному counter-missile (не сам полёт
+  ракеты — тот управляется независимо через MissileGuidance).
+  `simulation_world.gd`'s `_resolve_counter_missile_intercepts()`
+  находит ВЛАДЕЮЩИЙ counter-missile корабль через `missile_owners` и
+  подставляет его COUNTER_MISSILE_SYSTEMS condition; безхозный
+  counter-missile (owner_id == "") или несуществующий владелец —
+  честный fallback на 1.0 (пред-§25 поведение).
+* `ship_subsystems.gd`: HONEST STATUS docstring обновлён — было 3 из 11
+  реально подключённых consumer'ов (SENSORS/PROPULSION/MANEUVERING),
+  стало 7 из 11. Честно НЕ подключены (заблокированы отсутствием более
+  крупных систем, не просто "забыли"): COMMUNICATIONS (нет
+  command/reporting §26/§28), POWER (нет power-budget модели),
+  STRUCTURAL_INTEGRITY (HullState — временный §58 placeholder,
+  требующий полной замены перед §59 DoD, подключать поверх него
+  бессмысленно), DEFENSIVE_SYSTEMS (нет канонической разницы с уже
+  существующими wedge/sidewall системами ShipDefenseState — что именно
+  эта подсистема должна отдельно моделировать, UNKNOWN).
+* **РЕАЛЬНЫЙ БАГ НАЙДЕН И ИСПРАВЛЕН** при написании нового теста для
+  этого прохода (не гипотетический — падал с реальным SCRIPT ERROR):
+  counter-missile (у которого `target` — другой `MissileState`, не
+  корабль) вооружает боеголовку той же самой generic
+  дистанционной проверкой, что и обычная ракета
+  (`MissileState.integrate()` не различает тип цели). До исправления
+  `simulation_world.gd`'s `_update_missiles(dt)` затем безусловно
+  вызывал `MissileResolution.resolve_detonation()`, который читает
+  `target.defense` — поля, которого нет на `MissileState` (оно есть
+  только на `ShipPhysicsState`) — падение "Invalid access to property
+  or key 'defense'". Баг был скрытым: ни один существующий тест
+  counter-missile не проходит через `SimulationWorld.tick_simulation()`
+  (все дергают `integrate()`/`check_intercept()` напрямую). Исправлено:
+  `_update_missiles` теперь явно исключает laserhead-детонацию для
+  ракет, чья цель сама является `MissileState` — counter-missile
+  разрешается ИСКЛЮЧИТЕЛЬНО через `_resolve_counter_missile_intercepts()`
+  (wedge-overlap), никогда через §21 laserhead/rod-детонацию против
+  другой ракеты, что и так уже соответствовало документированной
+  канонической механике в `counter_missile_resolution.gd`.
+* Новый `test_subsystem_damage_consumers.gd` — 8 новых тестов (13
+  проверок): синхронизация condition для всех 3 mount/tube типов;
+  реальное снижение урона выстрела; полное отключение при
+  `condition == 0`; корабль без ShipSubsystems не затрагивается;
+  масштабирование радиуса перехвата counter-missile + обратная
+  совместимость параметра по умолчанию; сквозной сценарий через
+  `world.tick_simulation()`, который и поймал баг выше.
+* Полный прогон headless-тестов ПОДТВЕРЖДЁН в этой сессии через
+  Godot v4.3-stable_linux.x86_64 (скачан заново): все 23 файла
+  `project/simulation/tests/` зелёные (exit code 0 каждый), включая
+  новый файл. Регрессий не найдено.
+* Честно НЕ сделано (открыто дальше): POINT_DEFENSE/MISSILE_SYSTEMS —
+  только hard on/off, не непрерывная деградация точности/скорострельности
+  как у WEAPONS; COMMUNICATIONS/POWER/STRUCTURAL_INTEGRITY/
+  DEFENSIVE_SYSTEMS по-прежнему без consumer'а (см. выше, честные
+  архитектурные блокеры); переданное командование формации по-прежнему
+  не переpланирует §29 приказы под нового ведущего; угловая скорость
+  ведущего по-прежнему не учитывается PD-регулятором удержания строя;
+  многоуровневая иерархия команд §28 не реализована; Milestone 11+ не
+  начаты.

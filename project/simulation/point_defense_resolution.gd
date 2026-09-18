@@ -26,9 +26,14 @@ extends RefCounted
 ## unaffected.
 ##
 ## HONEST GAPS (not implemented, see AGENTS.md §22/§24 for what these
-## should eventually do): ECM does not yet degrade PD accuracy/tracking;
-## ship subsystem damage does not yet degrade `condition`. These are real,
-## named gaps, not silently skipped.
+## should eventually do): ECM does not yet degrade PD accuracy/tracking.
+## `condition` IS now degraded by ship subsystem damage (§25) -- see
+## SimulationWorld._sync_subsystem_driven_conditions(), which syncs it from
+## the mounting ship's own POINT_DEFENSE subsystem every tick -- but only as
+## a hard on/off at `condition <= 0.0` via `PointDefenseMount.is_ready()`,
+## not a continuous accuracy/reaction-time falloff in between; that finer
+## degradation remains a documented TODO. These are real, named gaps, not
+## silently skipped.
 class_name PointDefenseResolution
 
 const MissileState = preload("res://simulation/missile_state.gd")

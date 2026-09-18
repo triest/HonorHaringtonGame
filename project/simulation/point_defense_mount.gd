@@ -28,7 +28,7 @@ var max_engagement_range_m: float = 20_000.0    # ASSUMPTION: shorter-ranged tha
 var reaction_time_s: float = 1.5                 # ASSUMPTION: time a contact must be tracked before PD can engage it.
 var recharge_time_s: float = 0.75                # ASSUMPTION: rapid-fire compared to a main energy mount.
 var hits_required_to_kill: int = 2               # ASSUMPTION: a single laser hit is not automatically a kill (missile body is small/tough/maneuvering).
-var condition: float = 1.0                       # 1.0 = fully functional; degraded by subsystem damage (§25, not yet modeled here).
+var condition: float = 1.0                       # 1.0 = fully functional; synced each tick from POINT_DEFENSE subsystem condition (§25, see SimulationWorld._sync_subsystem_driven_conditions()).
 
 var cooldown_remaining_s: float = 0.0
 var _tracking_target = null       # the MissileState currently being engaged, if any

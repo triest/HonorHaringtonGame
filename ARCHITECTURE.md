@@ -825,3 +825,54 @@ communication limitations"), а не просто безопасно пропу�
   (element/division/squadron/task force/fleet, §28) не реализована —
   `succession_order`/`guide_ship_id` работают на уровне одной плоской
   формации, не многоуровневой структуры.
+
+## Milestone 10 (продолжение): condition-поля WeaponMount/PointDefenseMount/MissileTube реально подключены к §25
+
+Эти три поля существовали с самого начала своих модулей (Milestone 4/9)
+как заглушки "1.0 = fully functional; damaged by §25 later" — читались
+на каждый выстрел/engage/launch (`mount.condition` уже умножало урон в
+`weapon_resolution.gd`, `is_ready()` уже проверял `condition > 0.0`
+в обоих mount-классах и теперь в `MissileTube`), но НИКТО никогда их не
+записывал — они были мертвы, всегда 1.0. Это ровно то расхождение,
+которое честно фиксировалось как "8 из 11 подсистем без потребителя
+урона" в предыдущих проходах.
+
+Решение архитектуры: НЕ трогать сигнатуры `weapon_resolution.fire()` /
+`point_defense_resolution.engage()` (они уже принимают то, что нужно
+через `mount`/`ship`) — вместо этого добавить ОДНУ новую функцию
+`SimulationWorld._sync_subsystem_driven_conditions()`, вызываемую первым
+шагом `tick_simulation(dt)`, которая копирует
+`ship.subsystems.get_condition(TYPE)` в `mount.condition`/`tube.condition`
+для каждого mount/tube этого корабля. Это самый маленький возможный
+diff, использующий уже существующую, уже протестированную инфраструктуру
+(`is_ready()` gate, урон * condition) вместо изобретения новой.
+Компромисс: это делает condition СНИМКОМ на начало тика, а не реактивным
+мгновенным пересчётом — урон, нанесённый ПОЗЖЕ в этом же тике (например,
+попадание во время `_resolve_weapons_ai`), отражается только со
+СЛЕДУЮЩЕГО тика. Осознанный выбор ради простоты и детерминизма (§43),
+не баг.
+
+`COUNTER_MISSILE_SYSTEMS` не подключена через тот же механизм, т.к. у
+counter-missile нет "mount" на корабле — вместо этого
+`CounterMissileResolution.check_intercept()` получил третий опциональный
+параметр (`counter_missile_system_condition`, default 1.0), а
+`_resolve_counter_missile_intercepts()` сам смотрит владельца
+counter-missile через `missile_owners` (уже существующий словарь) и
+передаёт его условие. INTERPRETATION зафиксирована в class doc
+`counter_missile_resolution.gd`: подсистема представляет fire-control
+uplink корабля-носителя, а не сам полёт ракеты.
+
+Побочный эффект написания честного сквозного теста через
+`world.tick_simulation()` (а не изолированного вызова модуля, как
+делали все предыдущие counter-missile тесты) — нашёл РЕАЛЬНЫЙ краш:
+`_update_missiles()` не различал "цель — корабль" и "цель — другая
+ракета" перед вызовом `MissileResolution.resolve_detonation()`, который
+безусловно читает `target.defense`. Исправлено явным исключением
+laserhead-детонации, когда `missile.target is MissileState` — см.
+CHANGELOG.md для деталей и `simulation_world.gd`'s
+`_update_missiles()` doc comment для полного разбора. Урок для будущих
+проходов: модуль-изолированные тесты (как весь `test_counter_missile.gd`)
+дёшевы и быстры, но НЕ заменяют хотя бы один сквозной тест через
+`SimulationWorld.tick_simulation()` для каждой механики — именно там
+всплывают взаимодействия между модулями, которые ни один изолированный
+тест не может увидеть.

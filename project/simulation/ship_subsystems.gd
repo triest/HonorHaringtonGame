@@ -13,16 +13,36 @@ extends RefCounted
 ## conditions (§9). Those are NOT yet unified with this container (that
 ## would mean rewriting those modules to read from here instead of their
 ## own fields -- a real refactor, deliberately deferred rather than
-## rushed to avoid destabilizing already-tested systems). This container
-## currently actively DRIVES ONE consumer: SensorResolution reads
-## `get_condition(SubsystemType.Type.SENSORS)` to degrade detection range
-## (see sensor_resolution.gd), directly implementing the ТЗ §25 example
-## "sensor damage -> degraded tracking". COMMUNICATIONS, POWER,
-## STRUCTURAL_INTEGRITY, MISSILE_SYSTEMS and COUNTER_MISSILE_SYSTEMS have
-## no consumer wired yet -- there is no command/reporting system (§26/§28)
-## for COMMUNICATIONS to degrade, no live power-budget model, and
-## MissileGuidance/CounterMissileResolution do not yet read a launching
-## ship's subsystem state. See ASSUMPTIONS.md for the full gap list.
+## rushed to avoid destabilizing already-tested systems).
+##
+## Consumers now wired (7 of 11 SubsystemType entries actually change
+## ship capability, up from 3 as of the previous pass):
+## SENSORS (SensorResolution degrades detection range), PROPULSION and
+## MANEUVERING (ShipPhysicsState.effective_max_acceleration), and, as of
+## this pass, WEAPONS/POINT_DEFENSE/MISSILE_SYSTEMS (SimulationWorld.
+## _sync_subsystem_driven_conditions() syncs condition into WeaponMount/
+## PointDefenseMount/MissileTube's own `condition` field every tick, so a
+## damaged WEAPONS subsystem now proportionally reduces weapon damage
+## output and a fully disabled one stops the mount firing; POINT_DEFENSE/
+## MISSILE_SYSTEMS currently gate their mount/tube as hard on/off at
+## `condition <= 0.0` rather than continuous falloff -- an honest,
+## documented simplification, not silently skipped) and
+## COUNTER_MISSILE_SYSTEMS (SimulationWorld._resolve_counter_missile_intercepts
+## scales CounterMissileResolution's effective kill radius by the
+## launching ship's own condition; see that module's class doc for the
+## INTERPRETATION this represents).
+##
+## Still with NO consumer wired (4 of 11, genuinely blocked on systems
+## that do not exist yet, not merely unwired): COMMUNICATIONS (no
+## command/reporting system, §26/§28, for it to degrade), POWER (no live
+## power-budget model), STRUCTURAL_INTEGRITY (HullState is still the
+## single-scalar §58 placeholder pool ТЗ §59 requires replacing before
+## Definition of Done -- wiring STRUCTURAL_INTEGRITY meaningfully needs
+## that replacement first, not a quick shim), and DEFENSIVE_SYSTEMS (no
+## canonical mapping found distinguishing it from the wedge/sidewall
+## systems ShipDefenseState already models separately -- what this
+## subsystem would additionally represent is UNKNOWN, not merely
+## unimplemented). See ASSUMPTIONS.md for the full record.
 class_name ShipSubsystems
 
 const SubsystemType = preload("res://simulation/subsystem_type.gd")

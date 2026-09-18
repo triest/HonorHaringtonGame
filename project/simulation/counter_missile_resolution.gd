@@ -20,6 +20,22 @@ extends RefCounted
 ## INTERPRETATION / ASSUMPTION (no canonical number found for the exact
 ## effective wedge-overlap radius): `INTERCEPT_KILL_RADIUS_M` below is a
 ## documented placeholder, not a canonical figure. See ASSUMPTIONS.md.
+##
+## ТЗ §25 Subsystem Damage / COUNTER_MISSILE_SYSTEMS: INTERPRETATION (no
+## canonical source distinguishes a hull "counter-missile systems"
+## subsystem from the counter-missile's own onboard guidance) --
+## `check_intercept()`'s optional `counter_missile_system_condition`
+## represents the LAUNCHING SHIP's fire-control uplink that feeds terminal
+## targeting corrections to its own already-launched counter-missile
+## (the counter-missile's flight itself is guided independently by
+## MissileGuidance, unaffected). A degraded condition shrinks the
+## effective wedge-overlap kill radius achievable via that uplink --
+## same "deeper simulation model, not a flat modifier" pattern already
+## used by ECMState.jamming_range_multiplier -- rather than gating
+## intercept as a binary on/off. Wired by SimulationWorld
+## (_resolve_counter_missile_intercepts), which looks up the
+## counter-missile's OWN launching ship (via `missile_owners`, not the
+## incoming missile's) each tick.
 class_name CounterMissileResolution
 
 const MissileState = preload("res://simulation/missile_state.gd")
@@ -41,7 +57,7 @@ class InterceptResult:
 ## Call once per tick per (counter_missile, incoming_missile) pair that is
 ## still mutually active, to check whether this tick's closing has
 ## achieved a wedge-overlap kill.
-static func check_intercept(counter_missile, incoming_missile) -> InterceptResult:
+static func check_intercept(counter_missile, incoming_missile, counter_missile_system_condition: float = 1.0) -> InterceptResult:
 	if counter_missile.target != incoming_missile:
 		return InterceptResult.new(Outcome.NOT_TRACKING)
 
@@ -49,7 +65,8 @@ static func check_intercept(counter_missile, incoming_missile) -> InterceptResul
 		return InterceptResult.new(Outcome.ALREADY_RESOLVED)
 
 	var distance: float = counter_missile.position.distance_to(incoming_missile.position)
-	if distance > INTERCEPT_KILL_RADIUS_M:
+	var effective_kill_radius: float = INTERCEPT_KILL_RADIUS_M * clampf(counter_missile_system_condition, 0.0, 1.0)
+	if distance > effective_kill_radius:
 		return InterceptResult.new(Outcome.TOO_FAR)
 
 	counter_missile.guidance_state = MissileState.GuidanceState.INTERCEPTED

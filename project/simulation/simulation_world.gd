@@ -44,6 +44,7 @@ const WeaponResolution = preload("res://simulation/weapon_resolution.gd")
 const TacticalAI = preload("res://simulation/tactical_ai.gd")
 const MissileTube = preload("res://simulation/missile_tube.gd")
 const FormationState = preload("res://simulation/formation_state.gd")
+const SubsystemType = preload("res://simulation/subsystem_type.gd")
 
 var clock: SimClock
 
@@ -197,6 +198,7 @@ func _on_simulation_tick(dt: float, _tick: int, _sim_time: float) -> void:
 ## future scenario runner -- can drive it directly without a SceneTree.
 func tick_simulation(dt: float) -> void:
 	world_sim_time += dt
+	_sync_subsystem_driven_conditions()
 	_cleanup_inactive_missiles()
 	_update_sensors(dt)
 	_update_missiles(dt)
@@ -207,6 +209,40 @@ func tick_simulation(dt: float) -> void:
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
 	_integrate_ships(dt)
+
+## ТЗ §25 Subsystem Damage: run once at the START of every tick, before
+## any consumer (weapons fire, PD engagement, missile launch AI) reads a
+## mount/tube's `condition` this tick, to sync WeaponMount.condition,
+## PointDefenseMount.condition, and MissileTube.condition from their
+## owning ship's own ShipSubsystems container (WEAPONS, POINT_DEFENSE,
+## and MISSILE_SYSTEMS respectively). This is the direct implementation
+## of what those fields' own doc comments already anticipated ("damaged
+## by §25 later" / "not yet modeled here") -- closing 3 of the 8
+## previously-honest "no consumer wired" subsystem-damage gaps recorded
+## in ASSUMPTIONS.md/ship_subsystems.gd (COUNTER_MISSILE_SYSTEMS is the
+## 4th, wired separately in `_resolve_counter_missile_intercepts()`,
+## since a counter-missile's kill check has no per-tick "mount" of its
+## own to hold a synced condition field on). A ship with no
+## ShipSubsystems (`subsystems == null`, e.g. a test/scenario that never
+## opted into §25) is left untouched -- its mounts/tubes keep whatever
+## `condition` they were constructed or set with, identical to
+## pre-this-change behavior. Deliberately a per-tick SNAPSHOT taken
+## before this tick's own damage is applied (e.g. a weapon hit landing
+## later in this same tick, during `_resolve_weapons_ai`) rather than
+## reactive mid-tick coupling -- damage applied this tick is reflected
+## starting NEXT tick, which keeps tick ordering simple and deterministic
+## (ТЗ §43).
+func _sync_subsystem_driven_conditions() -> void:
+	for ship_id in ships.keys():
+		var ship: ShipPhysicsState = ships[ship_id]
+		if ship.subsystems == null:
+			continue
+		for mount in weapon_mounts.get(ship_id, []):
+			mount.condition = ship.subsystems.get_condition(SubsystemType.Type.WEAPONS)
+		for mount in pd_mounts.get(ship_id, []):
+			mount.condition = ship.subsystems.get_condition(SubsystemType.Type.POINT_DEFENSE)
+		for tube in missile_tubes.get(ship_id, []):
+			tube.condition = ship.subsystems.get_condition(SubsystemType.Type.MISSILE_SYSTEMS)
 
 func _cleanup_inactive_missiles() -> void:
 	for missile_id in missiles.keys():
@@ -238,6 +274,29 @@ func _update_sensors(dt: float) -> void:
 			SensorResolution.update_contacts(contacts, missile_id, missile, observer.position, dt, SensorResolution.DEFAULT_SENSOR_RANGE_M, null, observer.subsystems)
 
 ## ТЗ §18/§19/§21: guide, fly, and (if armed) detonate every active missile.
+##
+## BUG FOUND AND FIXED THIS PASS: a counter-missile (missile.target is
+## itself another MissileState, ТЗ §20) arms its warhead via the exact
+## same generic distance-to-target check as an offensive missile
+## (MissileState.integrate()'s arm-at-10%-of-terminal-range logic does
+## not care what kind of object `target` is). Before this fix, once armed
+## it fell into MissileResolution.resolve_detonation(), which
+## unconditionally reads `target.defense` -- a property that exists on
+## ShipPhysicsState but NOT on MissileState -- crashing with "Invalid
+## access to property or key 'defense'" the first time a counter-missile
+## closed within its own arm radius of an incoming missile inside the
+## live per-tick loop. This was previously latent/undiscovered because
+## every existing counter-missile test (test_counter_missile.gd) drives
+## `integrate()`/`check_intercept()` directly, bypassing
+## `SimulationWorld.tick_simulation()` entirely -- it only surfaced once
+## this pass's new test exercised a counter-missile through the full
+## world loop (test_subsystem_damage_consumers.gd). Counter-missiles
+## never use laserhead/rod detonation (§21) against another missile --
+## per CounterMissileResolution's class doc, a counter-missile kill is a
+## wedge-vs-wedge overlap, resolved exclusively by
+## `_resolve_counter_missile_intercepts()` -- so a missile whose target is
+## another MissileState is now explicitly excluded from this laserhead
+## detonation path, regardless of its own warhead_armed flag.
 func _update_missiles(dt: float) -> void:
 	for missile_id in missiles.keys():
 		var missile = missiles[missile_id]
@@ -247,7 +306,8 @@ func _update_missiles(dt: float) -> void:
 		var thrust_dir: Vector3 = MissileGuidance.resolve_thrust_direction(missile, dt)
 		missile.integrate(dt, thrust_dir)
 
-		if missile.warhead_armed and not missile.has_detonated:
+		var is_counter_missile: bool = missile.target is MissileState
+		if missile.warhead_armed and not missile.has_detonated and not is_counter_missile:
 			var target = missile.target
 			var target_hull = null
 			var target_subsystems = null
@@ -260,13 +320,24 @@ func _update_missiles(dt: float) -> void:
 
 ## ТЗ §20: any missile whose target is itself another (incoming) missile
 ## is a counter-missile -- check whether it has closed to kill radius.
+## ТЗ §25: the effective kill radius is scaled by the counter-missile's
+## OWN LAUNCHING ship's COUNTER_MISSILE_SYSTEMS subsystem condition (via
+## `missile_owners`, recorded at `add_missile()` time) -- see
+## CounterMissileResolution's class doc for the INTERPRETATION this
+## represents. An unowned counter-missile (owner_id == "", e.g. a test
+## that never registered ownership) or one whose owner ship no longer
+## exists defaults to condition 1.0, identical to pre-§25 behavior.
 func _resolve_counter_missile_intercepts() -> void:
 	for missile_id in missiles.keys():
 		var missile = missiles[missile_id]
 		if not missile.is_active():
 			continue
 		if missile.target is MissileState:
-			CounterMissileResolution.check_intercept(missile, missile.target)
+			var owner_ship: ShipPhysicsState = ships.get(missile_owners.get(missile_id, ""))
+			var cm_condition: float = 1.0
+			if owner_ship != null and owner_ship.subsystems != null:
+				cm_condition = owner_ship.subsystems.get_condition(SubsystemType.Type.COUNTER_MISSILE_SYSTEMS)
+			CounterMissileResolution.check_intercept(missile, missile.target, cm_condition)
 
 ## ТЗ §22 Point Defense + §26 Tactical AI. Target selection now goes
 ## through `TacticalAI.select_pd_target()`, which reads ONLY this ship's

@@ -383,14 +383,17 @@ func _resolve_point_defense(dt: float) -> void:
 ## Honorverse canon, just applying the same v = v_cg + omega x r identity
 ## KinematicsUtils/ShipPhysicsState already use elsewhere).
 ##
-## §33 Formation Leader (this pass): a lost guide (destroyed/removed OR
-## incapacitated -- see TacticalAI.is_guide_lost) now triggers a real
-## succession sequence after a short recognition delay
-## (COMMAND_TRANSFER_DELAY_S) instead of being silently skipped forever
-## -- see the guide-lost branch below and `_transfer_formation_command`.
-## Still NOT modeled: re-issuing/reshaping formation ORDERS (§29) after a
-## leader change (member stations are frozen in place relative to the
-## new guide, not replanned into a fresh geometric wall).
+## §33 Formation Leader: a lost guide (destroyed/removed OR incapacitated
+## -- see TacticalAI.is_guide_lost) triggers a real succession sequence
+## after a short recognition delay (COMMAND_TRANSFER_DELAY_S) instead of
+## being silently skipped forever -- see the guide-lost branch below and
+## `_transfer_formation_command`. §29 Formation Orders (this pass):
+## `_transfer_formation_command` now RE-PLANS surviving members into the
+## formation's originally-designed relative geometry around the new
+## guide (closing the wall), instead of freezing each member wherever it
+## physically happened to be at the moment of transfer -- see
+## FormationState.design_offsets and `_transfer_formation_command`'s doc
+## comment for the mechanism and its honest fallback case.
 ##
 ## Runs BEFORE `_resolve_damage_response` so a critically damaged member
 ## retreating overrides its formation station-keeping thrust for that
@@ -471,22 +474,36 @@ func _resolve_formation_keeping(dt: float) -> void:
 			member.commanded_thrust_local = member.orientation.inverse() * (desired_accel / max_accel)
 
 ## §33 Formation Leader, steps 2-3 ("transfer command" / "update
-## formation state"). Makes `new_guide_id` the formation's guide. Every
-## remaining member's station offset is recomputed to FREEZE its current
-## relative position to the new guide, expressed in the new guide's
-## local/body frame, at the moment of transfer -- rather than reusing
-## offsets that were only ever meaningful relative to the OLD guide's
-## station plan. This avoids the "wall" snapping every member toward a
-## nonsensical position built around the new leader; formation SHAPE as
-## planned (§29 Formation Orders) is not preserved automatically, honestly
-## left as a follow-up (re-issuing formation orders after a leader change
-## is a player/AI decision, not something this transfer invents on its
-## own). The old guide, if it still physically exists (e.g. incapacitated
-## but not destroyed) and is not the new guide, is folded in as an
-## ordinary member under the same freeze-in-place rule -- it keeps
-## flying, just no longer in charge. A former member that no longer
-## exists in `ships` (destroyed) is silently dropped rather than carried
-## forward as a dangling station.
+## formation state") + §29 Formation Orders ("re-plan the wall" after a
+## leader change). Makes `new_guide_id` the formation's guide.
+##
+## The first time ANY transfer happens on a formation, its pre-transfer
+## `member_offsets` (plus the old guide at an implicit ZERO offset) are
+## captured once into `FormationState.design_offsets` -- the formation's
+## ORIGINALLY PLANNED relative geometry, e.g. the spacing of a "wall of
+## battle" -- and never overwritten again by later transfers. Every
+## surviving ship that has a design entry then gets a REPLANNED offset
+## around the new guide: `design_offsets[ship] - design_offsets[new_guide]`,
+## i.e. the same relative geometry the formation was always flying,
+## simply re-centered on whoever is now in the lead (a 3-ship line losing
+## its lead ship closes up into a 2-ship line at the original spacing,
+## rather than snapping to wherever the survivors physically drifted
+## during the recognition delay).
+##
+## Honest fallback: a ship with NO design entry (it joined the formation
+## AFTER a design was already captured, e.g. reinforcements) has no
+## planned geometry to preserve, so it keeps the previous behavior --
+## freeze its actual current position relative to the new guide. When
+## that fallback is used for anyone this call, the resulting offsets are
+## captured as a FRESH design baseline so the NEXT transfer has real
+## geometry to replan from instead of repeating the freeze forever.
+##
+## The old guide, if it still physically exists (e.g. incapacitated but
+## not destroyed) and is not the new guide, is folded in as an ordinary
+## member under the same replan-or-freeze rule -- it keeps flying, just
+## no longer in charge. A former member that no longer exists in `ships`
+## (destroyed) is silently dropped rather than carried forward as a
+## dangling station.
 func _transfer_formation_command(formation: FormationState, new_guide_id: String) -> void:
 	var new_guide: ShipPhysicsState = ships.get(new_guide_id)
 	if new_guide == null:
@@ -496,22 +513,50 @@ func _transfer_formation_command(formation: FormationState, new_guide_id: String
 	var old_member_ids: Array = formation.member_ids()
 	var inverse_orientation: Quaternion = new_guide.orientation.inverse()
 
-	var new_offsets: Dictionary = {}
-	for member_id in old_member_ids:
-		if member_id == new_guide_id:
-			continue
-		var member: ShipPhysicsState = ships.get(member_id)
-		if member == null:
-			continue
-		new_offsets[member_id] = inverse_orientation * (member.position - new_guide.position)
+	# §29: lazily capture the pre-transfer shape as the formation's
+	# permanent "design" the first time a transfer ever happens, so it
+	# survives this and future transfers overwriting `member_offsets`.
+	if formation.design_offsets.is_empty():
+		var design: Dictionary = {old_guide_id: Vector3.ZERO}
+		for member_id in old_member_ids:
+			design[member_id] = formation.member_offsets[member_id]
+		formation.design_offsets = design
 
+	var can_replan: bool = formation.design_offsets.has(new_guide_id)
+	var new_guide_design: Vector3 = formation.design_offsets.get(new_guide_id, Vector3.ZERO)
+
+	var carried_ids: Array = old_member_ids.duplicate()
 	if old_guide_id != new_guide_id and old_guide_id != "" and ships.has(old_guide_id):
-		var old_guide: ShipPhysicsState = ships[old_guide_id]
-		new_offsets[old_guide_id] = inverse_orientation * (old_guide.position - new_guide.position)
+		carried_ids.append(old_guide_id)
+
+	var new_offsets: Dictionary = {}
+	var fully_replanned: bool = can_replan
+	for ship_id in carried_ids:
+		if ship_id == new_guide_id:
+			continue
+		var ship: ShipPhysicsState = ships.get(ship_id)
+		if ship == null:
+			continue
+		if can_replan and formation.design_offsets.has(ship_id):
+			new_offsets[ship_id] = formation.design_offsets[ship_id] - new_guide_design
+		else:
+			fully_replanned = false
+			new_offsets[ship_id] = inverse_orientation * (ship.position - new_guide.position)
 
 	formation.member_offsets = new_offsets
 	formation.guide_ship_id = new_guide_id
 	formation.guide_lost_since = -1.0
+
+	# Honest fallback follow-up: if this transfer couldn't fully replan
+	# from the existing design (some carried ship had no design entry),
+	# the freeze-in-place result becomes the new design baseline so a
+	# FUTURE transfer has real geometry to preserve instead of repeating
+	# the freeze fallback on every single leader change.
+	if not fully_replanned:
+		var refreshed_design: Dictionary = {new_guide_id: Vector3.ZERO}
+		for ship_id in new_offsets.keys():
+			refreshed_design[ship_id] = new_offsets[ship_id]
+		formation.design_offsets = refreshed_design
 
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting

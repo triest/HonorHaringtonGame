@@ -58,6 +58,27 @@ var succession_order: Array = []
 ## SimulationWorld.COMMAND_TRANSFER_DELAY_S.
 var guide_lost_since: float = -1.0
 
+## §29 Formation Orders / §33 Formation Leader (this pass): the ORIGINAL
+## planned formation shape, captured lazily the first time a leader
+## transfer happens (see SimulationWorld._transfer_formation_command).
+## Keyed by ship_id (INCLUDING the original guide, whose own design
+## offset is always Vector3.ZERO) -> Vector3 offset in the design's own
+## rotating frame, exactly as originally passed to `set_station`. Unlike
+## `member_offsets` (which IS overwritten on every transfer to reflect
+## whoever currently holds each station), `design_offsets` deliberately
+## stays fixed across transfers so a leader change can RE-PLAN surviving
+## members into the same relative geometry around the new guide (closing
+## the wall) instead of freezing wherever each ship physically happened
+## to drift to during the recognition delay. Empty until the first
+## transfer -- a formation that never loses its guide never needs this.
+## INTERPRETATION, not canon: no Honorverse source specifies HOW a wall
+## re-forms after a leader is lost; "preserve the planned relative
+## geometry, closing around the new guide" is the most natural reading
+## of formation-keeping doctrine (a "wall of battle" is a *shape*, not a
+## set of absolute stations), not a numeric assumption -- see
+## ASSUMPTIONS.md.
+var design_offsets: Dictionary = {}
+
 func set_station(ship_id: String, offset_local: Vector3) -> void:
 	member_offsets[ship_id] = offset_local
 

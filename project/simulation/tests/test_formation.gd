@@ -269,18 +269,26 @@ func _test_no_fit_successor_leaves_formation_leaderless_without_crashing() -> vo
 	_assert(formation.guide_ship_id == "guide", "with no fit successor anywhere, the formation should keep its (now-invalid) last guide id rather than crash or invent one")
 	_assert(formation.guide_lost_since >= 0.0, "the formation should still honestly record that its guide has been lost, even with no successor available")
 
-func _test_transferred_command_freezes_member_station_relative_to_new_guide() -> void:
+func _test_transferred_command_replans_from_design_not_frozen_actual_position() -> void:
+	# §29 Formation Orders: after a leader transfer, a surviving member's
+	# new station should preserve the formation's ORIGINALLY PLANNED
+	# relative geometry around the new guide, not whichever position the
+	# member actually happened to have drifted to during the recognition
+	# delay. wing2 is deliberately placed far from its planned station
+	# (-500,0,0) -- at (-750,300,0) -- specifically so a "freeze current
+	# position" implementation and a "replan from design" implementation
+	# disagree, and this test can tell them apart.
 	var world := SimulationWorld.new()
 	var guide := _make_ship(Vector3.ZERO)
 	var wing1 := _make_ship(Vector3(500.0, 0, 0))
-	var wing2 := _make_ship(Vector3(-750.0, 300.0, 0))
+	var wing2 := _make_ship(Vector3(-750.0, 300.0, 0))  # off its planned station
 	world.add_ship("guide", guide)
 	world.add_ship("wing1", wing1)
 	world.add_ship("wing2", wing2)
 
 	var formation := world.add_formation("red_wall", "guide")
 	formation.set_station("wing1", Vector3(500.0, 0, 0))
-	formation.set_station("wing2", Vector3(-500.0, 0, 0))  # wing2's OLD station -- not where it actually is
+	formation.set_station("wing2", Vector3(-500.0, 0, 0))  # the planned design
 	formation.set_succession_order(["wing1", "wing2"])
 
 	world.remove_ship("guide")
@@ -288,14 +296,133 @@ func _test_transferred_command_freezes_member_station_relative_to_new_guide() ->
 		world.tick_simulation(1.0 / 60.0)
 
 	_assert(formation.guide_ship_id == "wing1", "sanity: wing1 should have taken over")
-	# wing2's actual position at the moment of transfer was (-750, 300, 0)
-	# and the new guide (wing1) is at (500, 0, 0) with identity
-	# orientation throughout this test (no thrust applied to guide/wing1
-	# before the transfer tick) -- the frozen offset should equal that
-	# true relative position, NOT the stale old-guide-relative station
-	# of (-500, 0, 0).
+	# Design-preserving replan: design_offsets = {guide: 0, wing1: (500,0,0),
+	# wing2: (-500,0,0)}; new guide is wing1, so wing2's replanned offset
+	# is design[wing2] - design[wing1] = (-1000, 0, 0) -- the wall closes
+	# up around wing1 at the ORIGINAL spacing, not wing2's actual drifted
+	# position.
 	var recorded_offset: Vector3 = formation.member_offsets["wing2"]
-	_assert(recorded_offset != Vector3(-500.0, 0, 0), "the member's station offset must be recomputed relative to the NEW guide, not left as the stale old-guide-relative value")
+	_assert(recorded_offset.is_equal_approx(Vector3(-1000.0, 0, 0)), "the member's new station must be replanned from the formation's original design geometry around the new guide")
+	_assert(not recorded_offset.is_equal_approx(Vector3(-500.0, 0, 0)), "must not be left as the stale old-guide-relative value")
+	# Also must not equal a "freeze current actual position" result,
+	# which would have been (-750,300,0) - (500,0,0) = (-1250, 300, 0).
+	_assert(not recorded_offset.is_equal_approx(Vector3(-1250.0, 300.0, 0)), "must not simply freeze wherever the member physically happened to be at the moment of transfer")
+
+func _test_transfer_falls_back_to_freeze_when_new_guide_has_no_design_entry() -> void:
+	# Honest fallback: a ship that joined the formation AFTER a design
+	# was already captured (by an earlier transfer) has no planned
+	# geometry to replan from. If THAT ship becomes guide on a later
+	# transfer, every other carried ship also falls back to a
+	# freeze-in-place offset for that transfer (there is no shared design
+	# to reason about a "closed-up wall" from).
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing1 := _make_ship(Vector3(500.0, 0, 0))
+	var wing2 := _make_ship(Vector3(-500.0, 0, 0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing1", wing1)
+	world.add_ship("wing2", wing2)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing1", Vector3(500.0, 0, 0))
+	formation.set_station("wing2", Vector3(-500.0, 0, 0))
+	formation.set_succession_order(["wing1", "wing2"])
+
+	# First transfer: guide destroyed, wing1 takes over. This captures
+	# design_offsets = {guide: 0, wing1: (500,0,0), wing2: (-500,0,0)}.
+	world.remove_ship("guide")
+	for i in range(400):
+		world.tick_simulation(1.0 / 60.0)
+	_assert(formation.guide_ship_id == "wing1", "sanity: first transfer should hand command to wing1")
+
+	# A late-joining reinforcement with NO design entry -- added directly
+	# to the live formation after the design snapshot above already
+	# happened.
+	var latecomer := _make_ship(Vector3(200.0, 0.0, 900.0))
+	world.add_ship("latecomer", latecomer)
+	formation.set_station("latecomer", Vector3(0.0, 0.0, 1000.0))
+	formation.set_succession_order(["latecomer", "wing2"])
+
+	# Second transfer: wing1 (the current guide) is now destroyed, and
+	# latecomer -- which has no design entry -- takes over.
+	world.remove_ship("wing1")
+	for i in range(400):
+		world.tick_simulation(1.0 / 60.0)
+
+	_assert(formation.guide_ship_id == "latecomer", "sanity: latecomer should take over as the new guide")
+	# latecomer has no design entry, so this transfer must fall back to
+	# freezing wing2's ACTUAL position relative to latecomer's ACTUAL
+	# position (both identity-oriented, never thrust off their spawn
+	# points in this test), rather than crashing or computing nonsense
+	# from a design that doesn't describe latecomer at all.
+	var expected_wing2_offset: Vector3 = wing2.position - latecomer.position
+	var recorded_wing2_offset: Vector3 = formation.member_offsets["wing2"]
+	_assert(recorded_wing2_offset.is_equal_approx(expected_wing2_offset), "with no design entry for the new guide, the transfer must honestly fall back to freezing the member's actual current position")
+
+func _test_second_transfer_replans_from_refreshed_design_after_fallback() -> void:
+	# Continuation of the fallback case: once a fallback transfer has
+	# happened (because the new guide had no design entry), its
+	# freeze-in-place result becomes a FRESH design baseline -- a THIRD
+	# transfer starting from that refreshed state should once again
+	# replan geometrically (from the refreshed design), not fall back
+	# again just because an ancestor transfer had to.
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing1 := _make_ship(Vector3(500.0, 0, 0))
+	var wing2 := _make_ship(Vector3(-500.0, 0, 0))
+	var wing3 := _make_ship(Vector3(0.0, 0.0, -1000.0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing1", wing1)
+	world.add_ship("wing2", wing2)
+	world.add_ship("wing3", wing3)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing1", Vector3(500.0, 0, 0))
+	formation.set_station("wing2", Vector3(-500.0, 0, 0))
+	formation.set_station("wing3", Vector3(0.0, 0.0, -1000.0))
+	formation.set_succession_order(["wing1", "wing2", "wing3"])
+
+	# Transfer 1 (fully replanned -- everyone here has a design entry,
+	# captured from this very setup): guide destroyed, wing1 takes over.
+	world.remove_ship("guide")
+	for i in range(400):
+		world.tick_simulation(1.0 / 60.0)
+	_assert(formation.guide_ship_id == "wing1", "sanity: wing1 should take over first")
+
+	# A late-joining reinforcement, added only AFTER the design snapshot
+	# above already happened -- it has no design entry.
+	var latecomer := _make_ship(Vector3(2000.0, 0.0, 0.0))
+	world.add_ship("latecomer", latecomer)
+	formation.set_station("latecomer", Vector3(1500.0, 0.0, 0.0))
+	formation.set_succession_order(["latecomer", "wing2", "wing3"])
+
+	# Transfer 2 (fallback -- latecomer has no design entry): wing1 (the
+	# current guide) is destroyed, latecomer takes over. Every carried
+	# ship (wing2, wing3) falls back to a frozen actual-position offset,
+	# and that result becomes the NEW design baseline.
+	world.remove_ship("wing1")
+	for i in range(400):
+		world.tick_simulation(1.0 / 60.0)
+	_assert(formation.guide_ship_id == "latecomer", "sanity: latecomer should take over second (fallback transfer)")
+	_assert(formation.design_offsets.has("wing2") and formation.design_offsets.has("wing3"), "a fallback transfer must refresh the design baseline to include every surviving ship")
+
+	# Capture the refreshed design baseline exactly as the fallback left
+	# it, before the next transfer can (correctly) leave it untouched.
+	var refreshed_wing2_design: Vector3 = formation.design_offsets["wing2"]
+	var refreshed_wing3_design: Vector3 = formation.design_offsets["wing3"]
+
+	# Transfer 3: latecomer (current guide) is destroyed, wing2 takes
+	# over. wing2 now HAS a design entry (from the transfer-2 refresh),
+	# so this transfer should replan wing3 geometrically from that
+	# refreshed baseline rather than falling back a second time.
+	world.remove_ship("latecomer")
+	for i in range(400):
+		world.tick_simulation(1.0 / 60.0)
+	_assert(formation.guide_ship_id == "wing2", "sanity: wing2 should take over third")
+
+	var expected_wing3_offset: Vector3 = refreshed_wing3_design - refreshed_wing2_design
+	var recorded_wing3_offset: Vector3 = formation.member_offsets["wing3"]
+	_assert(recorded_wing3_offset.is_equal_approx(expected_wing3_offset), "a transfer following a fallback must replan from the REFRESHED design baseline, not fall back again")
 
 func _test_rotating_guide_sweeps_station_and_member_gets_matching_thrust() -> void:
 	# Milestone 10 (this pass): the guide's ANGULAR velocity must be part
@@ -364,7 +491,9 @@ func _init() -> void:
 	_test_incapacitated_guide_skips_also_incapacitated_first_in_line()
 	_test_default_succession_falls_back_to_member_list_when_unset()
 	_test_no_fit_successor_leaves_formation_leaderless_without_crashing()
-	_test_transferred_command_freezes_member_station_relative_to_new_guide()
+	_test_transferred_command_replans_from_design_not_frozen_actual_position()
+	_test_transfer_falls_back_to_freeze_when_new_guide_has_no_design_entry()
+	_test_second_transfer_replans_from_refreshed_design_after_fallback()
 	_test_rotating_guide_sweeps_station_and_member_gets_matching_thrust()
 	_test_member_already_tracking_guide_rotation_gets_no_spurious_thrust()
 

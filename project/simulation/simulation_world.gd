@@ -63,9 +63,30 @@ var formations: Dictionary = {}       # formation_id -> FormationState (§27/§2
 ## contacts. See TacticalAI.is_critically_damaged / select_retreat_vector_world.
 const CRITICAL_HULL_FRACTION: float = 0.3
 
+## ASSUMPTION (§33 Formation Leader, step 4 "account for communication
+## limitations" -- see FormationState.guide_lost_since for why this is
+## deliberately NOT a light-speed command-lag figure per CANON_RULES.md
+## §7). Seconds a formation waits, after its guide is first observed
+## lost/incapacitated, before formally transferring command to a
+## successor. Represents subordinate crews recognizing the loss and
+## executing succession doctrine, not instant telepathic reorganization.
+## No canonical Honorverse figure exists for this -- chosen as a small,
+## game-feel value (a few seconds at 1x time scale) rather than tuned
+## against any source.
+const COMMAND_TRANSFER_DELAY_S: float = 3.0
+
 var missiles: Dictionary = {}         # missile_id -> MissileState
 var missile_owners: Dictionary = {}   # missile_id -> owning ship_id (String, may be "")
 var _next_ai_missile_id: int = 0      # counter for AI-launched missile ids (see _resolve_missile_launch_ai)
+
+## Total simulated time accumulated purely by successive `tick_simulation(dt)`
+## calls (§43 Deterministic Simulation). Deliberately independent of
+## `clock.sim_time` / the SceneTree, because tests (and any future
+## scenario runner) call `tick_simulation` directly without a running
+## Node tree, where `clock` is never initialized (`_ready()` never
+## fires). Used by `_resolve_formation_keeping` to time
+## COMMAND_TRANSFER_DELAY_S.
+var world_sim_time: float = 0.0
 
 func _ready() -> void:
 	clock = SimClock.new()
@@ -175,6 +196,7 @@ func _on_simulation_tick(dt: float, _tick: int, _sim_time: float) -> void:
 ## method (not gated behind the SimClock/Node signal) so tests -- and any
 ## future scenario runner -- can drive it directly without a SceneTree.
 func tick_simulation(dt: float) -> void:
+	world_sim_time += dt
 	_cleanup_inactive_missiles()
 	_update_sensors(dt)
 	_update_missiles(dt)
@@ -278,11 +300,18 @@ func _resolve_point_defense(dt: float) -> void:
 ## K_P_STATION/K_D_STATION are an engineering PD-controller tuning
 ## choice (heavily overdamped -- no canonical Honorverse station-keeping
 ## formula exists), not itself Honorverse canon -- see ASSUMPTIONS.md.
-## Still NOT modeled (open items, unchanged from the first slice): the
+## Still NOT modeled (open item, unchanged from the first slice): the
 ## guide's own ANGULAR velocity sweeping a nonzero-offset slot through an
-## arc (this only matches the guide's LINEAR velocity), and a fallback/
-## succession when the guide ship no longer exists (still simply skipped
-## this tick; §33 leader succession remains open).
+## arc (this only matches the guide's LINEAR velocity).
+##
+## §33 Formation Leader (this pass): a lost guide (destroyed/removed OR
+## incapacitated -- see TacticalAI.is_guide_lost) now triggers a real
+## succession sequence after a short recognition delay
+## (COMMAND_TRANSFER_DELAY_S) instead of being silently skipped forever
+## -- see the guide-lost branch below and `_transfer_formation_command`.
+## Still NOT modeled: re-issuing/reshaping formation ORDERS (§29) after a
+## leader change (member stations are frozen in place relative to the
+## new guide, not replanned into a fresh geometric wall).
 ##
 ## Runs BEFORE `_resolve_damage_response` so a critically damaged member
 ## retreating overrides its formation station-keeping thrust for that
@@ -293,6 +322,29 @@ func _resolve_formation_keeping(dt: float) -> void:
 
 	for formation_id in formations.keys():
 		var formation: FormationState = formations[formation_id]
+
+		# §33 Formation Leader: guide destroyed/incapacitated handling
+		# comes BEFORE ordinary station-keeping below, since a lost guide
+		# means there is (for now) nobody to keep station on at all.
+		if TacticalAI.is_guide_lost(formation.guide_ship_id, ships, hulls, CRITICAL_HULL_FRACTION):
+			if formation.guide_lost_since < 0.0:
+				formation.guide_lost_since = world_sim_time
+			elif world_sim_time - formation.guide_lost_since >= COMMAND_TRANSFER_DELAY_S:
+				var successor_id: String = TacticalAI.select_formation_successor(formation, ships, hulls, CRITICAL_HULL_FRACTION)
+				if successor_id != "":
+					_transfer_formation_command(formation, successor_id)
+				# else: nobody left fit to lead -- §33 "do not magically
+				# transfer information unavailable to subordinate ships"
+				# means there is honestly nobody to hand command to; the
+				# formation holds silently (no station-keeping thrust)
+				# rather than inventing a successor.
+			# Either way (still within the recognition delay, or just
+			# transferred/failed to transfer this tick), skip ordinary
+			# station-keeping for this formation this tick.
+			continue
+		else:
+			formation.guide_lost_since = -1.0
+
 		var guide: ShipPhysicsState = ships.get(formation.guide_ship_id)
 		if guide == null:
 			continue
@@ -327,6 +379,49 @@ func _resolve_formation_keeping(dt: float) -> void:
 				desired_accel = desired_accel.normalized() * max_accel
 
 			member.commanded_thrust_local = member.orientation.inverse() * (desired_accel / max_accel)
+
+## §33 Formation Leader, steps 2-3 ("transfer command" / "update
+## formation state"). Makes `new_guide_id` the formation's guide. Every
+## remaining member's station offset is recomputed to FREEZE its current
+## relative position to the new guide, expressed in the new guide's
+## local/body frame, at the moment of transfer -- rather than reusing
+## offsets that were only ever meaningful relative to the OLD guide's
+## station plan. This avoids the "wall" snapping every member toward a
+## nonsensical position built around the new leader; formation SHAPE as
+## planned (§29 Formation Orders) is not preserved automatically, honestly
+## left as a follow-up (re-issuing formation orders after a leader change
+## is a player/AI decision, not something this transfer invents on its
+## own). The old guide, if it still physically exists (e.g. incapacitated
+## but not destroyed) and is not the new guide, is folded in as an
+## ordinary member under the same freeze-in-place rule -- it keeps
+## flying, just no longer in charge. A former member that no longer
+## exists in `ships` (destroyed) is silently dropped rather than carried
+## forward as a dangling station.
+func _transfer_formation_command(formation: FormationState, new_guide_id: String) -> void:
+	var new_guide: ShipPhysicsState = ships.get(new_guide_id)
+	if new_guide == null:
+		return  # should not happen (caller already validated), safe no-op
+
+	var old_guide_id: String = formation.guide_ship_id
+	var old_member_ids: Array = formation.member_ids()
+	var inverse_orientation: Quaternion = new_guide.orientation.inverse()
+
+	var new_offsets: Dictionary = {}
+	for member_id in old_member_ids:
+		if member_id == new_guide_id:
+			continue
+		var member: ShipPhysicsState = ships.get(member_id)
+		if member == null:
+			continue
+		new_offsets[member_id] = inverse_orientation * (member.position - new_guide.position)
+
+	if old_guide_id != new_guide_id and old_guide_id != "" and ships.has(old_guide_id):
+		var old_guide: ShipPhysicsState = ships[old_guide_id]
+		new_offsets[old_guide_id] = inverse_orientation * (old_guide.position - new_guide.position)
+
+	formation.member_offsets = new_offsets
+	formation.guide_ship_id = new_guide_id
+	formation.guide_lost_since = -1.0
 
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting

@@ -155,3 +155,54 @@ static func select_retreat_vector_world(ship, contacts: Dictionary, hostile_ship
 	if count == 0:
 		return Vector3.ZERO
 	return away_sum.normalized()
+
+## §33 Formation Leader, "destroyed or incapacitated". A formation guide
+## (or any candidate successor -- this is used for both) is considered
+## LOST if it no longer physically exists in the simulation's `ships`
+## (destroyed and removed, see SimulationWorld.remove_ship) OR its
+## tracked HullState (if any) is fully destroyed OR it is critically
+## damaged by the SAME threshold already used for §26 "respond to
+## damage"/retreat (`is_critically_damaged`) -- deliberately reusing one
+## "too hurt to function normally" definition rather than inventing a
+## second, unrelated one for command purposes. A ship with no HullState
+## tracked (`hulls.get()` returns null) is treated as never incapacitated
+## by this rule, same convention as `is_critically_damaged` itself.
+static func is_guide_lost(guide_ship_id: String, ships: Dictionary, hulls: Dictionary, critical_threshold: float = 0.3) -> bool:
+	if guide_ship_id == "" or not ships.has(guide_ship_id):
+		return true
+	var hull = hulls.get(guide_ship_id)
+	if hull == null:
+		return false
+	if hull.is_destroyed():
+		return true
+	return is_critically_damaged(hull, critical_threshold)
+
+## §33 step 1, "determine successor". Walks `formation.succession_order`
+## (or, if that is empty, `formation.member_offsets.keys()` in their
+## existing deterministic order -- see FormationState class docs) and
+## returns the first candidate that is not the formation's own current
+## (lost) guide, and is itself not lost by `is_guide_lost` above. Returns
+## "" if nobody currently in the formation is fit to lead -- callers must
+## handle that case explicitly (§33: "do not magically transfer
+## information unavailable to subordinate ships" -- there being no valid
+## successor is a real, honestly-representable outcome, not an error).
+## Reads ONLY `ships`/`hulls` true state, never SensorContact -- this is
+## intra-formation bookkeeping between FRIENDLY ships assumed to share a
+## tactical link (see FormationState class docs "not a 'no cheat vision'
+## situation"), not detection of a potentially hostile contact under §26.
+## Does NOT mutate `formation` -- the caller applies the actual transfer.
+static func select_formation_successor(formation, ships: Dictionary, hulls: Dictionary, critical_threshold: float = 0.3) -> String:
+	var candidates: Array = formation.succession_order
+	if candidates.is_empty():
+		candidates = formation.member_offsets.keys()
+
+	for candidate_id in candidates:
+		if candidate_id == formation.guide_ship_id:
+			continue
+		if not ships.has(candidate_id):
+			continue
+		if is_guide_lost(candidate_id, ships, hulls, critical_threshold):
+			continue
+		return candidate_id
+
+	return ""

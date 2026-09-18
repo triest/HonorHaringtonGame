@@ -29,6 +29,35 @@ var guide_ship_id: String = ""
 ## guide, not fixed to world axes). The guide itself is never a key here.
 var member_offsets: Dictionary = {}
 
+## §33 Formation Leader: explicit chain-of-command order (ship_id) used
+## by SimulationWorld/TacticalAI to pick a successor if the current guide
+## is destroyed or incapacitated ("determine successor", step 1 of §33).
+## Empty (the default) means "no curated chain of command was set for
+## this formation" -- the caller then falls back to
+## `member_offsets.keys()` in their existing deterministic Dictionary
+## insertion order (§43 Deterministic Simulation: no RNG, no reliance on
+## time-of-day). Does not have to list every member -- an id missing from
+## here simply is never considered before the fallback list.
+var succession_order: Array = []
+
+## §33 step 4 ("account for communication limitations"). Set by
+## SimulationWorld to the accumulated simulation time (SimulationWorld's
+## own tick-accumulated clock, NOT wall time -- see
+## SimulationWorld.world_sim_time) at which the CURRENT guide was first
+## observed lost/incapacitated, or -1.0 while the guide is fine. This is
+## deliberately NOT modeling the speed-of-light command lag described in
+## CANON_RULES.md §7 ("Command Lag") -- that concerns fleet actions
+## across millions of kilometers, where light-lag is seconds to minutes;
+## at this project's current 1v1/few-ship tactical ranges (kilometers to
+## low tens of thousands of km) true light-lag is a small fraction of a
+## second and not worth a dedicated mechanic yet. What this DOES model,
+## honestly labeled as an ASSUMPTION engineering choice (see
+## ASSUMPTIONS.md), is a short crew recognition/succession-procedure
+## delay: subordinates do not instantly know the moment their guide goes
+## silent and instantly reorganize -- see
+## SimulationWorld.COMMAND_TRANSFER_DELAY_S.
+var guide_lost_since: float = -1.0
+
 func set_station(ship_id: String, offset_local: Vector3) -> void:
 	member_offsets[ship_id] = offset_local
 
@@ -37,3 +66,9 @@ func remove_member(ship_id: String) -> void:
 
 func member_ids() -> Array:
 	return member_offsets.keys()
+
+## §33: set (or replace) the explicit chain-of-command order. Duplicated
+## defensively so later mutation of the caller's array does not silently
+## change this formation's succession behind its back.
+func set_succession_order(order: Array) -> void:
+	succession_order = order.duplicate()

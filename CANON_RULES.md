@@ -450,3 +450,56 @@ BUILD.md/CANON_RULES.md/CHANGELOG.md/CLOUD.md/README.md) через `diff`:
 физике, только продекларировано в ТЗ. См. соответствующую запись в
 ASSUMPTIONS.md — открытый пункт для будущего прохода (вероятно,
 Milestone 8/дальнейшая доработка Ship Database, §8/§48).
+
+
+---
+
+## Двенадцатая сверка — Wall of Battle / Command Lag (§33 Formation Leader, по запросу перепроверки из "Второй сверки")
+
+Перепроверка отложенного пункта ("Wall-of-battle формация / command lag
+со скоростью света" — ранее статус INTERPRETATION, см. "Вторая сверка"
+выше, с пометкой "перепроверить при реализации Milestone формаций/AI",
+что и происходит в этом Milestone-проходе).
+
+* **Wall of Battle — CONFIRMED CANON.** Wikipedia-контент-зеркало
+  (en-academic.com, отражающее статью "Spacecraft in the Honorverse")
+  прямой цитатой: "The most common fleet battle formation is the 'wall
+  of battle' in which the vulnerable bow and stern of the ships present
+  are perpendicular to the enemy's weapons." Подтверждает уже
+  реализованную мотивацию (§61, ARCHITECTURE.md) — строй существует,
+  чтобы прикрыть уязвимые нос/корму бортовыми sidewall'ами, подставив
+  врагу защищённые борта. Статус повышен: INTERPRETATION → **CONFIRMED
+  CANON**.
+* **Command Lag (скорость-света задержка команд) — статус НЕ изменён,
+  остаётся INTERPRETATION.** Прямая cURL/WebFetch-проверка
+  honorverse.fandom.com (основной источник CANON_RULES.md для этой темы)
+  вернула HTTP 402 в этой сессии на нескольких релевантных страницах
+  (та же проблема, что и в "Вторая сверка" для gravitic sensor) —
+  недоступно для перепроверки этим способом сейчас. Веб-поиск нашёл
+  косвенно релевантный канонический термин **COLAC** (Combined Local
+  Attack Coordination — координация огня по цели между кораблями
+  эскадры в бою) как реальную механику Honorverse, но НЕ удалось
+  получить содержимое его wiki-страницы (тот же HTTP 402) для проверки,
+  упоминает ли она явно задержку по скорости света. Пункт 7 верхнего
+  списка CANON_RULES.md ("Command Lag: Orders are bound by the speed of
+  light") остаётся НЕ подтверждён прямой цитатой ни в этой, ни в
+  предыдущей сверке — статус явно понижается с ошибочного [CANON] тега
+  секции (унаследованного от общего заголовка "7. FORMATIONS & COMMAND
+  HIERARCHY [CANON]", который относится к секции целиком, а не к каждому
+  отдельному пункту) до **INTERPRETATION**: правдоподобно (реальный
+  термин "light-speed lag" используется в жанре и, по косвенным
+  признакам поиска, в самой серии), но без прямой цитаты источника в
+  руках. НЕ ИСПОЛЬЗОВАТЬ как обоснование для точной цифры задержки —
+  см. ASSUMPTIONS.md: `COMMAND_TRANSFER_DELAY_S` в реализации §33 —
+  ЯВНО инженерная константа (процедура распознавания потери командира
+  экипажем), НЕ модель задержки по скорости света, чтобы не путать эти
+  два разных, но тематически смежных понятия.
+
+Источники:
+- https://en-academic.com/dic.nsf/enwiki/2910958 (зеркало "Spacecraft in
+  the Honorverse", прямая цитата про wall of battle получена)
+- https://honorverse.fandom.com/wiki/COLAC (существование страницы
+  подтверждено поиском, содержимое НЕ получено — HTTP 402)
+- https://honorverse.fandom.com/wiki/Honorverse:Wikipedia_content/Spacecraft_in_the_Honorverse
+  (то же зеркало на fandom, НЕ получено напрямую — HTTP 402, использован
+  en-academic.com зеркало вместо этого)

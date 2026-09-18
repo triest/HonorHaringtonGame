@@ -53,6 +53,12 @@ var ecm_states: Dictionary = {}       # ship_id -> ECMState (optional)
 var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> SensorContact]
 var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: minimal hostility model, see class doc)
 
+## ASSUMPTION (§26 "retreat"/"disengage", no canonical figure found): a
+## ship whose HullState integrity fraction drops to or below this stops
+## firing offensively and instead thrusts away from its known hostile
+## contacts. See TacticalAI.is_critically_damaged / select_retreat_vector_world.
+const CRITICAL_HULL_FRACTION: float = 0.3
+
 var missiles: Dictionary = {}         # missile_id -> MissileState
 var missile_owners: Dictionary = {}   # missile_id -> owning ship_id (String, may be "")
 
@@ -151,6 +157,7 @@ func tick_simulation(dt: float) -> void:
 	_update_missiles(dt)
 	_resolve_counter_missile_intercepts()
 	_resolve_point_defense(dt)
+	_resolve_damage_response(dt)
 	_resolve_weapons_ai(dt)
 	_integrate_ships(dt)
 
@@ -235,6 +242,29 @@ func _resolve_point_defense(dt: float) -> void:
 		for mount in mounts:
 			PointDefenseResolution.engage(mount, ship, target_missile, dt, target_contact)
 
+## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
+## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting
+## toward the fight and instead thrusts directly away from its own known
+## (sensor-contact-based, no cheat vision) hostile contacts. If it has no
+## usable hostile contact to retreat from, its commanded thrust is left
+## untouched (there is nothing sensor-honest to retreat FROM yet).
+## Firing is suppressed for a disengaging ship in `_resolve_weapons_ai`
+## (checked there via the same `is_critically_damaged` call), not here --
+## this function only handles movement.
+func _resolve_damage_response(dt: float) -> void:
+	for ship_id in ships.keys():
+		var hull = hulls.get(ship_id)
+		if not TacticalAI.is_critically_damaged(hull, CRITICAL_HULL_FRACTION):
+			continue
+
+		var ship: ShipPhysicsState = ships[ship_id]
+		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+		var hostile_ids: Array = _hostile_ship_ids(ship_id)
+		var away_world: Vector3 = TacticalAI.select_retreat_vector_world(ship, contacts, hostile_ids)
+		if away_world == Vector3.ZERO:
+			continue
+		ship.commanded_thrust_local = ship.orientation.inverse() * away_world
+
 ## ТЗ §17 Weapons + §26 Tactical AI ("select targets" / "use weapons").
 ## Each ship with at least one weapon mount and a team assigned picks the
 ## nearest usable hostile contact (via `TacticalAI.select_weapon_target`,
@@ -248,6 +278,8 @@ func _resolve_weapons_ai(dt: float) -> void:
 			continue
 		if not teams.has(ship_id) or teams[ship_id] == "":
 			continue
+		if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
+			continue  # disengaging -- see _resolve_damage_response
 
 		var ship: ShipPhysicsState = ships[ship_id]
 		var contacts: Dictionary = sensor_contacts.get(ship_id, {})

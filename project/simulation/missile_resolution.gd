@@ -31,12 +31,19 @@ extends RefCounted
 ##   direction) rather than a bug; the independent resolution exists so
 ##   per-rod damage/outcome is real, auditable simulation state, not a
 ##   hidden multiplier.
+##
+## ТЗ §25 Damage: optional `target_subsystems` (the TARGET's
+## ShipSubsystems) lets each rod's penetrating damage also degrade a
+## subsystem via SubsystemDamageResolution, using that same rod's own
+## resolved sector. Omitting it (the default) keeps pre-§25 behavior
+## (hull damage only) -- every existing caller/test is unaffected.
 class_name MissileResolution
 
 const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const MissileState = preload("res://simulation/missile_state.gd")
 const LasingRod = preload("res://simulation/lasing_rod.gd")
 const DamageType = preload("res://simulation/damage_type.gd")
+const SubsystemDamageResolution = preload("res://simulation/subsystem_damage_resolution.gd")
 
 enum Outcome { NOT_ARMED, ALREADY_DETONATED, NO_TARGET, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, HIT_UNPROTECTED }
 
@@ -54,11 +61,13 @@ class DetonationResult:
 	var outcome: int
 	var damage_dealt: float = 0.0
 	var rod_results: Array = []  # Array[RodResult]
+	var subsystem_damage: Dictionary = {}  # SubsystemType.Type -> total condition_loss across all rods, if target_subsystems was passed
 
-	func _init(p_outcome: int, p_damage: float = 0.0, p_rod_results: Array = []) -> void:
+	func _init(p_outcome: int, p_damage: float = 0.0, p_rod_results: Array = [], p_subsystem_damage: Dictionary = {}) -> void:
 		outcome = p_outcome
 		damage_dealt = p_damage
 		rod_results = p_rod_results
+		subsystem_damage = p_subsystem_damage
 
 ## Computes the world-space positions the missile's lasing rods take up at
 ## detonation: a fan of `missile.rod_count` points, each `rod_offset_m`
@@ -94,8 +103,11 @@ static func compute_rod_positions(missile) -> Array:
 
 ## Call once, when missile.warhead_armed is true and it should detonate
 ## this tick. target_hull: HullState to damage (may be null to skip
-## damage application, e.g. for a dry-run check).
-static func resolve_detonation(missile, target_hull) -> DetonationResult:
+## damage application, e.g. for a dry-run check). target_subsystems:
+## optional ShipSubsystems (ТЗ §25) belonging to missile.target; when
+## provided, each rod's penetrating damage also degrades a
+## sector-appropriate subsystem.
+static func resolve_detonation(missile, target_hull, target_subsystems = null) -> DetonationResult:
 	if missile.has_detonated:
 		return DetonationResult.new(Outcome.ALREADY_DETONATED)
 	if not missile.warhead_armed:
@@ -115,12 +127,16 @@ static func resolve_detonation(missile, target_hull) -> DetonationResult:
 	var total_damage: float = 0.0
 	var any_unprotected: bool = false
 	var any_attenuated: bool = false
+	var subsystem_damage_totals: Dictionary = {}
 
 	for rod_position in rod_positions:
 		if defense == null:
 			rod_results.append(RodResult.new(null, Outcome.HIT_UNPROTECTED, damage_per_rod))
 			total_damage += damage_per_rod
 			any_unprotected = true
+			var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, damage_per_rod, null)
+			for k in sub_damage:
+				subsystem_damage_totals[k] = subsystem_damage_totals.get(k, 0.0) + sub_damage[k]
 			continue
 
 		# ТЗ §21.25 CANON: laserhead penetrates sidewalls more effectively than
@@ -141,6 +157,10 @@ static func resolve_detonation(missile, target_hull) -> DetonationResult:
 
 		rod_results.append(RodResult.new(resolution.sector, rod_outcome, rod_damage))
 
+		var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, rod_damage, resolution.sector)
+		for k in sub_damage:
+			subsystem_damage_totals[k] = subsystem_damage_totals.get(k, 0.0) + sub_damage[k]
+
 	if total_damage > 0.0 and target_hull != null:
 		target_hull.apply_damage(total_damage)
 
@@ -150,4 +170,4 @@ static func resolve_detonation(missile, target_hull) -> DetonationResult:
 	elif any_attenuated:
 		overall_outcome = Outcome.SIDEWALL_ATTENUATED
 
-	return DetonationResult.new(overall_outcome, total_damage, rod_results)
+	return DetonationResult.new(overall_outcome, total_damage, rod_results, subsystem_damage_totals)

@@ -6,10 +6,18 @@ extends RefCounted
 ##
 ## Deliberately a static utility, not a node: keeps combat resolution in
 ## "Simulation" per §42, independent of rendering/UI/timers.
+##
+## ТЗ §25 Damage: optional `target_subsystems` (the TARGET's
+## ShipSubsystems) lets a penetrating hit also degrade a subsystem via
+## SubsystemDamageResolution, using the same `resolution.sector` already
+## computed for wedge/sidewall purposes. Omitting it (the default) keeps
+## pre-§25 behavior (hull damage only) -- every existing caller/test is
+## unaffected.
 class_name WeaponResolution
 
 const AttackGeometry = preload("res://simulation/attack_geometry.gd")
 const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
+const SubsystemDamageResolution = preload("res://simulation/subsystem_damage_resolution.gd")
 
 enum Outcome { OUT_OF_RANGE, NOT_READY, NO_ARC, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, HIT_UNPROTECTED }
 
@@ -17,16 +25,21 @@ class ShotResult:
 	var outcome: int
 	var damage_dealt: float = 0.0
 	var target_sector  # AttackGeometry.Sector, if the shot got far enough to be classified
+	var subsystem_damage: Dictionary = {}  # SubsystemType.Type -> condition_loss, if target_subsystems was passed
 
-	func _init(p_outcome: int, p_damage: float = 0.0, p_sector = null) -> void:
+	func _init(p_outcome: int, p_damage: float = 0.0, p_sector = null, p_subsystem_damage: Dictionary = {}) -> void:
 		outcome = p_outcome
 		damage_dealt = p_damage
 		target_sector = p_sector
+		subsystem_damage = p_subsystem_damage
 
 ## attacker_ship / target_ship: ShipPhysicsState. mount: WeaponMount owned by
 ## attacker_ship. target_defense: target_ship.defense (may be null).
 ## target_hull: HullState to apply damage to, if the shot penetrates.
-static func fire(attacker_ship, mount, target_ship, target_hull) -> ShotResult:
+## target_subsystems: optional ShipSubsystems (ТЗ §25) belonging to
+## target_ship; when provided, a penetrating hit also degrades a
+## sector-appropriate subsystem (see SubsystemDamageResolution).
+static func fire(attacker_ship, mount, target_ship, target_hull, target_subsystems = null) -> ShotResult:
 	if mount == null or mount.weapon == null:
 		return ShotResult.new(Outcome.NOT_READY)
 
@@ -54,7 +67,8 @@ static func fire(attacker_ship, mount, target_ship, target_hull) -> ShotResult:
 		var full_damage: float = mount.weapon.damage_per_hit * mount.condition
 		if target_hull != null:
 			target_hull.apply_damage(full_damage)
-		return ShotResult.new(Outcome.HIT_UNPROTECTED, full_damage)
+		var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, full_damage, null)
+		return ShotResult.new(Outcome.HIT_UNPROTECTED, full_damage, null, sub_damage)
 
 	var resolution = defense.resolve_attack(attacker_ship.position, target_ship.position, target_ship.orientation, ShipDefenseState.DamageType.Type.ENERGY)
 	var damage: float = mount.weapon.damage_per_hit * mount.condition * resolution.transmitted_fraction
@@ -68,4 +82,5 @@ static func fire(attacker_ship, mount, target_ship, target_hull) -> ShotResult:
 	elif resolution.kind == ShipDefenseState.ResolutionKind.SIDEWALL_ATTENUATED:
 		outcome = Outcome.SIDEWALL_ATTENUATED
 
-	return ShotResult.new(outcome, damage, resolution.sector)
+	var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, damage, resolution.sector)
+	return ShotResult.new(outcome, damage, resolution.sector, sub_damage)

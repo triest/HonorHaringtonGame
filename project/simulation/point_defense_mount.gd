@@ -35,6 +35,34 @@ var _tracking_target = null       # the MissileState currently being engaged, if
 var _tracking_time_s: float = 0.0
 var _hits_scored: int = 0
 
+## ТЗ §25 continuous subsystem-damage falloff (closes the "hard on/off,
+## not continuous" gap this mount's `condition` field previously had --
+## see ASSUMPTIONS.md/CHANGELOG.md). Two degradation shapes, both already
+## established elsewhere in this codebase rather than invented fresh
+## here: EFFECTIVE RANGE scales linearly with `condition` (same model as
+## `ECMState.jamming_range_multiplier` and
+## `CounterMissileResolution.check_intercept()`'s condition-scaled
+## intercept radius); reaction/recharge TIMING scales inversely with
+## `condition` (a damaged fire-control/tracking system takes
+## proportionally longer to acquire a lock and cycle between shots, not
+## merely a shorter reach). `condition <= 0.0` is unreachable through
+## these getters in the live sim -- `is_ready()` already hard-gates
+## engagement at `condition <= 0.0` before `PointDefenseResolution` ever
+## reads them -- but each getter still floors `condition` defensively so
+## a direct/test call never divides by zero or returns a negative range.
+## INTERPRETATION, not canon: no canonical source describes HOW PD
+## degrades under partial damage, only that damage matters (§22/§25).
+const _MIN_CONDITION_FOR_TIMING: float = 0.05
+
+func effective_reaction_time_s() -> float:
+	return reaction_time_s / maxf(condition, _MIN_CONDITION_FOR_TIMING)
+
+func effective_recharge_time_s() -> float:
+	return recharge_time_s / maxf(condition, _MIN_CONDITION_FOR_TIMING)
+
+func effective_engagement_range_m() -> float:
+	return max_engagement_range_m * maxf(condition, 0.0)
+
 func tick_cooldown(dt: float) -> void:
 	if cooldown_remaining_s > 0.0:
 		cooldown_remaining_s = maxf(0.0, cooldown_remaining_s - dt)

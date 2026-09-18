@@ -29,11 +29,14 @@ extends RefCounted
 ## should eventually do): ECM does not yet degrade PD accuracy/tracking.
 ## `condition` IS now degraded by ship subsystem damage (§25) -- see
 ## SimulationWorld._sync_subsystem_driven_conditions(), which syncs it from
-## the mounting ship's own POINT_DEFENSE subsystem every tick -- but only as
-## a hard on/off at `condition <= 0.0` via `PointDefenseMount.is_ready()`,
-## not a continuous accuracy/reaction-time falloff in between; that finer
-## degradation remains a documented TODO. These are real, named gaps, not
-## silently skipped.
+## the mounting ship's own POINT_DEFENSE subsystem every tick -- as BOTH a
+## hard on/off at `condition <= 0.0` via `PointDefenseMount.is_ready()`
+## AND, for any condition in between, a continuous falloff read through
+## `PointDefenseMount.effective_reaction_time_s()` /
+## `effective_recharge_time_s()` / `effective_engagement_range_m()`
+## (reaction/recharge slower, effective range shorter, the more damaged
+## the mount is). ECM still does not degrade PD accuracy/tracking -- that
+## remains a real, named, un-implemented gap, not silently skipped.
 class_name PointDefenseResolution
 
 const MissileState = preload("res://simulation/missile_state.gd")
@@ -82,18 +85,18 @@ static func engage(mount: PointDefenseMount, ship, incoming_missile, dt: float, 
 		mount._hits_scored = 0
 
 	var distance: float = ship.position.distance_to(incoming_missile.position)
-	if distance > mount.max_engagement_range_m:
+	if distance > mount.effective_engagement_range_m():
 		mount._reset_tracking()
 		return EngagementResult.new(Outcome.OUT_OF_RANGE)
 
 	mount._tracking_time_s += dt
-	if mount._tracking_time_s < mount.reaction_time_s:
+	if mount._tracking_time_s < mount.effective_reaction_time_s():
 		return EngagementResult.new(Outcome.ACQUIRING, mount._hits_scored, mount.hits_required_to_kill)
 
 	if not mount.is_ready():
 		return EngagementResult.new(Outcome.NOT_READY, mount._hits_scored, mount.hits_required_to_kill)
 
-	mount.cooldown_remaining_s = mount.recharge_time_s
+	mount.cooldown_remaining_s = mount.effective_recharge_time_s()
 	mount._hits_scored += 1
 
 	if mount._hits_scored >= mount.hits_required_to_kill:

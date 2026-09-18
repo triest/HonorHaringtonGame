@@ -36,8 +36,26 @@ var condition: float = 1.0  ## 1.0 = fully functional; degraded by MISSILE_SYSTE
 ## same convention as WeaponMount/PointDefenseMount's cooldown fields.
 var time_since_last_launch_s: float = INF
 
+## ТЗ §25 continuous subsystem-damage falloff, same model/rationale as
+## PointDefenseMount's effective_* getters (see that class's doc comment):
+## cycle time scales inversely with `condition` (a damaged launcher takes
+## proportionally longer between shots), effective range scales linearly
+## with `condition` (degraded guidance-uplink/targeting reach). Closes the
+## "hard on/off, not continuous" half of the honest §25 gap recorded for
+## POINT_DEFENSE/MISSILE_SYSTEMS in ASSUMPTIONS.md. `condition <= 0.0` is
+## unreachable through these getters in the live sim -- `is_ready()`
+## already hard-gates a spent tube at `condition <= 0.0` -- but each
+## getter still floors `condition` defensively. INTERPRETATION, not canon.
+const _MIN_CONDITION_FOR_TIMING: float = 0.05
+
+func effective_reload_time_s() -> float:
+	return reload_time_s / maxf(condition, _MIN_CONDITION_FOR_TIMING)
+
+func effective_max_range_m() -> float:
+	return max_range_m * maxf(condition, 0.0)
+
 func is_ready() -> bool:
-	return ammo_count > 0 and time_since_last_launch_s >= reload_time_s and condition > 0.0
+	return ammo_count > 0 and time_since_last_launch_s >= effective_reload_time_s() and condition > 0.0
 
 func advance(dt: float) -> void:
 	time_since_last_launch_s += dt

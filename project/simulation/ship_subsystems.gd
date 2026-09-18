@@ -24,9 +24,13 @@ extends RefCounted
 ## PointDefenseMount/MissileTube's own `condition` field every tick, so a
 ## damaged WEAPONS subsystem now proportionally reduces weapon damage
 ## output and a fully disabled one stops the mount firing; POINT_DEFENSE/
-## MISSILE_SYSTEMS currently gate their mount/tube as hard on/off at
-## `condition <= 0.0` rather than continuous falloff -- an honest,
-## documented simplification, not silently skipped) and
+## MISSILE_SYSTEMS combine a hard on/off at `condition <= 0.0` (mount/tube
+## stops engaging entirely) WITH a continuous falloff at any condition in
+## between -- `PointDefenseMount.effective_reaction_time_s()` /
+## `effective_recharge_time_s()` / `effective_engagement_range_m()` and
+## `MissileTube.effective_reload_time_s()` / `effective_max_range_m()`
+## slow reaction/cycle time and shrink effective range as condition drops,
+## closing the "hard on/off only" gap logged in a previous pass) and
 ## COUNTER_MISSILE_SYSTEMS (SimulationWorld._resolve_counter_missile_intercepts
 ## scales CounterMissileResolution's effective kill radius by the
 ## launching ship's own condition; see that module's class doc for the

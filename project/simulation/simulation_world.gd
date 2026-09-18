@@ -371,9 +371,17 @@ func _resolve_point_defense(dt: float) -> void:
 ## K_P_STATION/K_D_STATION are an engineering PD-controller tuning
 ## choice (heavily overdamped -- no canonical Honorverse station-keeping
 ## formula exists), not itself Honorverse canon -- see ASSUMPTIONS.md.
-## Still NOT modeled (open item, unchanged from the first slice): the
-## guide's own ANGULAR velocity sweeping a nonzero-offset slot through an
-## arc (this only matches the guide's LINEAR velocity).
+## Milestone 10 (this pass): the guide's own ANGULAR velocity is now
+## accounted for too -- a station point at a nonzero offset from a
+## rotating guide is itself moving (rigid-body kinematics,
+## v_station = v_guide + omega x r), so the previous linear-velocity-only
+## matching term made a member at a wide offset perpetually "chase" a
+## guide that was simply turning, thrusting against its own turn-rate
+## instead of tracking the swept slot. This closes that previously-open
+## gap; see the offset_world/station_point_velocity computation below and
+## ASSUMPTIONS.md for the rigid-body-kinematics framing (not itself new
+## Honorverse canon, just applying the same v = v_cg + omega x r identity
+## KinematicsUtils/ShipPhysicsState already use elsewhere).
 ##
 ## §33 Formation Leader (this pass): a lost guide (destroyed/removed OR
 ## incapacitated -- see TacticalAI.is_guide_lost) now triggers a real
@@ -428,9 +436,20 @@ func _resolve_formation_keeping(dt: float) -> void:
 				continue
 
 			var offset_local: Vector3 = formation.member_offsets[member_id]
-			var desired_world_position: Vector3 = guide.position + (guide.orientation * offset_local)
+			var offset_world: Vector3 = guide.orientation * offset_local
+			var desired_world_position: Vector3 = guide.position + offset_world
 			var to_station: Vector3 = desired_world_position - member.position
-			var velocity_error: Vector3 = guide.velocity - member.velocity
+			# Rigid-body kinematics: a point at `offset_world` from the
+			# guide's center of mass is itself moving at
+			# guide.velocity + guide.angular_velocity x offset_world when
+			# the guide is turning, not just guide.velocity. Matching only
+			# the guide's linear velocity (the old formula) made a member
+			# at a wide offset see a constant, spurious velocity error
+			# while the guide simply rotated in place -- this feedforward
+			# term cancels that out so the member tracks the swept slot
+			# instead of fighting the guide's turn.
+			var station_point_velocity: Vector3 = guide.velocity + guide.angular_velocity.cross(offset_world)
+			var velocity_error: Vector3 = station_point_velocity - member.velocity
 
 			# ASSUMPTION: a small dead zone avoids thrust jitter once a
 			# member is essentially on station AND already velocity-
@@ -588,7 +607,7 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 		for tube in tubes:
 			if not tube.is_ready():
 				continue
-			if distance > tube.max_range_m:
+			if distance > tube.effective_max_range_m():
 				continue
 			_launch_missile_from_tube(ship_id, ship, target_ship, tube)
 

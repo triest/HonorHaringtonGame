@@ -297,6 +297,60 @@ func _test_transferred_command_freezes_member_station_relative_to_new_guide() ->
 	var recorded_offset: Vector3 = formation.member_offsets["wing2"]
 	_assert(recorded_offset != Vector3(-500.0, 0, 0), "the member's station offset must be recomputed relative to the NEW guide, not left as the stale old-guide-relative value")
 
+func _test_rotating_guide_sweeps_station_and_member_gets_matching_thrust() -> void:
+	# Milestone 10 (this pass): the guide's ANGULAR velocity must be part
+	# of the station-point velocity a member matches, not just the
+	# guide's LINEAR velocity. Here the guide sits still (zero linear
+	# velocity) but is rotating in place; a member already sitting
+	# exactly on its assigned offset, also with zero velocity, is
+	# therefore NOT actually matched with its (moving) station point --
+	# the offset point is sweeping through space at omega x r. Before
+	# this pass the old formula (guide.velocity - member.velocity, both
+	# zero here) would have hit the dead zone and commanded no thrust at
+	# all, silently letting the member fall behind a turning wall.
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.angular_velocity = Vector3(0.0, 1.0, 0.0)  # 1 rad/s yaw, in place
+	var wing := _make_ship(Vector3(500.0, 0, 0))  # sitting exactly on its (500,0,0) station
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(500.0, 0, 0))
+
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(wing.commanded_thrust_local != Vector3.ZERO, "a member sitting still at a wide offset from an in-place-rotating guide must be given thrust to track the swept station point, not treated as already on-station")
+	var thrust_world: Vector3 = wing.orientation * wing.commanded_thrust_local
+	# omega(0,1,0) x offset(500,0,0) = (0,0,-500): the station point at
+	# this offset is sweeping toward -Z, so the member should thrust
+	# toward -Z to keep up with it.
+	_assert(thrust_world.z < -0.01, "the member should thrust toward -Z to track the guide's rotation sweeping its station point in that direction (omega x r)")
+
+func _test_member_already_tracking_guide_rotation_gets_no_spurious_thrust() -> void:
+	# The flip side of the test above: a member that IS already moving to
+	# match its swept station point (velocity == omega x offset) should
+	# be left alone by the dead zone, exactly as a member matched to a
+	# non-rotating guide would be. The pre-fix formula would have compared
+	# the member's (correctly nonzero) velocity against the guide's zero
+	# linear velocity and commanded spurious braking thrust here -- this
+	# is the case that proves the feedforward term isn't just adding
+	# thrust, it is fixing what "matched" means.
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.angular_velocity = Vector3(0.0, 1.0, 0.0)
+	var wing := _make_ship(Vector3(500.0, 0, 0))
+	wing.velocity = Vector3(0.0, 0.0, -500.0)  # already matching omega x offset for this offset
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(500.0, 0, 0))
+
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(wing.commanded_thrust_local == Vector3.ZERO, "a member already moving to track the guide's rotation about its own station point should not receive spurious correction thrust")
+
 func _init() -> void:
 	_test_formation_state_basics()
 	_test_member_thrusts_toward_station()
@@ -311,6 +365,8 @@ func _init() -> void:
 	_test_default_succession_falls_back_to_member_list_when_unset()
 	_test_no_fit_successor_leaves_formation_leaderless_without_crashing()
 	_test_transferred_command_freezes_member_station_relative_to_new_guide()
+	_test_rotating_guide_sweeps_station_and_member_gets_matching_thrust()
+	_test_member_already_tracking_guide_rotation_gets_no_spurious_thrust()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

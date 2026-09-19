@@ -36,9 +36,20 @@ extends RefCounted
 ## launching ship's own condition; see that module's class doc for the
 ## INTERPRETATION this represents).
 ##
-## Still with NO consumer wired (4 of 11, genuinely blocked on systems
-## that do not exist yet, not merely unwired): COMMUNICATIONS (no
-## command/reporting system, §26/§28, for it to degrade), POWER (no live
+## As of this pass, COMMUNICATIONS also has a real consumer: degraded
+## COMMUNICATIONS condition lengthens
+## `SimulationWorld._individual_order_transmission_delay_s()`, the delay
+## a `transmit_*`-issued individual order/designation takes to reach this
+## ship (§25's own worked example, "communications damage -> degraded
+## command/reporting", and §31 "account for communication limitations"
+## for individual orders -- see ARCHITECTURE.md/ASSUMPTIONS.md for the
+## §25/§31 transmission-delay entry). Note this only affects orders
+## issued through the new `transmit_*` API; the pre-existing immediate
+## API (`issue_individual_order_now`/`set_ship_target`/etc.) is
+## untouched and still instant, by design -- see that entry.
+##
+## Still with NO consumer wired (3 of 11, genuinely blocked on systems
+## that do not exist yet, not merely unwired): POWER (no live
 ## power-budget model), STRUCTURAL_INTEGRITY (HullState is still the
 ## single-scalar §58 placeholder pool ТЗ §59 requires replacing before
 ## Definition of Done -- wiring STRUCTURAL_INTEGRITY meaningfully needs

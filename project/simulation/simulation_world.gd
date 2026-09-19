@@ -63,6 +63,7 @@ var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: m
 var formations: Dictionary = {}       # formation_id -> FormationState (§27/§28/§29, Milestone 10 first slice)
 var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
 var ship_combat_directives: Dictionary = {}  # ship_id -> ShipCombatDirective (§30 target/weapon mode, Milestone 11 second slice)
+var _pending_command_transmissions: Array = []  # Array[Dictionary{ready_at:float, ship_id:String, callable:Callable}] -- §25/§31 communication-delayed individual orders, see transmit_individual_order_now/transmit_ship_target/etc. below
 
 ## ASSUMPTION (§26 "retreat"/"disengage", no canonical figure found): a
 ## ship whose HullState integrity fraction drops to or below this stops
@@ -81,6 +82,32 @@ const CRITICAL_HULL_FRACTION: float = 0.3
 ## game-feel value (a few seconds at 1x time scale) rather than tuned
 ## against any source.
 const COMMAND_TRANSFER_DELAY_S: float = 3.0
+
+## §25 Damage "communications damage -> degraded command/reporting" +
+## §31 "account for communication limitations" (both honestly-logged
+## gaps from previous passes -- see ASSUMPTIONS.md -- closed together
+## here, since they are the same underlying mechanic: a routine
+## individual order/designation takes real time to reach the ship that
+## must carry it out, and that time grows as the receiving ship's own
+## COMMUNICATIONS subsystem degrades). Baseline seconds a routine order
+## takes to reach a ship with FULLY INTACT communications, before
+## `_resolve_individual_orders`/`_resolve_weapon_target` ever sees it.
+## Deliberately much smaller than COMMAND_TRANSFER_DELAY_S (3.0s) --
+## that constant models crews RECOGNIZING a major, uncertain event
+## (their guide going silent) and working out succession doctrine; this
+## constant models the mechanical/procedural latency of relaying a
+## routine order within the same tactical formation while
+## communications are healthy (bridge-to-bridge transmission, watch
+## officer relay, helm/weapons acknowledgment) -- a smaller, different
+## kind of delay. No canonical Honorverse figure exists for either;
+## both are ASSUMPTIONs, not canon.
+const INDIVIDUAL_ORDER_BASE_TRANSMISSION_DELAY_S: float = 1.0
+
+## Same floor-of-condition convention as PointDefenseMount/MissileTube's
+## `_MIN_CONDITION_FOR_TIMING` (see those files): keeps the delay finite
+## as COMMUNICATIONS condition approaches zero, while still letting it
+## grow large well before that floor is reached.
+const _MIN_CONDITION_FOR_COMMS_TIMING: float = 0.05
 
 var missiles: Dictionary = {}         # missile_id -> MissileState
 var missile_owners: Dictionary = {}   # missile_id -> owning ship_id (String, may be "")
@@ -127,6 +154,12 @@ func remove_ship(ship_id: String) -> void:
 	teams.erase(ship_id)
 	individual_orders.erase(ship_id)
 	ship_combat_directives.erase(ship_id)
+	if not _pending_command_transmissions.is_empty():
+		var kept: Array = []
+		for entry in _pending_command_transmissions:
+			if entry["ship_id"] != ship_id:
+				kept.append(entry)
+		_pending_command_transmissions = kept
 
 func get_ship(ship_id: String) -> ShipPhysicsState:
 	return ships.get(ship_id)
@@ -206,6 +239,7 @@ func _on_simulation_tick(dt: float, _tick: int, _sim_time: float) -> void:
 ## future scenario runner -- can drive it directly without a SceneTree.
 func tick_simulation(dt: float) -> void:
 	world_sim_time += dt
+	_resolve_pending_command_transmissions()
 	_sync_subsystem_driven_conditions()
 	_cleanup_inactive_missiles()
 	_update_sensors(dt)
@@ -718,6 +752,74 @@ func return_ship_to_formation(ship_id: String) -> void:
 func is_ship_overriding_formation(ship_id: String) -> bool:
 	var state = individual_orders.get(ship_id)
 	return state != null and state.is_active()
+
+## Seconds a routine individual order/designation takes to reach
+## `ship_id`, given that ship's own COMMUNICATIONS subsystem condition
+## (§25 "communications damage -> degraded command/reporting"). A ship
+## with no ShipSubsystems (§25 opted out entirely -- true of most
+## existing tests/scenarios) or not yet known to this world is treated
+## as condition == 1.0, i.e. the smallest ("healthy comms") baseline
+## delay, never an unexplained worst case.
+func _individual_order_transmission_delay_s(ship_id: String) -> float:
+	var ship: ShipPhysicsState = ships.get(ship_id)
+	var condition: float = 1.0
+	if ship != null and ship.subsystems != null:
+		condition = ship.subsystems.get_condition(SubsystemType.Type.COMMUNICATIONS)
+	return INDIVIDUAL_ORDER_BASE_TRANSMISSION_DELAY_S / maxf(condition, _MIN_CONDITION_FOR_COMMS_TIMING)
+
+func _queue_command_transmission(ship_id: String, callable: Callable) -> void:
+	var ready_at: float = world_sim_time + _individual_order_transmission_delay_s(ship_id)
+	_pending_command_transmissions.append({"ready_at": ready_at, "ship_id": ship_id, "callable": callable})
+
+## §25/§31: applied once per tick, BEFORE `_sync_subsystem_driven_conditions`
+## and every order-consuming resolver runs, so an order that finishes
+## transmitting THIS tick is already visible to
+## `_resolve_individual_orders`/`_resolve_weapon_target` this same tick --
+## no extra tick of lag beyond the modeled delay itself (same convention
+## `_sync_subsystem_driven_conditions` already uses for its own snapshot
+## timing). Applies every pending transmission whose `ready_at` has
+## arrived, in the order they were queued (oldest-issued order lands
+## first if two land the same tick), then drops it from the pending list.
+func _resolve_pending_command_transmissions() -> void:
+	if _pending_command_transmissions.is_empty():
+		return
+	var still_pending: Array = []
+	for entry in _pending_command_transmissions:
+		if world_sim_time >= entry["ready_at"]:
+			entry["callable"].call()
+		else:
+			still_pending.append(entry)
+	_pending_command_transmissions = still_pending
+
+## §25/§31 communication-delayed variants of the immediate APIs above.
+## Use these to represent a commander issuing an order through the normal
+## chain of command (the realistic case, now that it has a real seam to
+## hook into). The immediate `issue_individual_order`/
+## `issue_individual_order_now`/`set_ship_target`/`clear_ship_target`/
+## `set_ship_weapons_free`/`return_ship_to_formation` above remain
+## available UNCHANGED -- every existing caller/test that assumes
+## instantaneous effect (e.g. a scenario script directly puppeteering a
+## ship, or the many pre-existing tests written against the instant
+## behavior) keeps working exactly as before; nothing about this pass
+## touches their signatures or semantics. `order_missile_launch` (§30
+## "missile launch") deliberately has no transmit_* wrapper -- it is
+## already documented as an immediate "explicit shot trigger" by its own
+## convention, matching `fire_weapon()`, and reconsidering that is out of
+## scope for this pass.
+func transmit_individual_order_now(ship_id: String, order: IndividualOrder) -> void:
+	_queue_command_transmission(ship_id, Callable(self, "issue_individual_order_now").bind(ship_id, order))
+
+func transmit_ship_target(ship_id: String, target_ship_id: String) -> void:
+	_queue_command_transmission(ship_id, Callable(self, "set_ship_target").bind(ship_id, target_ship_id))
+
+func transmit_clear_ship_target(ship_id: String) -> void:
+	_queue_command_transmission(ship_id, Callable(self, "clear_ship_target").bind(ship_id))
+
+func transmit_ship_weapons_free(ship_id: String, is_free: bool) -> void:
+	_queue_command_transmission(ship_id, Callable(self, "set_ship_weapons_free").bind(ship_id, is_free))
+
+func transmit_return_ship_to_formation(ship_id: String) -> void:
+	_queue_command_transmission(ship_id, Callable(self, "return_ship_to_formation").bind(ship_id))
 
 ## §30 "target"/"target priority"/"weapon mode" (Milestone 11, second
 ## slice). Returns this ship's ShipCombatDirective, creating a default

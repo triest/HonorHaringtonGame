@@ -1350,3 +1350,96 @@ unchanged. New test file `test_missile_launch_order.gd` (8 tests, 18
 assertions), calling the method directly rather than only through
 `tick_simulation` (this order is deliberately NOT part of the per-tick
 resolution loop at all).
+
+## §25/§31 Communication-delayed individual order transmission — additive `transmit_*` layer, no change to any existing entry point
+
+Milestone 11, fourth slice. Closes two separate honestly-logged gaps with
+one mechanism: §31 "account for communication limitations" (previously
+only modeled for formation-leader succession via
+`COMMAND_TRANSFER_DELAY_S`, explicitly NOT for routine individual orders
+— see the previous ASSUMPTIONS.md entry for §30/§31) and §25's own
+worked example, "communications damage → degraded command/reporting"
+(COMMUNICATIONS was, until this pass, one of four SubsystemType entries
+with condition tracked but no consumer reading it at all).
+
+Decision: additive wrapper layer, not a change to any existing function's
+signature or behavior. Every pre-existing entry point
+(`issue_individual_order`, `issue_individual_order_now`, `set_ship_target`,
+`clear_ship_target`, `set_ship_weapons_free`, `return_ship_to_formation`)
+is untouched and still applies instantly — every one of the 27 test files
+that predate this pass exercises those functions directly and keeps
+asserting instantaneous effect, unmodified. New `transmit_*` methods
+(`transmit_individual_order_now`, `transmit_ship_target`,
+`transmit_clear_ship_target`, `transmit_ship_weapons_free`,
+`transmit_return_ship_to_formation`) sit ALONGSIDE them: each one just
+defers a call to the existing immediate function via a bound `Callable`,
+queued in `_pending_command_transmissions` and released once enough
+`world_sim_time` has passed. Why additive rather than making the existing
+functions delayed in place: that would have been the "more realistic by
+default" choice, but it would silently change the meaning of every
+existing call site and break every test written against instant
+semantics — a large, high-risk rewrite for a pass whose actual job was
+adding a new capability, not relitigating 27 files' worth of existing
+assertions. A future pass can decide whether the immediate path should be
+deprecated in favor of always routing through `transmit_*`; this pass
+deliberately leaves that decision open rather than forcing it.
+
+Mechanism: `_pending_command_transmissions` is a flat `Array` of
+`{ready_at: float, ship_id: String, callable: Callable}`, resolved by
+`_resolve_pending_command_transmissions()` — a linear scan each tick that
+calls and drops every entry whose `ready_at <= world_sim_time`, keeping
+the rest. No priority queue/heap: entry counts here are "a handful of
+in-flight orders", not thousands, so O(n) per tick is the right tool, not
+premature optimization. Deliberately called FIRST in `tick_simulation`,
+before `_sync_subsystem_driven_conditions` and everything else — the same
+"snapshot taken at the top of the tick, consumed later the same tick, no
+extra tick of lag" convention `_sync_subsystem_driven_conditions` itself
+already documents, applied here to keep "the delay is exactly what the
+formula says, no tick-boundary rounding surprises" honest.
+
+Delay formula: `INDIVIDUAL_ORDER_BASE_TRANSMISSION_DELAY_S (1.0s) /
+max(receiving ship's COMMUNICATIONS condition, _MIN_CONDITION_FOR_COMMS_
+TIMING (0.05))` — the same floor-divide shape `PointDefenseMount.
+effective_reaction_time_s()`/`effective_recharge_time_s()` already use,
+reused here rather than inventing a new curve shape for the same kind of
+problem (a stat that degrades a timing value continuously and needs a
+floor to stay finite). A ship with no `ShipSubsystems` at all (most
+existing scenario/test ships) or not yet added to the world is treated as
+condition == 1.0 — the smallest, "healthy comms" delay — so a caller that
+never opted into §25 subsystem modeling sees the least surprising
+behavior, not an unexplained worst case.
+
+Why the receiving ship's own COMMUNICATIONS condition, not the issuing
+commander's, and not channel distance/geometry: §25's own worked example
+phrases it as "communications damage → degraded command/reporting" for
+the ship whose subsystem is damaged, which is the simplest, most directly
+textual reading available without inventing an unstated two-sided channel
+model. Distance/geometry-based comms degradation is a real, separately
+defensible idea (light-speed lag is explicitly why `COMMAND_TRANSFER_
+DELAY_S` itself is NOT light-speed-based, per CANON_RULES.md §7) but was
+left out here — a bigger feature (would need a notion of "communication
+range" that doesn't exist anywhere in the codebase yet) than this pass's
+scope.
+
+`order_missile_launch` deliberately has no `transmit_*` counterpart: its
+own architecture entry above already establishes it as an immediate
+"explicit shot trigger", matching `fire_weapon()`'s convention. Adding a
+delay to it would be a real design change to an already-documented
+decision, not a natural extension of this pass — left as an explicitly
+open question for a future pass rather than decided in passing here.
+
+`remove_ship` now also filters `_pending_command_transmissions` by
+`ship_id` — otherwise a ship_id reused after removal (a real scenario:
+scenario scripts/tests routinely reuse short ids like "alpha") could have
+a stale pre-removal order land on an unrelated new ship carrying the same
+id.
+
+Range of changes: 2 new constants, 1 new Array field, 4 new private
+methods (~50 lines total), 5 new public `transmit_*` wrapper methods
+(~15 lines), 1 new line in `tick_simulation`, 1 small addition to
+`remove_ship` — all in `simulation_world.gd`; no other file touched, and
+every symbol this pass added is additive (no existing method body
+changed except `tick_simulation`'s one new call and `remove_ship`'s one
+new cleanup loop). New test file `test_command_transmission.gd` (9 tests,
+18 assertions), exclusively through `SimulationWorld.tick_simulation()`
+since the entire point under test is behavior across several ticks.

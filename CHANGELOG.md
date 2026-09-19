@@ -1321,3 +1321,83 @@ COMMUNICATIONS/POWER/STRUCTURAL_INTEGRITY/DEFENSIVE_SYSTEMS по-прежнем�
 missile launch order — применяется мгновенно, тем же вызовом);
 `weapons_free` по-прежнему единый флаг на энергооружие и ракеты вместе,
 не два раздельных; Milestone 12+ не начаты.
+
+## 2026-09-19 (проход: Milestone 11 продвинут — §25/§31 задержка передачи индивидуальных приказов)
+
+Закрывает СРАЗУ ДВА честно залогированных пробела предыдущих проходов
+одним механизмом: §31 "account for communication limitations" для
+индивидуальных приказов (было: приказ вступал в силу мгновенно, в тот же
+тик) и §25's собственный worked example "communications damage →
+degraded command/reporting" (COMMUNICATIONS был единственной подсистемой
+из "6 из 11" с потребителем урона, не считая STRUCTURAL_INTEGRITY/POWER/
+DEFENSIVE_SYSTEMS, которые по-прежнему честно заблокированы на
+несуществующих системах — см. ship_subsystems.gd class doc; не
+пересмотрено в этом проходе).
+
+* `SimulationWorld`: новая очередь `_pending_command_transmissions`
+  (Array of Dictionary{ready_at, ship_id, callable}) и её резолвер
+  `_resolve_pending_command_transmissions()`, вызываемый ПЕРВЫМ делом в
+  `tick_simulation` (сразу после `world_sim_time += dt`, до
+  `_sync_subsystem_driven_conditions`) — так что приказ, чья передача
+  завершается именно в этот тик, уже виден `_resolve_individual_orders`/
+  `_resolve_weapon_target` в этом же тике (тот же принцип "без лишнего
+  тика задержки сверх смоделированной", что и у
+  `_sync_subsystem_driven_conditions`).
+* Новые константы `INDIVIDUAL_ORDER_BASE_TRANSMISSION_DELAY_S = 1.0` и
+  `_MIN_CONDITION_FOR_COMMS_TIMING = 0.05` (тот же floor-конвенция, что и
+  `PointDefenseMount`/`MissileTube`'s `_MIN_CONDITION_FOR_TIMING`).
+  Задержка = base / max(condition COMMUNICATIONS корабля-получателя,
+  floor) — при здоровых средствах связи (condition=1.0) задержка равна
+  базовой (1с, честный ASSUMPTION, НЕ канон — намеренно много меньше
+  `COMMAND_TRANSFER_DELAY_S` (3с), т.к. это разные явления: тот
+  моделирует распознавание ЭКИПАЖЕМ крупного неопределённого события
+  (потеря ведущего), этот — рутинную механическую задержку передачи
+  приказа в пределах той же тактической дистанции при исправной связи).
+* Новые публичные "transmit_*" обёртки — ДОПОЛНИТЕЛЬНЫЕ, не заменяющие:
+  `transmit_individual_order_now`, `transmit_ship_target`,
+  `transmit_clear_ship_target`, `transmit_ship_weapons_free`,
+  `transmit_return_ship_to_formation`. Каждая просто откладывает вызов
+  СУЩЕСТВУЮЩЕГО мгновенного API (`issue_individual_order_now`/
+  `set_ship_target`/...) через `Callable.bind`, ничего не переписывая в
+  самих мгновенных функциях — ВСЕ 27 ранее существовавших тестовых
+  файлов и любой существующий вызывающий код (сценарии, будущий UI,
+  что угодно, что хочет мгновенный эффект) продолжают работать
+  ПОБИТОВО идентично, без единого изменения поведения.
+  `order_missile_launch` (§30 "missile launch") сознательно БЕЗ
+  transmit_*-обёртки — она уже задокументирована как мгновенный
+  "explicit shot trigger" по конвенции `fire_weapon()`, пересмотр этого
+  вне рамок прохода.
+* `remove_ship` теперь также вычищает `_pending_command_transmissions`
+  для удаляемого id — иначе повторно используемый ship_id мог бы
+  "воскресить" чужой приказ, отправленный до удаления корабля.
+* Новый файл `test_command_transmission.gd` (9 сквозных тестов через
+  `SimulationWorld.tick_simulation()`, 18 assertion): приказ НЕ
+  применяется сразу после `transmit_*`; применяется после базовой
+  задержки при здоровой связи; корабль без `ShipSubsystems` вообще
+  использует базовую (не наихудшую) задержку; ухудшенная связь
+  (condition=0.5) удлиняет задержку примерно вдвое (эмпирически, не
+  только по формуле); `transmit_ship_target`/`transmit_ship_weapons_free`
+  задерживаются идентично; `transmit_clear_ship_target`/
+  `transmit_return_ship_to_formation` тоже задерживаются; существующий
+  мгновенный API остаётся синхронным без изменений; удаление корабля
+  отбрасывает его висящую передачу, не воскрешая её на переиспользованном
+  id; и один сквозной тест, что приказ, дошедший через передачу, реально
+  зануляет тягу/угловую скорость (не только "появляется в состоянии", а
+  действительно переопределяет `_resolve_formation_keeping`, ровно как
+  мгновенный API).
+* Полный прогон headless-тестов ПОДТВЕРЖДЁН: все 28 файлов
+  `project/simulation/tests/` (было 27, +1 новый файл) зелёные
+  (Godot v4.3-stable_linux.x86_64, скачан заново). Регрессий не найдено.
+
+Честно НЕ сделано (см. ASSUMPTIONS.md за полный список): STRUCTURAL_
+INTEGRITY/POWER/DEFENSIVE_SYSTEMS всё ещё без потребителя урона (см.
+ship_subsystems.gd class doc за причину для каждой — не "забыли
+подключить", а честно заблокировано на отсутствующих системах: замена
+HullState-заглушки, модель энергобюджета, и неопределённость, что вообще
+физически представляет DEFENSIVE_SYSTEMS отдельно от wedge/sidewalls);
+"counter-missile policy"/"point-defense policy"; "sensor mode"/"ECM
+mode"/"defensive posture"; "target priority" за пределами single-target
+designation; "approach" как отдельный примитив; многоуровневая иерархия
+команд §28; ECM не деградирует точность/захват PD; задержка передачи для
+`order_missile_launch` (сознательно оставлена мгновенной, см. выше);
+Milestone 12+ не начаты.

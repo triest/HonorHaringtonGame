@@ -271,6 +271,100 @@ Do not invent exact numerical values when the source does not establish them.
 
 ---
 
+## 8.1 Concrete canon reference data -- example ship classes, missiles, energy weapons
+
+§8 says "do not invent exact numerical values" but does not itself supply
+any -- this subsection gives concrete, sourced example values to seed the
+Ship/Weapon/Missile Database (§8/§48) with, verified 2026-09-19 against
+Honorverse Wiki technical/class pages (WebFetch, factual numeric data
+extracted -- not book prose, no verbatim passages reproduced). These are
+EXAMPLES for specific classes/generations, not universal constants --
+same caveat as §21.2's missile rod-count/warhead-type table. Honorverse
+technology (missile generations, compensator strength, warhead yield)
+canonically improves across the book series' internal timeline; a real
+implementation needs numbers tagged by ERA, not one fixed table.
+
+**Ship classes (CANON, source: Honorverse Wiki class articles):**
+
+* Medusa-class (superdreadnought): length 1383 m; mass 8,554,750 tons;
+  acceleration 402.3 G (502.8 G maximum); broadside armament 26 missile
+  tubes / 13 large energy mounts / 15 grasers / 54 capital missile
+  launchers / 52 point-defense; fore 9 missile tubes / 4 large energy
+  mounts / 5 grasers / 18 capital missile launchers / 22 point-defense;
+  aft 6 missile tubes / 4 large energy mounts / 5 grasers / 14 capital
+  missile launchers / 20 point-defense; missile pod capacity 492.
+  Medusa-B refit: missile pod capacity 2000; crew 1,025 (incl. 125
+  Marines); energy battery 50 grasers. Compensator rating and Medusa-B
+  length/mass/acceleration: UNKNOWN (not given in the source article).
+* Agamemnon-class (battlecruiser or similar wall unit -- class role not
+  re-verified this pass): mass 1,750,750 tons; length 815 m; beam 118 m;
+  draught 110 m; acceleration at 80% compensator load 554.1 G (5.434
+  km/s^2); broadside 10 graser mounts / 30 Cherenkov missiles / 30
+  point-defense; fore 4 graser mounts / 12 point-defense; aft 4 missile
+  pods / 4 graser mounts / 12 point-defense; magazine capacity 360 pods
+  of Mk 16 DDMs. Crew and compensator rating: UNKNOWN (not given).
+
+**Missiles (CANON, source: Honorverse Wiki "Manticoran missile
+technology"):**
+
+* Mark 13 (single-drive, laser head, heavy-cruiser/battlecruiser era):
+  88,000 G acceleration; 12 m long; 78 tons; Mark 86 warhead, 15
+  megaton hydrogen-fusion yield.
+* Mark 19: introduced 1870 PD -- first laser-head-armed impeller-drive
+  missile (era marker, not a full spec set found this pass).
+* Mark 23 MDM (multi-drive missile, three-stage, wall-of-battle
+  standard): 96,000 G maximum acceleration; 48,000 G sustained
+  ("half") acceleration; 15,000,000 km powered envelope at full
+  thrust; 63,000,000 km powered envelope at half acceleration; 0.83c
+  terminal velocity; 94 tons mass; warhead option 6 lasing rods (500cm
+  x 40cm), capital-weight configuration.
+* Mark 25 MDM: four-stage system-defense variant (role marker; detailed
+  spec set not found this pass -- UNKNOWN).
+* Mark 30 (RMN standard counter-missile until ~1920 PD): spec set not
+  found this pass beyond its role/service-life dates -- UNKNOWN.
+* Mark 31 (counter-missile, successor to Mark 30): 130,000 G
+  acceleration; 75 second burn time; 3,600,000 km effective range from
+  rest.
+* Viper (Grayson anti-LAC missile): 130,000 G acceleration; 3,600,000
+  km powered envelope; 75 second endurance.
+* Warheads: Mark 16 Mod E 15 megaton yield (cruiser weight); Mark 16
+  Mod G 40 megaton yield (improved gravity-lensing variant); Mistletoe
+  (offensive drone) 500 megaton option.
+
+**Energy weapons (CANON, source: Honorverse Wiki "Space Weapons
+Technology"):**
+
+* Grav lance: 100,000 km maximum range under optimal conditions --
+  gravitic weapon that disaligns the target's impeller wedge to
+  overload its sidewall (a distinct effect from a direct-damage
+  weapon, see §21.25's existing sidewall-damage-character CANON entry).
+* Energy torpedo: up to 300,000 km effective range -- self-sustaining
+  plasma mass traveling at near-light speed.
+* Graser torpedo: warhead power roughly 100x a standard laser warhead;
+  graser effect duration ~3 seconds vs. milliseconds for a laser
+  warhead.
+* Laser (direct-fire mount) and graser (direct-fire mount, distinct
+  from graser TORPEDO above) numeric range/damage figures: UNKNOWN --
+  not given as concrete numbers in the source article; §22 Point
+  Defense and §17/§21 energy-mount rules should keep treating these as
+  ASSUMPTION-tier placeholders (see PointDefenseMount's own documented
+  ASSUMPTION constants) until a numeric source is found.
+* Autocannon caliber, rate of fire, and any concrete damage/penetration
+  figures for any energy or projectile weapon: UNKNOWN -- not found
+  this pass for any weapon type.
+
+**How to use this table:** seed §8 Ship Database / §48 Data-Driven
+Design entries for a small number of NAMED example classes (Medusa,
+Agamemnon, missile Marks above) with these exact numbers, tagged with
+their source and era, rather than inventing round numbers. For any
+class/weapon/missile NOT in this list, §8's own rule still applies --
+do not invent exact numerical values; use logic/consistency with these
+known reference points (§4.1) and mark the result ASSUMPTION, not
+CANON. This table is a first pass, not exhaustive -- see ASSUMPTIONS.md
+for what remains UNKNOWN and would need further sourcing.
+
+---
+
 # 9. Impeller Wedge
 
 The impeller wedge is a fundamental part of both movement and combat.

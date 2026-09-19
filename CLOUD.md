@@ -12,6 +12,25 @@ Damage is shown as combat capability, not an abstract HP bar: which subsystems a
 ## 1.3. SAME RULES FOR EVERY SHIP (AGENTS.md §43.1)
 Physics and damage run through the exact same code/formulas for every ship regardless of side (player/AI/allied/hostile/neutral) -- team/ownership is targeting-only bookkeeping (§26), never an input to accel/mass/inertia or to damage resolution. No hidden per-side multipliers; any deliberate difficulty/balance choice belongs in scenario/ship-database DATA (e.g. a weaker OPFOR loadout), not in special-cased code.
 
+## 1.4. CONCRETE REFERENCE NUMBERS (AGENTS.md §8.1)
+* Sourced example specs (Honorverse Wiki, verified 2026-09-19), for
+  seeding §8/§48, NOT universal constants:
+  Medusa-class SD: 1383m, 8,554,750t, 402.3G (502.8G max), 26 tubes/
+  13 large mounts/15 grasers/54 capital-missile launchers/52 PD
+  broadside, 492 pods (Medusa-B: 2000 pods, crew 1025).
+  Agamemnon-class: 815m, 1,750,750t, 554.1G@80% (5.434 km/s^2), 10
+  graser/30 Cherenkov/30 PD broadside, 360 pods of Mk16 DDM.
+  Mark 13 missile: 88,000G, 12m, 78t, Mk86 warhead 15MT.
+  Mark 23 MDM: 96,000G max/48,000G sustained, 15M km full-thrust
+  envelope / 63M km half-accel envelope, 0.83c terminal, 94t.
+  Mark 31 counter-missile: 130,000G, 75s burn, 3.6M km range.
+  Grav lance: 100,000 km max range (disaligns wedge, overloads
+  sidewall). Energy torpedo: 300,000 km. Graser torpedo: ~100x laser
+  warhead power, ~3s effect duration.
+  UNKNOWN/not found this pass: direct-fire laser/graser mount
+  range-damage numbers, autocannon specs, several compensator ratings
+  and crew counts -- see ASSUMPTIONS.md.
+
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

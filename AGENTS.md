@@ -1783,3 +1783,107 @@ it must not be implemented by just cranking the §44 playback multiplier
 to extreme values, which would silently break tactical-scale physics
 assumptions (missile burn times, sensor detection windows, etc. are all
 tuned for real-time-scale tactical engagements).
+
+---
+
+# 63. Ship Destruction, Wrecks, and Progressive Combat Damage
+
+## 63.1 A destroyed ship must NOT disappear
+
+When a ship is destroyed, it MUST NOT be deleted or vanish from the
+simulated world. It becomes a **wreck**: an inert object that:
+
+* keeps its last position/velocity/orientation and continues to obey
+  inertial physics (ТЗ §12 -- "stopping thrust must not automatically
+  stop the ship" applies equally to a dead hull: nothing is thrusting,
+  but momentum does not vanish either);
+* is no longer a ship for any combat/command/AI purpose -- it has no
+  weapons, no sensors, no crew, cannot be given orders, is never a
+  member of a formation, and Tactical AI (§26) must never select it as
+  a firing platform or a formation guide;
+* REMAINS a valid sensor contact and a valid target reference for
+  everything that still makes sense against an inert mass (e.g. "avoid
+  debris," after-action battle damage assessment, a future salvage/
+  scenario mechanic) -- it is data that persists, not data that is
+  thrown away;
+* remains VISIBLE in the tactical picture and in the 3D view once
+  rendering exists (§7/§38) -- a battle's aftermath (a debris field, a
+  drifting hulk) is part of what the player should be able to see and
+  assess, not something the engine quietly erases.
+
+This directly fixes a previously-honest gap: the current
+`_resolve_ship_destruction()` implementation calls `remove_ship()`,
+which deletes the ship entirely from `SimulationWorld.ships` --
+`is_destroyed()` "removal" today means "ceases to exist," not "becomes
+a wreck." That is now a documented spec violation, not an acceptable
+simplification, and must be corrected by a future pass (see
+ASSUMPTIONS.md for the open implementation gap).
+
+## 63.2 Wreck retention is not eternal, but it is not instant either
+
+A long engagement can destroy many ships; keeping every wreck as a
+fully simulated object forever is a legitimate performance concern
+(ТЗ §49 Performance). The requirement is only that a wreck:
+
+* persists for at least the remainder of the tactical engagement it
+  died in, and through any immediate post-battle assessment/replay
+  (§45) of that engagement;
+* is never removed simply because "the ship died" -- any later pruning
+  (e.g. after a long real-world time, after leaving all sensor range,
+  or at scenario/replay boundaries) must be a SEPARATE, explicit,
+  documented decision, not a side effect of the destruction code path
+  itself.
+
+Exact retention policy (how long, under what conditions a wreck may
+eventually be pruned) is UNKNOWN/ASSUMPTION -- no canonical figure
+exists for this, and it is intentionally left open for a later
+performance-tuning pass rather than invented now.
+
+## 63.3 Progressive damage must matter BEFORE destruction, not just at it
+
+Combat damage must not be a binary "fully combat-capable" vs "gone"
+state. Subsystem damage (§25) is explicitly for this: a ship's actual
+fighting ability MUST degrade continuously and visibly as its
+subsystems take damage, well before hull integrity reaches zero. This
+was already a §25 requirement ("subsystem damage must change actual
+ship capabilities") -- this section makes the COMBAT CONSEQUENCE of
+that requirement explicit:
+
+* a ship with a disabled or badly degraded WEAPONS/MISSILE_SYSTEMS/
+  COUNTER_MISSILE_SYSTEMS/POINT_DEFENSE subsystem must actually deal
+  less damage, launch fewer/no missiles, or intercept fewer incoming
+  threats -- not just display a lower number while fighting exactly as
+  effectively;
+* a ship with disabled/degraded SENSORS or COMMUNICATIONS must
+  actually see less and coordinate worse (§23/§31, already partly
+  implemented: sensor range scaling, order transmission delay);
+* a ship with disabled/degraded PROPULSION/MANEUVERING must actually
+  maneuver worse (already implemented: `effective_max_acceleration()`);
+* accumulating subsystem damage, independent of the single hull-
+  integrity scalar, should be able to produce a ship that is
+  effectively **mission-killed** -- unable to meaningfully fight back,
+  sensor-blind, unable to maneuver -- while still nominally "alive"
+  (hull integrity > 0). A mission-killed ship remains a real object in
+  the simulation (still a target, still subject to further damage,
+  still eventually destroyable) -- it is a DEGRADED combat state, not
+  a third bookkeeping category bolted on beside "alive"/"destroyed".
+  Tactical AI (§26) retreat/disengage logic (§26, `is_critically_damaged`)
+  is one existing example of behavior keying off degraded state; further
+  such consequences (e.g. an AI that recognizes a mission-killed hostile
+  poses little threat) are open future work, not required by this
+  section on their own.
+
+## 63.4 Relationship to the existing HullState simplification
+
+`HullState` is already documented (see its own class doc, §58 Temporary
+Simplifications) as a TEMPORARY single-scalar placeholder for the full
+per-subsystem damage model required by §25. This section does not
+change that plan -- wrecks and progressive mission-kill behavior must
+eventually be judged by the same richer, per-subsystem damage state
+that replaces `HullState`, not by a parallel system. Implementing §63.1
+(wrecks) does not require waiting for that replacement -- a wreck is
+simply "no HullState-equivalent left to keep the ship alive," whatever
+that state ends up being -- but implementing §63.3 to its full extent
+(a genuine, systemic mission-kill determination across all subsystem types)
+does depend on closing the remaining §25 gaps (STRUCTURAL_INTEGRITY/
+POWER/DEFENSIVE_SYSTEMS still without a consumer, see ASSUMPTIONS.md).

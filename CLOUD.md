@@ -49,6 +49,22 @@ Physics and damage run through the exact same code/formulas for every ship regar
   Harrington (pod-layer SD), Ararat (pre-Alliance DD).
 * NOT implemented: no ShipClass/database records exist in code yet for
   any of these -- reference material to seed §8/§48 from.
+
+## 1.6. PER-CLASS ARMAMENT + SPECIFIC NAMED SHIPS (AGENTS.md §8.3)
+* Sultan-class (Haven BC) armament: 46 missile tubes (3 chase/20 per
+  broadside), 4 capital lasers, 12 anti-ship lasers, 12 grasers, 40
+  counter-missile tubes, 36 anti-missile lasers, 1 tractor beam.
+* Warlord-class (Haven BC) armament: 64 missile tubes total
+  (broadside 26M/6L/6G/16CM/12PD, chase 6M/2G/6CM/6PD), 12 lasers, 16
+  grasers, 44 counter-missile tubes, 36 PD clusters.
+* Named individual hulls (small sample, data-shape reference only --
+  NOT exhaustive, do not invent more): HMS Thunderer, HMS Revenge
+  (RMN, Medusa-class); PNS Kerebin (Haven, Sultan-class); PNS Yavuz
+  (Haven, class UNKNOWN).
+* Data shape: Ship Database needs class records (§8.1/§8.2) PLUS
+  individual-ship instances referencing a class by name/hull -- not a
+  flat class-only list.
+* NOT implemented in code yet -- seed reference material.
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

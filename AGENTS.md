@@ -439,6 +439,52 @@ class/faction not listed here still falls under §8's "do not invent
 exact numbers" rule.
 
 
+## 8.3 Per-class armament detail and specific named vessels
+
+Extends §8.1/§8.2 with (a) full weapon-mount breakdowns for the two
+Havenite classes already named in §8.2, and (b) specific individual
+named ships (not just classes) on both sides, sourced 2026-09-19
+(Honorverse Wiki class/ship articles -- factual armament counts and
+proper names only, no book prose reproduced).
+
+**Sultan-class (Haven, battlecruiser) armament:**
+46 LMF-5(d) missile tubes (3 in chase armament, 20 per broadside); 4
+L/130 capital-ship lasers; 12 L/118 anti-ship lasers; 12 G/125 grasers;
+40 LMC-8(g) counter-missile tubes; 36 P/18x6 anti-missile lasers; 1
+tractor beam. Magazine: 1,528 F17 impeller-drive missiles, 3,640 C2
+counter-missiles, 10 LAD-15 tethered ECM decoys.
+
+**Warlord-class (Haven, battlecruiser) armament:**
+64 missile tubes total (broadside 26M/6L/6G/16CM/12PD, chase fore+aft
+6M/2G/6CM/6PD); 12 lasers; 16 grasers; 44 counter-missile tubes; 36
+point-defense clusters total.
+
+**Specific named vessels (individual ships, not classes) --
+INDIVIDUAL SHIPS EXIST IN CANON AS DATA POINTS, not just their class:**
+
+* RMN (Manticore), Medusa-class: HMS Thunderer, HMS Revenge -- specific
+  named hulls of this class.
+* Haven (People's Navy/RHN), Sultan-class: PNS Kerebin -- specific
+  named hull.
+* Haven, unspecified/other class: PNS Yavuz -- named hull, class not
+  re-verified this pass (UNKNOWN).
+
+This list is intentionally a SMALL sample, not exhaustive -- the books
+name dozens of individual ships across the series. The purpose here is
+only to establish the DATA SHAPE the Ship Database (§8/§48) needs: a
+ship class record (§8.1/§8.2) plus individual ship instances that
+reference it by name/hull (own damage state, own crew, own history),
+not a single flat list of classes with no individual-hull concept.
+Do not invent additional named vessels beyond what is sourced here or
+found later with a citation -- an unnamed player/AI-scenario ship
+should just get a scenario-assigned name, never a name presented as if
+it were a canon vessel.
+
+**HONEST GAP:** none of the above is implemented as `ShipClass`/
+individual-ship database records in `project/simulation` yet. See
+§8.1/§8.2 for the same caveat -- this is seed reference material.
+
+
 # 9. Impeller Wedge
 
 The impeller wedge is a fundamental part of both movement and combat.

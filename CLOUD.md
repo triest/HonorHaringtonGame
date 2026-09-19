@@ -141,24 +141,21 @@ Wiki 2026-09-18 -- see AGENTS.md §18.1 for full detail/citations):
   battle" (§61) is the doctrine. Breaking formation (ship lost, out of
   station, straggling, dispersed order) genuinely loses that coverage
   and exposes the uncovered gap to exploitation.
-* **CANON (event, First Battle of Hancock, *The Short Victorious War*
-  HH3 -- NOT Field of Dishonor, which only covers the later
-  court-martial): confirmed via Honorverse Wiki, 2026-09-19.** Admiral
-  Sarnow incapacitated, no scatter order issued; Captain Pavel Young
-  panics and orders his own squadron to scatter anyway -- "defense
-  nets were disrupted", HMS Cassandra left exposed and heavily
-  damaged, until Harrington countermands and orders ships individually
-  back to formation. Confirms formation-wide PD/missile-defense
-  coverage as one interlocking net that breaking formation disrupts
-  for everyone in it, as a real plot-consequential event.
-* A separately user-supplied set of quotes ("Formation Reno", "get
-  those cruisers in tighter", "socketed back into the point defense
-  net", attributed to Field of Dishonor) could NOT be verified this
-  session -- zero search matches for the exact wording anywhere,
-  treated as unconfirmed/likely fabricated and NOT used or cited.
-* Classification: CANON for the event itself; INTERPRETATION for the
-  general per-ship-directional-gap mechanical rule (§41.1/§33.1/§61)
-  this ТЗ builds on top of it.
+* **CANON, directly source-confirmed (2026-09-19):** Baen's free
+  Prologue sample of *Field of Dishonor* (HH4),
+  baen.com/Chapters/0743435745/0743435745___0.htm -- fetched and
+  checked directly. Depicts a reconstruction of the First Battle of
+  Hancock (underlying event: HH3 *The Short Victorious War*). Honor
+  Harrington's "Formation Reno" order tightens station and makes the
+  formation's missile defenses measurably more effective; Pavel
+  Young's panicked "all ships scatter" order then causes "chaos" in
+  the "fine-meshed, interlocking network" of the task group's missile
+  defenses; returning ships "socket back into" the point defense net.
+* Classification: CANON for both the event and the "single
+  interlocking network" framing of the mechanism itself.
+  INTERPRETATION only for the per-ship DIRECTIONAL gap/coverage model
+  (§41.1/§33.1/§61) this ТЗ uses to implement that confirmed
+  principle as concrete geometry.
 * NOT implemented: PD is currently omnidirectional (no firing-arc model
   at all), and FormationState has no coverage concept.
 

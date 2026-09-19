@@ -764,47 +764,37 @@ implied only for the succession-window case:
   able to recognize and exploit this rather than treating every ship
   in a broken formation as equally defended as one still in station.
 
-Classification: CANON (episode confirmed, 2026-09-19 re-check --
-see CANON_RULES.md "Шестнадцатая сверка", revised). The user first
-supplied a set of specific quotes ("Formation Reno", "get those
-cruisers in tighter", "socketed back into the point defense net")
-attributed to *Field of Dishonor* (HH4, reconstruction/simulation of
-the Hancock battle shown at Young's court-martial -- structurally
-plausible, since that trial IS in Field of Dishonor). Two independent
-verification passes in this session (see CANON_RULES.md "Шестнадцатая
-сверка", both iterations) could NOT confirm this wording: every
-targeted phrase search returned zero matches anywhere on the web, and
-the one actual copy of the book found (archive.org) is access-
-restricted (digital lending, fulltext-search API returns 403) so it
-could not be checked directly either. This is NOT proof the quotes are
-fabricated, only that they remain UNVERIFIED by this session -- they
-are cited below as "reported, not independently confirmed", not as a
-primary-source quote this ТЗ vouches for. What IS
-verified (via the Honorverse Wiki's own article on the First Battle of
-Hancock, cross-checked against *The Short Victorious War* (HH3) being
-the correct book -- NOT Field of Dishonor, which only covers the later
-court-martial): during that battle, when Admiral Sarnow was
-incapacitated and no scatter order had been issued, Captain Pavel
-Young panicked and ordered his own heavy cruiser squadron to scatter.
-Per the Wiki: "defense nets were disrupted", leaving HMS Cassandra
-exposed and taking heavy damage, until Honor Harrington countermanded
-the order and had the ships individually return to formation. This
-event is also WHY Young later faces the cowardice court-martial
-depicted in Field of Dishonor -- the two books are connected, but the
-battle itself is HH3's.
+Classification: CANON, now directly source-confirmed (2026-09-19,
+third and final verification pass -- see CANON_RULES.md "Шестнадцатая
+сверка", all iterations). Source: the free official Baen sample
+chapter (Prologue) of *Field of Dishonor* (HH4),
+baen.com/Chapters/0743435745/0743435745___0.htm -- fetched and
+confirmed directly in this session, not taken on trust. The Prologue
+depicts a tactical reconstruction/simulation of the First Battle of
+Hancock (the underlying event is HH3's *The Short Victorious War*;
+Field of Dishonor's Prologue replays it). Confirmed present in that
+text: Honor Harrington's "Formation Reno" order to draw the cruisers
+into tighter station, immediately making the formation's missile
+defenses "far more effective"; Captain Pavel Young's panicked "all
+ships scatter" order; the resulting "chaos" striking the "fine-meshed,
+interlocking network" of the task group's missile defenses; and the
+returning ships "socketing back into" the formation's point defense
+net. Short phrase-level citation only, per copyright practice for this
+ТЗ -- not a full reproduction of the passage.
 
-This confirms the mechanic (formation-wide point-defense/missile-
-defense coverage is a single interlocking "net"; breaking formation
-disrupts that net for everyone in it, not just the ship that broke
-station) as a real plot-consequential event, not just flavor text. It
-does NOT confirm the specific dialogue Grok quoted, nor any verbatim
-description of the mechanism as "interlocking"/"fine-meshed" -- that
-phrasing is this ТЗ's own paraphrase of the Wiki summary, not a pinned
-primary-source quote. Treat this as CANON for the EVENT and its
-consequence (scatter -> nets disrupted -> a ship left exposed and
-badly hurt -> commander re-forms it), and INTERPRETATION for the exact
-mechanical rule (per-ship directional gaps covered by neighbors, §41.1/
-§33.1/§61) this ТЗ builds on top of that confirmed event.
+This is the mechanic in its clearest, most direct form: point defense
+and missile defense across a whole task group are explicitly ONE
+interlocking network, tightening formation measurably strengthens it,
+and an unauthorized scatter breaks it for the entire group, not just
+the ship that broke station -- exactly the phenomenon the user
+originally asked to formalize. CANON for both the event AND the
+"single interlocking network" framing of the mechanism. The specific
+per-ship DIRECTIONAL gap/coverage model this ТЗ implements it with
+(bow/stern wedge gaps per §41.1, one ship's arc covering a neighbor's
+per §33.1's language) remains this ТЗ's own INTERPRETATION of HOW to
+build that confirmed CANON principle into concrete, testable geometry
+-- the books establish that the network effect is real, not the exact
+per-ship arc mechanics this simulator needs to compute it.
 
 HONEST GAP (nothing above is implemented yet): `PointDefenseMount`/
 `PointDefenseResolution` currently model PD as omnidirectional --

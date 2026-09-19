@@ -768,10 +768,18 @@ Classification: CANON (episode confirmed, 2026-09-19 re-check --
 see CANON_RULES.md "Шестнадцатая сверка", revised). The user first
 supplied a set of specific quotes ("Formation Reno", "get those
 cruisers in tighter", "socketed back into the point defense net")
-attributed to *Field of Dishonor* (HH4); this session could NOT verify
-those as real book text -- multiple targeted phrase searches for the
-exact wording returned zero matches anywhere, which is a strong
-fabrication signal, so they are NOT used or cited below. What IS
+attributed to *Field of Dishonor* (HH4, reconstruction/simulation of
+the Hancock battle shown at Young's court-martial -- structurally
+plausible, since that trial IS in Field of Dishonor). Two independent
+verification passes in this session (see CANON_RULES.md "Шестнадцатая
+сверка", both iterations) could NOT confirm this wording: every
+targeted phrase search returned zero matches anywhere on the web, and
+the one actual copy of the book found (archive.org) is access-
+restricted (digital lending, fulltext-search API returns 403) so it
+could not be checked directly either. This is NOT proof the quotes are
+fabricated, only that they remain UNVERIFIED by this session -- they
+are cited below as "reported, not independently confirmed", not as a
+primary-source quote this ТЗ vouches for. What IS
 verified (via the Honorverse Wiki's own article on the First Battle of
 Hancock, cross-checked against *The Short Victorious War* (HH3) being
 the correct book -- NOT Field of Dishonor, which only covers the later

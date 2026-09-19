@@ -1030,6 +1030,33 @@ If the leader is destroyed or incapacitated:
 
 Do not magically transfer information unavailable to subordinate ships.
 
+## 33.1 Autonomous behavior during the succession window
+
+Between a leader being lost and a successor actually taking command
+(the recognition delay this requires -- currently
+`COMMAND_TRANSFER_DELAY_S` -- is a distinct, engineering-only constant
+from light-speed communication lag, and the two MUST stay documented
+as separate mechanisms, not conflated: see CANON_RULES.md/
+ASSUMPTIONS.md on this exact distinction), a subordinate ship is not
+without orders. Per §61 Nelsonian doctrine ("Initiative within the
+plan"), each ship's own local AI MUST, for that window:
+
+* hold its current tactical vector rather than going idle/ballistic or
+  reverting to some default behavior;
+* keep engaging its last AI-assigned target (§26/§34) rather than
+  dropping fire;
+* keep covering/screening a neighboring ship with its own wedge/
+  position where that is already what it was doing, rather than
+  abandoning the formation's shape mid-transition.
+
+This is explicitly INTERPRETATION grounded in §61, not a book
+citation about this exact mechanic -- the point is that "leaderless"
+must not mean "brainless": a subordinate captain who has lost contact
+with the flag keeps fighting the plan they already understood, per
+§33's own point 5 ("continue according to doctrine/orders"). This
+subsection makes that point concrete enough to implement and test
+against, rather than leaving it as a general aspiration.
+
 ---
 
 # 34. Target Assignment
@@ -1062,6 +1089,49 @@ Target assignment must account for:
 * geometry;
 * threat;
 * ship state.
+
+## 34.1 Doubling -- deliberate concentration, not coincidental pile-on
+
+"Automatic target distribution" above must be more than every ship
+independently picking its own nearest usable contact (the current
+Tactical AI first slice, §26 -- honestly documented as a known
+limitation in ASSUMPTIONS.md, not a design endpoint). A formation-level
+assignment pass, run by the guide ship's side of the command hierarchy
+(§27/§28/§33), should be able to deliberately mass several ships' fire
+onto ONE chosen enemy unit at a time ("doubling" -- concentrating a
+local firepower advantage the way a Nelsonian line-of-battle ship
+doubled on part of an enemy line) rather than each attacker
+independently converging on whatever looks nearest to itself, which
+can accidentally overkill an escort while a more valuable or more
+dangerous enemy unit goes unengaged. Concretely: target assignment
+should weigh EXPECTED CONTRIBUTION per ship-target pairing (would this
+ship's fire actually still matter against this target, or is the
+target already being overkilled by others already assigned to it) --
+not treat "already 4 ships shooting at it" and "nobody shooting at it"
+as equally good assignments just because both are within range.
+
+## 34.2 Missile time-on-target -- coordinated arrival, not a ragged trickle
+
+When multiple missiles from one or more launching ships are assigned
+to detonate against the same target at roughly the same time, their
+LAUNCH should be staggered (not necessarily simultaneous) so that
+their ARRIVAL is coordinated -- overwhelming the target's point
+defense (§22) with more simultaneous threats than it can engage in its
+own reaction-time window, rather than presenting them as a ragged,
+individually-interceptable trickle. This is a direct, mechanically
+necessary consequence of point defense already having a real reaction
+time and per-mount recharge cycle (§22/`PointDefenseMount`) -- a
+salvo's tactical value depends on its members arriving close enough
+together to saturate that capacity, not just on the total missile
+count fired over the course of an engagement.
+
+Both §34.1 and §34.2 are OPEN, not yet implemented -- Tactical AI's
+current target/launch selection (§26, `tactical_ai.gd`) is honestly
+documented as nearest-usable-contact only, with no cross-ship
+coordination of any kind. This subsection specifies what "automatic
+target distribution" and coordinated missile fire are actually
+required to accomplish once that work is picked up, so the next pass
+is not left to invent the goal from scratch.
 
 ---
 
@@ -1210,6 +1280,44 @@ sensor uncertainty
 ```
 
 Distance alone is insufficient.
+
+## 41.1 Crossing the T -- a concrete geometric objective, not just "consider geometry"
+
+Age-of-Sail "crossing the T" (§61) has a direct, already-implemented
+geometric vocabulary in this simulator and Tactical AI SHOULD pursue it
+as an explicit maneuvering objective, not just passively benefit from
+it when it happens to occur:
+
+* the objective is to maneuver so that the ENEMY's attack-geometry
+  sector (`AttackGeometry.Sector`, as computed against the enemy's own
+  local axes) toward this ship classifies as `BOW` or `STERN` --
+  meaning the enemy can only bring bow/stern-arc weapons (`bow_arc()`/
+  `stern_arc()`) to bear, not its full broadside -- while simultaneously
+  keeping THIS ship's own sector toward the enemy classified as `PORT`
+  or `STARBOARD`, so its `broadside_arc()` mounts (§17, PORT+STARBOARD)
+  are live;
+* the enemy's own bow/stern acute-angle wedge vulnerability
+  (`ShipDefenseState.BOW_STERN_ACUTE_ANGLE_HALF_WIDTH_RAD`, currently
+  15 degrees, ASSUMPTION -- see ASSUMPTIONS.md) is the geometric reason
+  this matters mechanically, not just flavor: a ship caught bow/stern-on
+  is not just weapon-disadvantaged, it is also more exposed through
+  that acute-angle gap in its own wedge coverage;
+* this is an INTERPRETATION of §41's existing "AI must consider... weapon
+  geometry... own acceleration capability" requirement, made concrete
+  using the sector vocabulary this codebase already has (`attack_geometry.gd`),
+  not a new, separately-invented mechanic. Honor Harrington herself, per
+  §61, is explicitly Age-of-Sail tactics translated to space; this is
+  that translation applied to a specific, already-coded piece of
+  geometry, which is exactly what §4.1 (canon/logic for genuine gaps)
+  calls for.
+
+This is OPEN, not yet implemented -- current Tactical AI target
+selection (§26) has no maneuvering/intercept-vector component at all
+(it only selects among contacts already in range/arc; it does not
+compute a course to REACH a favorable arc). A future pass implementing
+this should compute an intercept vector toward a `PORT`/`STARBOARD`
+firing solution against the enemy's `BOW`/`STERN`, not just react to
+whatever geometry the ships already happen to be in.
 
 ---
 

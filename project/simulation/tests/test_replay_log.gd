@@ -161,9 +161,13 @@ func _test_missile_launched_event_is_recorded() -> void:
 		_assert(launch_events[0]["data"]["attacker_ship_id"] == "alpha", "the missile_launched event should name the launching ship")
 		_assert(world.missiles.has(launch_events[0]["data"]["missile_id"]), "the missile_id in the event should refer to a real missile in the world")
 
-func _test_ship_destruction_removes_ship_and_records_event() -> void:
+func _test_ship_destruction_becomes_a_wreck_and_records_event() -> void:
+	# ТЗ §63.1: a destroyed ship must NOT disappear -- it becomes an inert
+	# wreck, still present in the world, still obeying inertia.
 	var world := SimulationWorld.new()
 	var alpha := _make_ship(Vector3.ZERO)
+	alpha.velocity = Vector3(0, 0, 100.0)  # coasting -- should be UNCHANGED by destruction
+	alpha.commanded_thrust_local = Vector3.FORWARD  # should be ZEROED by destruction (no crew left to hold it)
 	var alpha_hull := _make_hull(0.0)  # already at zero integrity
 	world.add_ship("alpha", alpha, alpha_hull)
 	world.start_recording()
@@ -171,15 +175,48 @@ func _test_ship_destruction_removes_ship_and_records_event() -> void:
 	_assert(world.ships.has("alpha"), "sanity check: the ship should exist before the first tick")
 	world.tick_simulation(1.0 / 60.0)
 
-	_assert(not world.ships.has("alpha"), "a ship whose hull is already destroyed should be removed from the world by the next tick")
-	_assert(not world.hulls.has("alpha"), "the destroyed ship's hull entry should also be cleaned up (remove_ship)")
+	_assert(world.ships.has("alpha"), "§63.1: a destroyed ship must NOT be removed from the world -- it becomes a wreck")
+	_assert(world.hulls.has("alpha"), "the destroyed ship's hull entry should be kept (its is_destroyed()==true is what keeps it a wreck)")
+	_assert(alpha.is_wreck, "the destroyed ship should be flagged as a wreck")
+	_assert(alpha.commanded_thrust_local == Vector3.ZERO, "a wreck should have its thrust zeroed -- no crew left to hold a heading")
+	_assert(alpha.velocity.is_equal_approx(Vector3(0, 0, 100.0)), "§63.1: a wreck must keep obeying inertia -- its pre-destruction velocity must be left completely untouched")
 	var destroy_events: Array = []
 	for entry in world.replay_log.events:
 		if entry["type"] == "ship_destroyed":
 			destroy_events.append(entry)
-	_assert(destroy_events.size() == 1, "exactly one ship_destroyed event should be recorded")
+	_assert(destroy_events.size() == 1, "exactly one ship_destroyed event should be recorded, even though the ship is not removed")
 	if destroy_events.size() == 1:
 		_assert(destroy_events[0]["data"]["ship_id"] == "alpha", "the ship_destroyed event should name the destroyed ship")
+
+	# The event/wreck-flip should happen exactly once, not every tick.
+	for i in range(5):
+		world.tick_simulation(1.0 / 60.0)
+	var destroy_events_after: Array = []
+	for entry in world.replay_log.events:
+		if entry["type"] == "ship_destroyed":
+			destroy_events_after.append(entry)
+	_assert(destroy_events_after.size() == 1, "a wreck must not be re-processed as newly destroyed on later ticks")
+
+func _test_wreck_is_excluded_from_combat_and_command() -> void:
+	# §63.1: "no longer a ship for any combat/command/AI purpose".
+	var world := SimulationWorld.new()
+	var alpha := _make_ship(Vector3.ZERO)
+	var beta := _make_ship(Vector3(0, 0, -500_000.0))  # would normally be alpha's nearest hostile target
+	var alpha_hull := _make_hull(0.0)  # alpha starts already destroyed
+	var beta_hull := _make_hull()
+	world.add_ship("alpha", alpha, alpha_hull)
+	world.add_ship("beta", beta, beta_hull)
+	world.set_team("alpha", "red")
+	world.set_team("beta", "blue")
+	world.add_weapon_mount("alpha", WeaponMount.new(_make_weapon(), WeaponMount.bow_chaser_arc()))
+	world.add_weapon_mount("beta", WeaponMount.new(_make_weapon(), WeaponMount.bow_chaser_arc()))
+	world.issue_individual_order_now("alpha", IndividualOrder.change_speed(alpha, 500.0))
+
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(alpha.is_wreck, "sanity check: alpha should have become a wreck on this tick")
+	_assert(beta_hull.integrity == 1000.0, "beta should never fire at alpha's wreck -- a wreck must never be selectable as anyone's hostile target")
+	_assert(alpha.commanded_thrust_local == Vector3.ZERO, "a wreck must never receive individual-order thrust, even with an active order still queued for it")
 
 func _test_ship_destruction_removes_member_from_formation() -> void:
 	var world := SimulationWorld.new()
@@ -343,7 +380,8 @@ func _init() -> void:
 	_test_transmit_and_formation_and_missile_launch_commands_are_recorded()
 	_test_weapon_hit_event_is_recorded()
 	_test_missile_launched_event_is_recorded()
-	_test_ship_destruction_removes_ship_and_records_event()
+	_test_ship_destruction_becomes_a_wreck_and_records_event()
+	_test_wreck_is_excluded_from_combat_and_command()
 	_test_ship_destruction_removes_member_from_formation()
 	_test_a_ship_with_no_hull_state_is_never_auto_destroyed()
 	_test_replay_log_to_dict_from_dict_round_trip()

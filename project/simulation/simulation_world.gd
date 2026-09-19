@@ -257,10 +257,19 @@ func is_hostile(ship_id_a: String, ship_id_b: String) -> bool:
 	var team_b = teams.get(ship_id_b, "")
 	return team_a != "" and team_b != "" and team_a != team_b
 
+## ТЗ §63.1 INTERPRETATION: a wreck is excluded here, so it is never
+## selected as a weapon/PD/missile/retreat-threat target by anyone --
+## §63.1 says a wreck "is no longer a ship for any combat... purpose",
+## which this codebase reads as including "worth shooting at", not
+## just "able to shoot back". It remains a normal SENSOR contact
+## (still tracked by _update_sensors) -- only its combat-targeting
+## eligibility changes here.
 func _hostile_ship_ids(ship_id: String) -> Array:
 	var result: Array = []
 	for other_id in ships.keys():
 		if other_id == ship_id:
+			continue
+		if ships[other_id].is_wreck:
 			continue
 		if is_hostile(ship_id, other_id):
 			result.append(other_id)
@@ -367,17 +376,51 @@ func apply_recorded_command(entry: Dictionary) -> void:
 ## it would keep being sensed, targeted, and integrated forever. A
 ## ship with no HullState at all (most existing tests/scenarios never
 ## attach one) is never auto-destroyed, identical to before this pass.
+## ТЗ §63.1 (AGENTS.md, added after this mechanic's first slice):
+## "a destroyed ship must NOT be deleted or vanish from the simulated
+## world -- it becomes a wreck". This SUPERSEDES this function's
+## original implementation, which called `remove_ship()` (full
+## deletion) -- that was flagged as a documented spec violation in
+## ASSUMPTIONS.md and is fixed here. A newly-destroyed ship instead:
+##   * gets `ship.is_wreck = true` (checked -- not re-checked, see the
+##     `not ship.is_wreck` guard below -- by every combat/command/AI
+##     resolver in this file, so a wreck is permanently excluded from
+##     firing, launching, defending, maneuvering-on-command, and
+##     being selected as a hostile target/formation guide);
+##   * has `commanded_thrust_local` zeroed ONCE, here -- no crew left
+##     to hold a heading, but existing `velocity`/`angular_velocity`
+##     are left completely untouched, so `_integrate_ships` keeps
+##     carrying it forward under pure momentum (ТЗ §12), exactly like
+##     a live ship that stopped thrusting;
+##   * is dropped from every formation's membership (pre-existing
+##     `FormationState.remove_member`, as before this pass) and from
+##     `individual_orders`/`ship_combat_directives` ("cannot be given
+##     orders", §63.1) and `ecm_states` (no crew left to run a
+##     jammer) -- but STAYS in `ships`/`hulls`/`sensor_contacts`/
+##     `teams`, since §63.1 explicitly requires it to remain a valid
+##     sensor contact and a persistent, identifiable object.
+## Retention/pruning policy (§63.2 -- how long a wreck should
+## eventually be removed, if ever) is explicitly UNKNOWN/deferred,
+## see ASSUMPTIONS.md -- this function never prunes a wreck itself.
 func _resolve_ship_destruction() -> void:
 	var destroyed_ids: Array = []
 	for ship_id in ships.keys():
+		var ship: ShipPhysicsState = ships[ship_id]
+		if ship.is_wreck:
+			continue  # already processed -- hull stays destroyed forever, never re-trigger
 		var hull = hulls.get(ship_id)
 		if hull != null and hull.is_destroyed():
 			destroyed_ids.append(ship_id)
 	for ship_id in destroyed_ids:
 		_record_event("ship_destroyed", {"ship_id": ship_id})
+		var ship: ShipPhysicsState = ships[ship_id]
+		ship.is_wreck = true
+		ship.commanded_thrust_local = Vector3.ZERO
 		for formation_id in formations.keys():
 			formations[formation_id].remove_member(ship_id)
-		remove_ship(ship_id)
+		individual_orders.erase(ship_id)
+		ship_combat_directives.erase(ship_id)
+		ecm_states.erase(ship_id)
 
 ## Explicit shot trigger. Still callable directly (e.g. by a scenario
 ## script that wants to override AI target selection for one shot);
@@ -465,6 +508,8 @@ func _cleanup_inactive_missiles() -> void:
 func _update_sensors(dt: float) -> void:
 	for observer_id in ships.keys():
 		var observer: ShipPhysicsState = ships[observer_id]
+		if observer.is_wreck:
+			continue  # §63.1: a wreck has no crew/power to operate sensors -- it can still be SENSED by others (see the inner loop below), just cannot sense anything itself
 		var contacts: Dictionary = sensor_contacts.get(observer_id)
 		if contacts == null:
 			contacts = {}
@@ -555,6 +600,8 @@ func _resolve_counter_missile_intercepts() -> void:
 ## time-to-impact, etc.) is still not implemented -- see tactical_ai.gd.
 func _resolve_point_defense(dt: float) -> void:
 	for ship_id in ships.keys():
+		if ships[ship_id].is_wreck:
+			continue  # §63.1: a wreck has no crew/power to operate point defense
 		var mounts: Array = pd_mounts.get(ship_id, [])
 		if mounts.is_empty():
 			continue
@@ -1155,6 +1202,8 @@ func _resolve_individual_orders(dt: float) -> void:
 		var ship: ShipPhysicsState = ships.get(ship_id)
 		if ship == null:
 			continue
+		if ship.is_wreck:
+			continue  # §63.1: a wreck cannot be given orders (_resolve_ship_destruction already clears individual_orders for it, but guard here too in case a stale/replayed order lands afterward)
 
 		if state.current_order == null:
 			state.current_order = state.order_queue.pop_front()
@@ -1264,6 +1313,8 @@ func _resolve_individual_orientation_order(ship: ShipPhysicsState, order: Indivi
 ## this function only handles movement.
 func _resolve_damage_response(dt: float) -> void:
 	for ship_id in ships.keys():
+		if ships[ship_id].is_wreck:
+			continue  # §63.1: a wreck does not retreat -- no crew left to order it, and it must keep obeying pure inertia, not manufactured "retreat" thrust
 		var hull = hulls.get(ship_id)
 		if not TacticalAI.is_critically_damaged(hull, CRITICAL_HULL_FRACTION):
 			continue
@@ -1287,6 +1338,8 @@ func _resolve_damage_response(dt: float) -> void:
 ## there is no default-hostile fallback (see `is_hostile`).
 func _resolve_weapons_ai(dt: float) -> void:
 	for ship_id in ships.keys():
+		if ships[ship_id].is_wreck:
+			continue  # §63.1: a wreck has no crew/power to fire weapons
 		var mounts: Array = weapon_mounts.get(ship_id, [])
 		if mounts.is_empty():
 			continue
@@ -1328,6 +1381,8 @@ func _resolve_weapons_ai(dt: float) -> void:
 ## not launch new missiles, same as it does not fire energy weapons.
 func _resolve_missile_launch_ai(dt: float) -> void:
 	for ship_id in ships.keys():
+		if ships[ship_id].is_wreck:
+			continue  # §63.1: a wreck has no crew/power to launch missiles
 		var tubes: Array = missile_tubes.get(ship_id, [])
 		if tubes.is_empty():
 			continue

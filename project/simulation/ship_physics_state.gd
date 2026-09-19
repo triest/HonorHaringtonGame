@@ -83,6 +83,22 @@ var defense: ShipDefenseState = null
 ## ASSUMPTIONS.md).
 var subsystems = null
 
+## ТЗ §63.1 (Ship Destruction, Wrecks, and Progressive Combat Damage):
+## true once this ship has been destroyed and become an inert wreck
+## (set by SimulationWorld._resolve_ship_destruction, never here). A
+## wreck keeps its physics state and continues to obey momentum/inertia
+## (ТЗ §12) via SimulationWorld._integrate_ships exactly like a live
+## ship -- nothing about `ShipPhysicsState.integrate()` itself changes --
+## but every combat/command/AI resolver in SimulationWorld checks this
+## flag and skips a wreck entirely (no weapons fire, no missile launch,
+## no point defense, no formation/individual command, no damage-
+## triggered retreat, no outgoing sensor observation): a wreck has no
+## crew or power left to do any of those things. It REMAINS a valid
+## incoming sensor CONTACT for other ships (see _update_sensors) and a
+## valid physics object -- see AGENTS.md §63.1, "a destroyed ship must
+## NOT disappear".
+var is_wreck: bool = false
+
 func effective_max_acceleration() -> float:
 	var result: float = max_acceleration_mps2 * propulsion_condition * compensator_condition
 	if subsystems != null:

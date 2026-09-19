@@ -1569,3 +1569,66 @@ exists once the render layer catches up to this).
 ## Deploy-key проверка (2026-09-19T11:26Z)
 
 Переключён на выделенный repo-scoped deploy key (write access) для запланированной задачи вместо личного account-wide SSH-ключа. Проверено: ssh -T отвечает "Hi triest/HonorHaringtonGame!", push проходит.
+
+## §63.1 Wrecks — a flag on the existing ship, not a new object type
+
+When AGENTS.md §63 was added (after the previous pass shipped
+`_resolve_ship_destruction()` calling `remove_ship()`), it directly
+contradicted what had just been built — §63.1 requires a destroyed ship
+to persist as an inert wreck, not vanish. Fixed by adding a single
+`is_wreck: bool` flag to `ShipPhysicsState` rather than introducing a
+separate "Wreck" class/type. Reasoning: a wreck is not a different KIND
+of physics object — it has the exact same position/velocity/orientation/
+mass that must keep obeying `ShipPhysicsState.integrate()`/
+`_integrate_ships` exactly as before (§12 inertia does not care whether
+a hull has a crew) — it is the same object with everything ELSE about it
+(weapons, sensors, command authority) switched off. A flag plus resolver-
+level guards is the minimal change that satisfies that; a parallel
+"Wreck" class would have needed either duplicating `ShipPhysicsState`'s
+physics fields or wrapping/converting the object at destruction time
+(losing identity — sensor contacts, formation history, replay events all
+key on ship_id, and a wreck must remain "the same ship, now dead", not a
+newly-spawned different entity).
+
+Every SimulationWorld resolver that represents crew-operated behavior now
+checks `.is_wreck` at the top of its per-ship loop and skips a wreck
+entirely: `_resolve_weapons_ai`, `_resolve_missile_launch_ai`,
+`_resolve_point_defense`, `_resolve_damage_response` (a wreck must NOT
+generate "critically damaged -> retreat" thrust — its hull fraction is
+permanently 0, which would otherwise always match that rule and
+manufacture thrust a ship with no crew cannot produce, directly
+contradicting "obeys inertia" in the same section), `_resolve_individual_
+orders` (belt-and-suspenders; `_resolve_ship_destruction` already erases
+`individual_orders[ship_id]` at the moment of destruction, so this guard
+only matters for an edge case like a stale replayed command landing
+after the fact), and `_update_sensors`'s OBSERVER loop (a wreck stops
+sensing others, but the same function's inner loop keeps letting every
+other ship sense the wreck as a contact — unchanged, since being sensed
+and being able to sense are different directions of the same loop).
+
+`_hostile_ship_ids()` also excludes wrecks — this is the one place where
+§63.1's exact wording ("no longer a ship for any combat... purpose")
+required a judgment call rather than a literal reading: the section
+explicitly says a wreck cannot be a firing platform or formation guide,
+but does not explicitly say it cannot be fired UPON. Chose to exclude it
+from targeting too, per AGENTS.md §4.1 ("where canon is silent, logic
+and common sense, not invention"): continuing to expend ordnance on
+already-dead debris has no real tactical logic in Honor Harrington's
+Age-of-Sail-in-space combat model (§61), and letting wrecks quietly
+soak up wasted fire would be a stranger, more surprising behavior to
+build than simply having weapon/PD/AI logic treat them as non-targets,
+consistent with them already being excluded as firing platforms. If a
+future pass finds a canonical or gameplay reason ships SHOULD finish off
+a wreck (a "coup de grâce" order, salvage denial, etc.), that is a
+narrower, deliberate addition on top of this default, not a reason this
+default was wrong.
+
+Not touched, deliberately: `weapon_mounts`/`missile_tubes`/`pd_mounts`/
+`teams` dictionary entries for a wreck are left in place (not erased) —
+they do no harm now that every consumer of them gates on `.is_wreck`
+first, and AGENTS.md §63.1 itself flags a possible future "salvage"
+mechanic that might want this equipment data still attached to the hulk
+rather than thrown away. Erasing them now would be optimizing for a
+requirement (cleanup/memory) the spec explicitly does NOT ask for yet
+(§63.2's retention policy is UNKNOWN/open) at the cost of data a later
+pass might actually want.

@@ -134,3 +134,15 @@ Wiki 2026-09-18 -- see AGENTS.md §18.1 for full detail/citations):
 * **Doubling (§34.1):** formation-level target assignment should deliberately mass fire on one chosen enemy unit at a time (weighing expected marginal contribution per ship-target pairing), not let every ship independently converge on its own nearest contact. OPEN -- current AI is nearest-contact-only, no cross-ship coordination.
 * **Missile time-on-target (§34.2):** stagger launch so simultaneous arrival saturates target PD's reaction-time window, instead of a ragged trickle. OPEN.
 * **Succession-window initiative (§33.1):** between leader loss and successor takeover (`COMMAND_TRANSFER_DELAY_S`, distinct from light-speed comm lag), a subordinate ship holds vector, keeps engaging its last assigned target, keeps covering a neighbor -- never goes idle. OPEN, not yet implemented in local single-ship AI behavior.
+### 2.11. FORMATION MUTUAL DEFENSIVE COVERAGE (AGENTS.md §22.1)
+* PD/wedge coverage has real directional gaps (bow/stern acute angle,
+  §41.1); close formation lets a neighboring ship's PD/wedge cover an
+  arc the first ship's own systems can't reach -- part of why "wall of
+  battle" (§61) is the doctrine. Breaking formation (ship lost, out of
+  station, straggling, dispersed order) genuinely loses that coverage
+  and exposes the uncovered gap to exploitation. INTERPRETATION --
+  no pinned book citation found this session (CANON_RULES.md
+  "Шестнадцатая сверка"), built from already-established §41.1/§33.1/
+  §61. NOT implemented: PD is currently omnidirectional (no firing-arc
+  model at all), and FormationState has no coverage concept.
+

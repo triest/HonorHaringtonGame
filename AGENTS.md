@@ -732,6 +732,71 @@ Point-defense systems must operate based on:
 
 ---
 
+## 22.1 Formation mutual defensive coverage -- PD/sidewall gaps are real, and breaking formation exposes them
+
+Point defense and sidewall coverage are NOT uniform in every direction
+for a single ship. This is already established elsewhere in this ТЗ:
+§41.1 documents a concrete bow/stern acute-angle gap in a ship's own
+wedge coverage (`ShipDefenseState.BOW_STERN_ACUTE_ANGLE_HALF_WIDTH_RAD`),
+and §33.1 already uses the language of one ship "covering/screening a
+neighboring ship with its own wedge/position." §22.1 makes that
+mutual-coverage idea an explicit, general rule rather than something
+implied only for the succession-window case:
+
+* a single ship's own PD arcs and wedge/sidewall geometry have real
+  gaps (bow/stern acute angle per §41.1, and any future PD mount
+  firing-arc restriction, see the honest gap below) -- this is a
+  physical consequence of geometry, not a balance knob;
+* keeping close formation station lets a neighboring ship's PD fire
+  and wedge/sidewall aspect cover an arc that the first ship's own
+  systems cannot reach -- this is a large part of WHY "wall of
+  battle" formation fighting (§61) is the doctrine instead of
+  dispersing every ship independently: a formation is a mutual
+  defensive structure, not merely a firing-line convenience;
+* consequently, when formation integrity breaks -- a ship is
+  destroyed, falls out of station, straggles, loses the guide (see
+  §33/§33.1 for the succession case specifically), or is ordered into
+  a dispersed/open formation -- the mutual coverage those neighbors
+  were providing for each other's gaps is genuinely lost, not just
+  cosmetically. A ship (or a formation position) that loses its
+  covering neighbor becomes exploitable through exactly the gap that
+  neighbor used to cover, and enemy targeting/AI (§26/§34) SHOULD be
+  able to recognize and exploit this rather than treating every ship
+  in a broken formation as equally defended as one still in station.
+
+Classification: INTERPRETATION, not a pinned book citation. This
+session searched for the specific canon passage the user described
+(a formation's ships covering a neighbor's own point-defense gap, and
+that coverage failing when the formation is disrupted) and did not
+manage to retrieve a citable exact passage/quote -- see CANON_RULES.md
+"Шестнадцатая сверка" for what was and wasn't found. The rule above is
+built from what IS already pinned in this ТЗ (§41.1's wedge gap,
+§33.1's covering-neighbor language, §61's formation-fighting doctrine)
+plus §4.1 (logic/common sense where canon is silent on the exact
+mechanism): ships fighting in formation specifically FOR mutual
+support, with that support being geometric/directional and therefore
+losable, is consistent with everything else already established here,
+even without a pinned quote for this specific paragraph.
+
+HONEST GAP (nothing above is implemented yet): `PointDefenseMount`/
+`PointDefenseResolution` currently model PD as omnidirectional --
+range and reaction/recharge time only (see `point_defense_mount.gd`),
+with NO firing-arc/facing concept at all, so there is currently no
+per-ship "gap" for PD to begin with, only the already-modeled wedge
+bow/stern gap (§41.1). `FormationState` (§29/Milestone 10) tracks
+station offsets but has no concept of one ship's coverage extending
+to a neighbor's defense at all. Implementing §22.1 for real needs, in
+order: (1) a PD/wedge firing-arc model per ship (extends §41.1's
+existing sector vocabulary, `attack_geometry.gd`), (2) a formation-
+level check of which neighbor (if any) is in a position to cover a
+given ship's gap arc this tick, (3) folding that coverage into PD/
+wedge resolution so a covered gap is actually harder to hit through
+than an uncovered one, and (4) AI/targeting (§26/§34) preferring
+gaps that are currently uncovered. See ASSUMPTIONS.md for per-step
+cost notes, same pattern as the §33.1/§34.1/§34.2/§41.1 entry.
+
+---
+
 # 23. Sensors
 
 The battlefield must NOT automatically be fully visible.

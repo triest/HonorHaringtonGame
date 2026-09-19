@@ -1,7 +1,10 @@
 # ASSUMPTIONS.md - Simulator Approximations
 
-## 1. REPLAY AND SCENARIO ACCURACY [ASSUMPTION]
-* **Deterministic Pseudo-Randomness:** All micro-variations in point-defense interception rates and sensor noise are bound to a seed variable initialized at scenario start. This guarantees that replays recreate spatial data frame-by-frame without recording full telemetry video.
+## 1. REPLAY AND SCENARIO ACCURACY [ASSUMPTION] -- UPDATED 2026-09-19, Milestone 12 first slice
+* **Originally written before Milestone 1 as a forward-looking plan, now checked against actual code (as its own text asked future passes to do):** the premise "micro-variations... bound to a seed variable" does NOT match reality -- there is NO unseeded (or seeded) randomness anywhere in `simulation/*.gd` today (verified by grep for `randf`/`randi`/`RandomNumberGenerator`/`seed` across the whole directory; every point-defense/sensor/combat resolution formula that exists is a deterministic function of its inputs, per ТЗ §43's own requirement, which this codebase has simply honored throughout rather than needing a seed to enforce it).
+* **What replay actually relies on instead (Milestone 12, `replay_log.gd`/`SimulationWorld.start_recording`+`apply_recorded_command`):** since there is no randomness to reproduce, recording (initial scenario setup, already built by a scenario script) + (every command issued, via `_record_command`) + (the fixed timestep, ТЗ §43/§44) is sufficient by itself to reproduce a run exactly, by re-running the simulation from scratch with the same setup and re-issuing the same recorded commands at the same ticks -- proven by `test_replay_log.gd`'s `_test_replay_reproduces_the_original_run`. No seed is actually needed for correctness today.
+* `ReplayLog.random_seed` is kept as a field (default 0, settable via `start_recording(seed)`) purely for forward compatibility -- nothing reads it back. IF a future Milestone introduces real seeded randomness (e.g. sensor noise, as this entry originally anticipated), that pass must (a) actually construct a `RandomNumberGenerator` seeded from this field somewhere reachable by the resolvers that would use it, and (b) update this entry again to describe the real mechanism, not treat the field's mere existence as "done".
+* Full periodic state snapshots for fast seeking into a long replay (§45's own "if practical" hedge) are explicitly NOT implemented -- would require `to_dict()`/`from_dict()` on roughly two dozen stateful classes across the simulation, a separate pass. Today, "seeking" means replaying from tick 0 via `apply_recorded_command`, which is instant for a short engagement but does not scale to a long multi-thousand-tick scenario without snapshots -- honestly deferred, not forgotten.
 
 ## 2. SENSOR TRACKING STATES [ASSUMPTION]
 * **Confidence Interpolation:** When a target is obscured by heavy ECM, the simulator interpolates its position based on its last known velocity vector and active acceleration. This creates a spatial displacement between "Sensor Truth" and "Actual Reality" for the AI and Player UI.
@@ -1345,6 +1348,63 @@ Milestone 12+ не начаты.
   запись "не проверяется владение назначенной целью формацией/
   иерархией").
 
+## Milestone 12: Replay first slice -- ship destruction was a previously-invisible gap, not a deferred one
+
+Unlike most gaps logged in this file (a feature honestly not started
+yet), automatic ship destruction/removal was a case where every
+INDIVIDUAL piece already existed and looked correct -- `HullState.
+apply_damage()`/`is_destroyed()` worked fine, formation-leader-loss logic
+already read `is_destroyed()` correctly -- but nothing in
+`SimulationWorld.tick_simulation()` ever actually removed a ship once its
+hull reached zero. It would stay in `ships`/`hulls` forever: still
+sensed, still targetable, still physically integrated, just with a
+`HullState.integrity` of 0 that almost nothing looked at. This was found
+only while wiring the `ship_destroyed` replay event (Milestone 12 needs a
+real "the ship is gone" moment to record one) -- worth flagging explicitly
+as a caution for future passes: "every piece works when tested in
+isolation" is not the same guarantee as "the pieces are actually wired
+together", and this codebase's own test suite (28 files, all passing)
+did not catch this because no existing test ever ran a hull down to
+exactly zero through `tick_simulation` and then checked whether the ship
+was still there afterward -- it is easy to write a thorough test for a
+mechanic you know you built and never think to test for a consequence
+you did not realize was missing.
+
+Fix (`_resolve_ship_destruction`, see ARCHITECTURE.md for the full
+design rationale): checked once per tick, ship removed via the
+pre-existing `remove_ship` plus a new `FormationState.remove_member`
+call this file's own formation code already exposed but
+`SimulationWorld` never called on destruction. ASSUMPTION (INTERPRETATION,
+not canon -- no Honorverse source specifies simulator bookkeeping):
+removal happens one tick after the KILLING hit lands (mirrors
+`_cleanup_inactive_missiles`'s existing timing convention exactly, see
+ARCHITECTURE.md), and a missile already in flight toward a now-removed
+ship keeps flying at its last physics state (frozen, not redirected or
+despawned) rather than being retargeted -- a dead hulk not maneuvering
+under its own power is physically sensible and required no new code
+(GDScript's own refcounting keeps the `ShipPhysicsState` object alive via
+`MissileState.target` even after `ships.erase()`).
+
+## Milestone 12: commands vs. events, and why `ReplayLog` does not store a state snapshot
+
+ASSUMPTION/INTERPRETATION: `ReplayLog` records COMMANDS (inputs, replayed
+by re-calling the same public API) and EVENTS (outputs of resolution,
+recorded for a future Battle Report/UI but never replayed/re-applied) as
+two clearly separate arrays, never merged into one "things that happened"
+timeline. Chose NOT to also record a snapshot of the initial ship/
+formation/mount setup inside `ReplayLog` itself -- that setup already
+lives in whatever scenario script builds it (no "Scenario" file format
+exists yet, ТЗ §46/Milestone 13, honestly not started), so a `ReplayLog`
+today is only meaningful paired with the SAME scenario-construction code
+that produced the world it was recorded from, not a fully self-contained
+file. This is a real, honestly-logged limitation, not an oversight: once
+Milestone 13 (Scenarios) gives scenarios a real serializable format, a
+replay file should probably embed (or reference) the scenario it was
+recorded from so a saved `.json` replay is meaningful on its own without
+also having the exact scenario-building script around -- left for that
+future pass rather than inventing a scenario format prematurely just to
+serve replay.
+
 Честно НЕ сделано (см. CHANGELOG.md за полный список): STRUCTURAL_
 INTEGRITY/POWER/DEFENSIVE_SYSTEMS без потребителя (см. выше); задержка
 для `order_missile_launch` (сознательно мгновенна); зависимость задержки
@@ -1353,4 +1413,9 @@ INTEGRITY/POWER/DEFENSIVE_SYSTEMS без потребителя (см. выше)
 missile policy"/"point-defense policy"; "sensor mode"/"ECM mode"/
 "defensive posture"; "target priority" за пределами single-target
 designation; "approach" как отдельный примитив; многоуровневая иерархия
-команд §28; Milestone 12+ не начаты.
+команд §28; периодические снимки состояния для быстрого seek (§45,
+"if practical"); большинство типов событий §37 Battle Reports (contact
+detected, missile launch detected, incoming missile, subsystem damaged,
+formation broken за пределами потери ведущего, command lost, retreat
+initiated); привязка `ReplayLog` к формату сценария (Milestone 13);
+Milestone 13+ не начаты.

@@ -49,6 +49,7 @@ const IndividualOrder = preload("res://simulation/individual_order.gd")
 const IndividualCommandState = preload("res://simulation/individual_command_state.gd")
 const ShipCombatDirective = preload("res://simulation/ship_combat_directive.gd")
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
+const ReplayLog = preload("res://simulation/replay_log.gd")
 
 var clock: SimClock
 
@@ -64,6 +65,16 @@ var formations: Dictionary = {}       # formation_id -> FormationState (§27/§2
 var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
 var ship_combat_directives: Dictionary = {}  # ship_id -> ShipCombatDirective (§30 target/weapon mode, Milestone 11 second slice)
 var _pending_command_transmissions: Array = []  # Array[Dictionary{ready_at:float, ship_id:String, callable:Callable}] -- §25/§31 communication-delayed individual orders, see transmit_individual_order_now/transmit_ship_target/etc. below
+
+## ТЗ §45 Replay (Milestone 12): null (default) means recording is OFF,
+## identical to every pre-existing test/scenario -- _record_command/
+## _record_event below are no-ops until start_recording() is called.
+var replay_log: ReplayLog = null
+
+## Local tick counter, independent of SimClock.tick_count (most
+## existing tests drive tick_simulation() directly without ever going
+## through a SimClock), used only to timestamp replay commands/events.
+var _tick_index: int = 0
 
 ## ASSUMPTION (§26 "retreat"/"disengage", no canonical figure found): a
 ## ship whose HullState integrity fraction drops to or below this stops
@@ -191,6 +202,49 @@ func add_formation(formation_id: String, guide_ship_id: String) -> FormationStat
 func get_formation(formation_id: String) -> FormationState:
 	return formations.get(formation_id)
 
+## §29 Formation Orders via SimulationWorld (ТЗ §45 Replay, Milestone
+## 12 slice): thin, ADDITIONAL wrappers around FormationState's own
+## issue_order/issue_order_now/clear_orders. Calling FormationState
+## directly (as every existing test/scenario still does) remains fully
+## supported and unaffected -- these wrappers exist ONLY so formation
+## orders funnel through a SimulationWorld-level choke point that CAN
+## be recorded for replay (see _record_command below), the same reason
+## transmit_individual_order_now funnels individual orders through
+## this file instead of touching IndividualCommandState directly. A
+## formation_id that does not exist is a safe no-op (nothing to record
+## either -- there is no order to have taken effect).
+func issue_formation_order(formation_id: String, order) -> void:
+	var formation: FormationState = formations.get(formation_id)
+	if formation == null:
+		return
+	_record_command("issue_formation_order", {"formation_id": formation_id, "order": order.to_dict()})
+	formation.issue_order(order)
+
+func issue_formation_orders(formation_id: String, orders: Array) -> void:
+	var formation: FormationState = formations.get(formation_id)
+	if formation == null:
+		return
+	for order in orders:
+		_record_command("issue_formation_order", {"formation_id": formation_id, "order": order.to_dict()})
+	formation.issue_orders(orders)
+
+## Interrupt whatever `formation_id` is currently doing (or has
+## queued) and start `order` immediately -- the SimulationWorld-level,
+## recordable equivalent of FormationState.issue_order_now.
+func issue_formation_order_now(formation_id: String, order) -> void:
+	var formation: FormationState = formations.get(formation_id)
+	if formation == null:
+		return
+	_record_command("issue_formation_order_now", {"formation_id": formation_id, "order": order.to_dict()})
+	formation.issue_order_now(order)
+
+func clear_formation_orders(formation_id: String) -> void:
+	var formation: FormationState = formations.get(formation_id)
+	if formation == null:
+		return
+	_record_command("clear_formation_orders", {"formation_id": formation_id})
+	formation.clear_orders()
+
 ## ТЗ §26: minimal hostility bookkeeping. Two ships are hostile to each
 ## other only if BOTH have a non-empty team assigned AND the teams
 ## differ -- a ship with no team set is neutral (never selected as a
@@ -220,6 +274,111 @@ func remove_missile(missile_id: String) -> void:
 	missiles.erase(missile_id)
 	missile_owners.erase(missile_id)
 
+## ТЗ §45 Replay (Milestone 12): begin recording every command issued
+## through this world's public order-issuing API and every event
+## recorded via _record_event, from this tick onward. `seed` is stored
+## on the log for forward compatibility (see ReplayLog class doc) --
+## nothing in this simulation currently reads it back, since there is
+## no unseeded randomness anywhere to seed. Calling this again simply
+## replaces any log already being recorded (starts fresh).
+func start_recording(seed: int = 0) -> void:
+	replay_log = ReplayLog.new()
+	replay_log.random_seed = seed
+
+## Stops recording (if any) and returns the completed log, or null if
+## recording was never started. Safe to call unconditionally.
+func stop_recording() -> ReplayLog:
+	var finished := replay_log
+	replay_log = null
+	return finished
+
+func _record_command(command_name: String, args: Dictionary) -> void:
+	if replay_log == null:
+		return
+	replay_log.record_command(_tick_index, world_sim_time, command_name, args)
+
+func _record_event(event_type: String, data: Dictionary) -> void:
+	if replay_log == null:
+		return
+	replay_log.record_event(_tick_index, world_sim_time, event_type, data)
+
+## ТЗ §45 Replay: replays one entry from a ReplayLog.commands array
+## (as produced by _record_command) by dispatching it back to the
+## matching public SimulationWorld API, reconstructing any order
+## object from its to_dict() form via IndividualOrder.from_dict/
+## FormationOrder.from_dict. Intended use: rebuild a fresh
+## SimulationWorld with the SAME initial ship/formation/mount setup a
+## scenario script already constructs (recording is deterministic,
+## not a snapshot of setup -- see ReplayLog class doc), then call this
+## once per recorded command, interleaved with tick_simulation() calls
+## so each command lands on its own recorded tick. Does NOT replay
+## `events` (those are a RECORD of what happened, produced by the
+## simulation itself, not inputs to replay). An unrecognized command
+## name is skipped with a warning rather than crashing (e.g. a log
+## written by a future version with a command this version does not
+## know).
+func apply_recorded_command(entry: Dictionary) -> void:
+	var command_name: String = entry.get("name", "")
+	var args: Dictionary = entry.get("args", {})
+	match command_name:
+		"issue_individual_order_now":
+			issue_individual_order_now(args["ship_id"], IndividualOrder.from_dict(args["order"]))
+		"return_ship_to_formation":
+			return_ship_to_formation(args["ship_id"])
+		"transmit_individual_order_now":
+			transmit_individual_order_now(args["ship_id"], IndividualOrder.from_dict(args["order"]))
+		"transmit_ship_target":
+			transmit_ship_target(args["ship_id"], args["target_ship_id"])
+		"transmit_clear_ship_target":
+			transmit_clear_ship_target(args["ship_id"])
+		"transmit_ship_weapons_free":
+			transmit_ship_weapons_free(args["ship_id"], args["is_free"])
+		"transmit_return_ship_to_formation":
+			transmit_return_ship_to_formation(args["ship_id"])
+		"set_ship_target":
+			set_ship_target(args["ship_id"], args["target_ship_id"])
+		"clear_ship_target":
+			clear_ship_target(args["ship_id"])
+		"set_ship_weapons_free":
+			set_ship_weapons_free(args["ship_id"], args["is_free"])
+		"order_missile_launch":
+			order_missile_launch(args["ship_id"], args.get("target_ship_id", ""))
+		"issue_formation_order":
+			issue_formation_order(args["formation_id"], FormationOrder.from_dict(args["order"]))
+		"issue_formation_order_now":
+			issue_formation_order_now(args["formation_id"], FormationOrder.from_dict(args["order"]))
+		"clear_formation_orders":
+			clear_formation_orders(args["formation_id"])
+		_:
+			push_warning("SimulationWorld.apply_recorded_command: unknown command '%s', skipped" % command_name)
+
+## ТЗ §25/§37 "ship lost"/"target destroyed" (Milestone 12): a ship
+## whose HullState (still the single-scalar §58 placeholder pool)
+## reached zero integrity by the END of the previous tick is removed
+## from the world at the START of this one -- the same "cleanup lags
+## by one tick, applied before anything this tick reads world state"
+## convention `_cleanup_inactive_missiles` already uses for missiles,
+## so damage that kills a ship is still fully visible (sensors,
+## targeting, this replay event) for the tick it lands on, and
+## removal never races a same-tick kill shot. This closes a
+## previously-honest gap: `HullState.is_destroyed()` existed and was
+## already READ by formation-leader-loss logic, but nothing in the
+## tick loop ever actually removed a destroyed ship from `ships` --
+## it would keep being sensed, targeted, and integrated forever. A
+## ship with no HullState at all (most existing tests/scenarios never
+## attach one) is never auto-destroyed, identical to before this pass.
+func _resolve_ship_destruction() -> void:
+	var destroyed_ids: Array = []
+	for ship_id in ships.keys():
+		var hull = hulls.get(ship_id)
+		if hull != null and hull.is_destroyed():
+			destroyed_ids.append(ship_id)
+	for ship_id in destroyed_ids:
+		_record_event("ship_destroyed", {"ship_id": ship_id})
+		for formation_id in formations.keys():
+			formations[formation_id].remove_member(ship_id)
+		remove_ship(ship_id)
+
 ## Explicit shot trigger. Still callable directly (e.g. by a scenario
 ## script that wants to override AI target selection for one shot);
 ## `_resolve_weapons_ai` now also calls this automatically once a target
@@ -229,7 +388,10 @@ func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 	var target = ships.get(target_ship_id)
 	if attacker == null or target == null:
 		return null
-	return WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems)
+	var result = WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems)
+	if result != null and result.outcome == WeaponResolution.Outcome.HIT_UNPROTECTED and result.damage_dealt > 0.0:
+		_record_event("weapon_hit", {"attacker_ship_id": attacker_ship_id, "target_ship_id": target_ship_id, "damage_dealt": result.damage_dealt})
+	return result
 
 func _on_simulation_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	tick_simulation(dt)
@@ -238,10 +400,12 @@ func _on_simulation_tick(dt: float, _tick: int, _sim_time: float) -> void:
 ## method (not gated behind the SimClock/Node signal) so tests -- and any
 ## future scenario runner -- can drive it directly without a SceneTree.
 func tick_simulation(dt: float) -> void:
+	_tick_index += 1
 	world_sim_time += dt
 	_resolve_pending_command_transmissions()
 	_sync_subsystem_driven_conditions()
 	_cleanup_inactive_missiles()
+	_resolve_ship_destruction()
 	_update_sensors(dt)
 	_update_missiles(dt)
 	_resolve_counter_missile_intercepts()
@@ -565,7 +729,7 @@ func _resolve_formation_keeping(dt: float) -> void:
 			elif world_sim_time - formation.guide_lost_since >= COMMAND_TRANSFER_DELAY_S:
 				var successor_id: String = TacticalAI.select_formation_successor(formation, ships, hulls, CRITICAL_HULL_FRACTION)
 				if successor_id != "":
-					_transfer_formation_command(formation, successor_id)
+					_transfer_formation_command(formation_id, formation, successor_id)
 				# else: nobody left fit to lead -- §33 "do not magically
 				# transfer information unavailable to subordinate ships"
 				# means there is honestly nobody to hand command to; the
@@ -655,12 +819,13 @@ func _resolve_formation_keeping(dt: float) -> void:
 ## no longer in charge. A former member that no longer exists in `ships`
 ## (destroyed) is silently dropped rather than carried forward as a
 ## dangling station.
-func _transfer_formation_command(formation: FormationState, new_guide_id: String) -> void:
+func _transfer_formation_command(formation_id: String, formation: FormationState, new_guide_id: String) -> void:
 	var new_guide: ShipPhysicsState = ships.get(new_guide_id)
 	if new_guide == null:
 		return  # should not happen (caller already validated), safe no-op
 
 	var old_guide_id: String = formation.guide_ship_id
+	_record_event("formation_leader_lost", {"formation_id": formation_id, "old_guide_id": old_guide_id, "new_guide_id": new_guide_id})
 	var old_member_ids: Array = formation.member_ids()
 	var inverse_orientation: Quaternion = new_guide.orientation.inverse()
 
@@ -731,6 +896,7 @@ func issue_individual_orders(ship_id: String, orders: Array) -> void:
 ## missile" that shouldn't wait for an in-progress course change to
 ## finish first.
 func issue_individual_order_now(ship_id: String, order: IndividualOrder) -> void:
+	_record_command("issue_individual_order_now", {"ship_id": ship_id, "order": order.to_dict()})
 	_get_or_create_individual_command_state(ship_id).issue_order_now(order)
 
 ## §30 "return to formation" / §31's worked example's second half. Drops
@@ -742,6 +908,7 @@ func issue_individual_order_now(ship_id: String, order: IndividualOrder) -> void
 ## ship with no formation at all just keeps whatever thrust its last
 ## individual order left it at.
 func return_ship_to_formation(ship_id: String) -> void:
+	_record_command("return_ship_to_formation", {"ship_id": ship_id})
 	if individual_orders.has(ship_id):
 		individual_orders[ship_id].clear_orders()
 
@@ -807,18 +974,23 @@ func _resolve_pending_command_transmissions() -> void:
 ## convention, matching `fire_weapon()`, and reconsidering that is out of
 ## scope for this pass.
 func transmit_individual_order_now(ship_id: String, order: IndividualOrder) -> void:
+	_record_command("transmit_individual_order_now", {"ship_id": ship_id, "order": order.to_dict()})
 	_queue_command_transmission(ship_id, Callable(self, "issue_individual_order_now").bind(ship_id, order))
 
 func transmit_ship_target(ship_id: String, target_ship_id: String) -> void:
+	_record_command("transmit_ship_target", {"ship_id": ship_id, "target_ship_id": target_ship_id})
 	_queue_command_transmission(ship_id, Callable(self, "set_ship_target").bind(ship_id, target_ship_id))
 
 func transmit_clear_ship_target(ship_id: String) -> void:
+	_record_command("transmit_clear_ship_target", {"ship_id": ship_id})
 	_queue_command_transmission(ship_id, Callable(self, "clear_ship_target").bind(ship_id))
 
 func transmit_ship_weapons_free(ship_id: String, is_free: bool) -> void:
+	_record_command("transmit_ship_weapons_free", {"ship_id": ship_id, "is_free": is_free})
 	_queue_command_transmission(ship_id, Callable(self, "set_ship_weapons_free").bind(ship_id, is_free))
 
 func transmit_return_ship_to_formation(ship_id: String) -> void:
+	_record_command("transmit_return_ship_to_formation", {"ship_id": ship_id})
 	_queue_command_transmission(ship_id, Callable(self, "return_ship_to_formation").bind(ship_id))
 
 ## §30 "target"/"target priority"/"weapon mode" (Milestone 11, second
@@ -838,17 +1010,20 @@ func _get_or_create_combat_directive(ship_id: String) -> ShipCombatDirective:
 ## in _resolve_weapon_target every tick until it becomes valid or is
 ## cleared (see ShipCombatDirective doc comment).
 func set_ship_target(ship_id: String, target_ship_id: String) -> void:
+	_record_command("set_ship_target", {"ship_id": ship_id, "target_ship_id": target_ship_id})
 	_get_or_create_combat_directive(ship_id).set_manual_target(target_ship_id)
 
 ## Reverts `ship_id` to automatic (TacticalAI) nearest-hostile target
 ## selection.
 func clear_ship_target(ship_id: String) -> void:
+	_record_command("clear_ship_target", {"ship_id": ship_id})
 	if ship_combat_directives.has(ship_id):
 		ship_combat_directives[ship_id].clear_manual_target()
 
 ## §30 "weapon mode": true = free to fire (default, pre-existing
 ## behavior), false = hold fire -- see ShipCombatDirective.weapons_free.
 func set_ship_weapons_free(ship_id: String, is_free: bool) -> void:
+	_record_command("set_ship_weapons_free", {"ship_id": ship_id, "is_free": is_free})
 	_get_or_create_combat_directive(ship_id).set_weapons_free(is_free)
 
 ## §30 "missile launch" (Milestone 11) -- a discrete, one-time "fire a
@@ -895,6 +1070,7 @@ func set_ship_weapons_free(ship_id: String, is_free: bool) -> void:
 ## none -- held fire, disengaging, no valid target, or no tube ready/
 ## in range).
 func order_missile_launch(ship_id: String, target_ship_id: String = "") -> int:
+	_record_command("order_missile_launch", {"ship_id": ship_id, "target_ship_id": target_ship_id})
 	var ship: ShipPhysicsState = ships.get(ship_id)
 	if ship == null:
 		return 0
@@ -1203,6 +1379,7 @@ func _launch_missile_from_tube(attacker_ship_id: String, attacker: ShipPhysicsSt
 	var missile_id: String = "ai_missile_%d" % _next_ai_missile_id
 	add_missile(missile_id, missile, attacker_ship_id)
 	tube.mark_launched()
+	_record_event("missile_launched", {"attacker_ship_id": attacker_ship_id, "missile_id": missile_id})
 
 func _integrate_ships(dt: float) -> void:
 	for ship_id in ships.keys():

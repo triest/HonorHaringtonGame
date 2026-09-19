@@ -167,3 +167,36 @@ func is_complete(guide) -> bool:
 			return abs(guide.velocity.length() - target_velocity_mps.length()) <= speed_tolerance_mps
 		_:
 			return true
+
+## ТЗ §45 Replay (Milestone 12): flattens this order to JSON-safe types
+## (int/float/Array/Dictionary) so SimulationWorld._record_command can
+## log an issue_formation_order/issue_formation_order_now call through
+## ReplayLog and have it survive a save_to_file()/load_from_file()
+## round-trip. See from_dict() for the inverse.
+func to_dict() -> Dictionary:
+	var offsets: Dictionary = {}
+	for ship_id in new_offsets_local.keys():
+		var v: Vector3 = new_offsets_local[ship_id]
+		offsets[ship_id] = [v.x, v.y, v.z]
+	return {
+		"kind": kind,
+		"target_velocity_mps": [target_velocity_mps.x, target_velocity_mps.y, target_velocity_mps.z],
+		"new_offsets_local": offsets,
+		"heading_tolerance_rad": heading_tolerance_rad,
+		"speed_tolerance_mps": speed_tolerance_mps,
+	}
+
+static func from_dict(d: Dictionary) -> FormationOrder:
+	var order := FormationOrder.new()
+	order.kind = int(d.get("kind", Kind.HOLD_FORMATION))
+	var v: Array = d.get("target_velocity_mps", [0.0, 0.0, 0.0])
+	order.target_velocity_mps = Vector3(v[0], v[1], v[2])
+	var offsets: Dictionary = d.get("new_offsets_local", {})
+	var result: Dictionary = {}
+	for ship_id in offsets.keys():
+		var arr: Array = offsets[ship_id]
+		result[ship_id] = Vector3(arr[0], arr[1], arr[2])
+	order.new_offsets_local = result
+	order.heading_tolerance_rad = float(d.get("heading_tolerance_rad", 0.02))
+	order.speed_tolerance_mps = float(d.get("speed_tolerance_mps", 0.5))
+	return order

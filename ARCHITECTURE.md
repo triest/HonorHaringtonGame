@@ -1443,3 +1443,125 @@ changed except `tick_simulation`'s one new call and `remove_ship`'s one
 new cleanup loop). New test file `test_command_transmission.gd` (9 tests,
 18 assertions), exclusively through `SimulationWorld.tick_simulation()`
 since the entire point under test is behavior across several ticks.
+
+## §45 Replay, first slice — record commands+events, prove replay via re-simulation instead of full-state snapshots
+
+Milestone 12 (AGENTS.md §56). Design question up front: §45 lists what a
+replay needs to store ("initial state; random seed; commands; events;
+timestamps; snapshots") and says "seek should be implemented through
+snapshots IF PRACTICAL" — the "if practical" hedge matters, because full
+per-tick (or even periodic) state snapshots would require every stateful
+class in `simulation/` (ships, hulls, missiles, sensor contacts, ECM
+states, formations, individual command states, combat directives,
+weapon/PD mounts, missile tubes — roughly two dozen classes) to support
+`to_dict()`/`from_dict()`. That is a large, separate pass on its own, and
+this simulation has one property that makes it unnecessary for a FIRST
+slice: there is no unseeded randomness anywhere in it (verified by grep
+across `simulation/*.gd` for `randf`/`randi`/`RandomNumberGenerator`/
+`seed` — every combat/sensor/damage resolution formula here is a pure
+function of its inputs, per ТЗ §43's own requirement). That means a
+recording of (a) the initial ship/formation/mount setup a scenario script
+already builds, plus (b) every command issued, plus (c) the fixed
+timestep, is BY ITSELF sufficient to reproduce a run bit-for-bit by
+simply re-running the simulation from scratch and re-issuing the same
+commands at the same ticks — no snapshot needed to GET a correct replay,
+only (eventually) to make seeking into a long replay fast without
+replaying from tick 0 every time. This pass builds and proves (a)+(b)+(c)
+work; snapshot-based fast seeking is left as explicitly future work (see
+CHANGELOG.md/ASSUMPTIONS.md).
+
+Two separate concepts, deliberately not conflated: COMMANDS (what was
+ordered — recorded going IN, replayed by calling the same public API
+again) and EVENTS (what actually happened — recorded going OUT, a record
+only, never replayed/re-applied). Conflating them would be wrong: an
+event like `weapon_hit` is a RESULT of deterministic resolution given the
+world state at that tick, not an independent input — replaying it as if
+it were a command would double-apply damage on top of what naturally
+happens when the recorded commands are replayed into a fresh, identically-
+seeded-by-setup world.
+
+`SimulationWorld.replay_log` defaults to `null` (recording off) precisely
+so this is purely additive — every one of the 28 pre-existing test files,
+and any future caller that never opts in, sees zero behavior or
+performance change. `_record_command`/`_record_event` are both one-line
+early-returns when `replay_log == null`.
+
+Command recording required touching every existing order-issuing public
+function to insert one `_record_command(...)` call each (see
+CHANGELOG.md for the full list) — an intentionally mechanical,
+low-risk change: each insertion is a single new line at the top of an
+existing function body, none of which alters that function's own control
+flow, return value, or existing side effects. Two things did NOT already
+have a SimulationWorld-level function to attach a recording call to and
+needed new ones:
+
+* Formation orders were, before this pass, ALWAYS issued by calling
+  `FormationState.issue_order`/`issue_order_now`/`clear_orders` directly
+  on the object returned by `get_formation()` — there was no
+  `SimulationWorld` method for it at all (unlike individual orders, which
+  already had `SimulationWorld.issue_individual_order_now` etc. from
+  Milestone 11). Added `issue_formation_order`/`issue_formation_orders`/
+  `issue_formation_order_now`/`clear_formation_orders` as thin
+  ADDITIONAL wrappers — direct `FormationState` mutation continues to
+  work unrecorded (exactly like calling `issue_individual_order_now`
+  before Milestone 11's `transmit_*` layer existed), so nothing already
+  written needs to change, but new scenario/test code that wants its
+  formation orders to show up in a replay now has a choke point to call
+  instead.
+* `_transfer_formation_command(formation, new_guide_id)` had no
+  `formation_id` string available to it at all (only the `FormationState`
+  object) — needed one to record which formation lost its leader, so its
+  signature grew a leading `formation_id: String` parameter. Its only
+  call site (`_resolve_formation_keeping`, which already has
+  `formation_id` from its own `for formation_id in formations.keys()`
+  loop) was updated to match; it is a private (`_`-prefixed) method with
+  no external callers, so this was a safe, contained signature change.
+
+## Closing a previously-invisible gap: ships were never actually destroyed
+
+While wiring the `ship_destroyed`/`weapon_hit` events needed for replay,
+found that `HullState.is_destroyed()` — which has existed since Milestone
+4 — was read by exactly one piece of code (`TacticalAI.is_guide_lost`,
+for formation-leader succession) and by NOTHING in `tick_simulation`
+itself. A ship whose hull integrity reached zero simply kept existing in
+`ships`/`hulls` forever: still sensed, still selectable as a weapon/PD/
+missile target, still integrated by physics, indistinguishable from a
+healthy ship except for a HullState value nothing but formation logic
+ever consulted. This was not a "Milestone not started yet" gap in the
+usual sense recorded in ASSUMPTIONS.md — it was a mechanic that looked
+finished (hull damage is applied, `is_destroyed()` exists and is
+correct) but whose consequence (the ship actually leaving the battle) was
+never wired up, the kind of stitch-point gap that is easy to miss because
+every INDIVIDUAL piece works.
+
+Fixed as `_resolve_ship_destruction()`, called at the START of
+`tick_simulation` (same position/rationale as `_cleanup_inactive_missiles`
+— a terminal condition that became true by the END of the previous tick
+is cleaned up before anything THIS tick reads world state, so a same-tick
+kill is never raced, and the tick a ship actually dies on still sees it
+present for sensors/targeting/the `ship_destroyed` event itself). Chose
+tick-start over tick-end specifically to mirror the missile-cleanup
+convention already established in this file, rather than inventing a
+second "cleanup happens here instead" convention for the same kind of
+problem. Also cleans the destroyed ship out of every formation's
+`member_offsets` (`FormationState.remove_member`, pre-existing method,
+never previously called by `SimulationWorld` itself) before calling the
+pre-existing `remove_ship` — without this, a destroyed member would keep
+an orphaned station assignment forever, silently skipped every tick by
+`_resolve_formation_keeping`'s existing `ships.get(member_id) == null:
+continue` guard, but never actually removed from the formation's own
+bookkeeping.
+
+Deliberately NOT touched: missiles already in flight toward a ship that
+gets destroyed keep flying toward its last physics state (frozen in
+place, since a removed ship is no longer touched by `_integrate_ships`)
+rather than being redirected or despawned — a dead hulk not moving under
+its own power is physically sensible, and MissileState holds a direct
+object reference to the target (kept alive by GDScript's own refcounting
+even after `ships.erase()`), so this needed no special-casing to avoid a
+crash; it is simply the natural consequence of "the ship stops being
+touched by anything, including missile retargeting logic that was never
+asked to re-check target validity mid-flight". Revisit only if a future
+pass finds this looks wrong in practice (e.g. a homing missile visibly
+flying into empty space where a destroyed ship's wreck no longer visually
+exists once the render layer catches up to this).

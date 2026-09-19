@@ -157,3 +157,30 @@ func is_complete(ship) -> bool:
 			return angle_err <= orientation_tolerance_rad
 		_:
 			return true
+
+## ТЗ §45 Replay (Milestone 12): flattens this order to JSON-safe types
+## (int/float/Array) so SimulationWorld._record_command can log a
+## transmit_individual_order_now/issue_individual_order_now/etc. call
+## through ReplayLog and have it survive a save_to_file()/load_from_file()
+## round-trip. See from_dict() for the inverse.
+func to_dict() -> Dictionary:
+	return {
+		"kind": kind,
+		"target_velocity_mps": [target_velocity_mps.x, target_velocity_mps.y, target_velocity_mps.z],
+		"target_facing_world": [target_facing_world.x, target_facing_world.y, target_facing_world.z],
+		"heading_tolerance_rad": heading_tolerance_rad,
+		"speed_tolerance_mps": speed_tolerance_mps,
+		"orientation_tolerance_rad": orientation_tolerance_rad,
+	}
+
+static func from_dict(d: Dictionary) -> IndividualOrder:
+	var order := IndividualOrder.new()
+	order.kind = int(d.get("kind", Kind.HOLD))
+	var v: Array = d.get("target_velocity_mps", [0.0, 0.0, 0.0])
+	order.target_velocity_mps = Vector3(v[0], v[1], v[2])
+	var f: Array = d.get("target_facing_world", [0.0, 0.0, 0.0])
+	order.target_facing_world = Vector3(f[0], f[1], f[2])
+	order.heading_tolerance_rad = float(d.get("heading_tolerance_rad", 0.02))
+	order.speed_tolerance_mps = float(d.get("speed_tolerance_mps", 0.5))
+	order.orientation_tolerance_rad = float(d.get("orientation_tolerance_rad", 0.02))
+	return order

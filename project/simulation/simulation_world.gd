@@ -770,6 +770,43 @@ func _resolve_formation_keeping(dt: float) -> void:
 		# §33 Formation Leader: guide destroyed/incapacitated handling
 		# comes BEFORE ordinary station-keeping below, since a lost guide
 		# means there is (for now) nobody to keep station on at all.
+		#
+		# §33.1 Autonomous behavior during the succession window: for
+		# EVERY member of this formation, for every tick from the very
+		# first tick the guide is found lost (even before
+		# `guide_lost_since` is set, below) through the end of
+		# `COMMAND_TRANSFER_DELAY_S`, this loop deliberately issues them
+		# NO new station-keeping command at all (the `continue` below
+		# skips the member loop that would otherwise run further down
+		# this function) rather than zeroing their thrust or driving them
+		# toward a now-meaningless station relative to a lost guide. This
+		# is a deliberate implementation of §33.1's three requirements,
+		# not an accidental side effect of the early `continue`:
+		#   * "hold its current tactical vector" -- `commanded_thrust_
+		#     local` is a per-tick command, never reset to zero by
+		#     default (see ShipPhysicsState), so a member that receives
+		#     no new command here simply keeps flying on whatever thrust
+		#     vector this same function last gave it the tick before the
+		#     guide was lost (or whatever an active IndividualOrder/
+		#     damage-response retreat is separately commanding it --
+		#     both `_resolve_individual_orders` and
+		#     `_resolve_damage_response` run AFTER this function every
+		#     tick regardless of formation/guide state and are free to
+		#     override, exactly as they already do outside this window);
+		#   * "keep engaging its last AI-assigned target" -- weapons/
+		#     missile-launch AI (`_resolve_weapons_ai`/
+		#     `_resolve_missile_launch_ai`) and `ship_combat_directives`
+		#     manual target designations have no coupling to formation
+		#     guide status anywhere in this file, so target engagement
+		#     genuinely continues unaffected through the whole window;
+		#   * "keep covering/screening a neighboring ship" -- since this
+		#     member's velocity/thrust are not perturbed, its position
+		#     relative to its neighbors does not suddenly jump during the
+		#     (short, engineering-tuned) recognition delay either.
+		# See test_formation.gd's
+		# `_test_succession_window_member_holds_last_commanded_thrust`
+		# and `_test_succession_window_manual_target_designation_
+		# survives_guide_loss` for tests that lock this behavior in.
 		if TacticalAI.is_guide_lost(formation.guide_ship_id, ships, hulls, CRITICAL_HULL_FRACTION):
 			if formation.guide_lost_since < 0.0:
 				formation.guide_lost_since = world_sim_time
@@ -784,7 +821,9 @@ func _resolve_formation_keeping(dt: float) -> void:
 				# rather than inventing a successor.
 			# Either way (still within the recognition delay, or just
 			# transferred/failed to transfer this tick), skip ordinary
-			# station-keeping for this formation this tick.
+			# station-keeping for this formation this tick -- see the
+			# §33.1 block comment above for why this IS the succession-
+			# window behavior, not a placeholder.
 			continue
 		else:
 			formation.guide_lost_since = -1.0

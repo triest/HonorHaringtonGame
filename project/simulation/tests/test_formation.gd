@@ -191,6 +191,77 @@ func _test_guide_destroyed_and_removed_transfers_command_after_delay() -> void:
 	_assert(formation.member_offsets.has("wing2"), "the other member should still be tracked under the new guide")
 	_assert(not formation.member_offsets.has("guide"), "the destroyed old guide should not be carried forward as a dangling member")
 
+## §33.1 Autonomous behavior during the succession window (part 1 --
+## "hold its current tactical vector"): a member that already has a
+## nonzero station-keeping thrust command the tick BEFORE its guide is
+## lost must keep flying on exactly that same thrust command for every
+## tick of the recognition delay, rather than being zeroed or
+## recomputed against the now-gone guide. `commanded_thrust_local` is
+## never reset to zero by default between ticks (see ShipPhysicsState),
+## so this is really a test that `_resolve_formation_keeping` issues NO
+## new command at all to a member of a leaderless formation -- see the
+## §33.1 block comment on that function's guide-lost branch.
+func _test_succession_window_member_holds_last_commanded_thrust() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing1 := _make_ship(Vector3(2000.0, 0, 0))  # far off station, like _test_member_thrusts_toward_station
+	world.add_ship("guide", guide)
+	world.add_ship("wing1", wing1)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing1", Vector3(500.0, 0, 0))
+	formation.set_succession_order(["wing1"])
+
+	# One tick with the guide still present: station-keeping computes a
+	# real, nonzero correction thrust for wing1.
+	world.tick_simulation(1.0 / 60.0)
+	var thrust_just_before_loss: Vector3 = wing1.commanded_thrust_local
+	_assert(thrust_just_before_loss.length_squared() > 0.0, "sanity check: wing1 should have nonzero station-keeping thrust while its guide is still present and it is far off station")
+
+	# Guide destroyed -- succession window begins.
+	world.remove_ship("guide")
+
+	# Several ticks, all still well within COMMAND_TRANSFER_DELAY_S (3.0s).
+	for i in range(30):  # 30/60s = 0.5s < 3.0s
+		world.tick_simulation(1.0 / 60.0)
+		_assert(wing1.commanded_thrust_local == thrust_just_before_loss, "§33.1: a formation member must hold its last commanded tactical vector throughout the succession window, not go idle or be recomputed against the lost guide")
+
+	_assert(formation.guide_ship_id == "guide", "sanity check: still within the recognition delay, command should not have transferred yet")
+
+## §33.1 Autonomous behavior during the succession window (part 2 --
+## "keep engaging its last AI-assigned target"): a manual weapon target
+## designation (§30) on a formation member must survive both the
+## succession window itself and the eventual command transfer
+## unchanged -- nothing in the guide-lost/transfer machinery should ever
+## touch `ship_combat_directives`, since target engagement is a
+## per-ship concern independent of formation command state.
+func _test_succession_window_manual_target_designation_survives_guide_loss() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var wing1 := _make_ship(Vector3(500.0, 0, 0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing1", wing1)
+
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing1", Vector3(500.0, 0, 0))
+	formation.set_succession_order(["wing1"])
+
+	world.set_ship_target("wing1", "enemy_alpha")
+	_assert(world.ship_combat_directives["wing1"].manual_target_ship_id == "enemy_alpha", "sanity check: the manual target designation should be recorded before the guide is lost")
+
+	world.remove_ship("guide")
+
+	# Through the whole recognition delay...
+	for i in range(120):  # 120/60s = 2.0s, still < 3.0s
+		world.tick_simulation(1.0 / 60.0)
+	_assert(world.ship_combat_directives["wing1"].manual_target_ship_id == "enemy_alpha", "§33.1: a member's last-assigned weapon target must survive the succession window unchanged")
+
+	# ...and past the transfer itself.
+	for i in range(280):  # total > 400/60s ≈ 6.7s > 3.0s delay, matching the existing transfer test's margin
+		world.tick_simulation(1.0 / 60.0)
+	_assert(formation.guide_ship_id == "wing1", "sanity check: command should have transferred to wing1 by now")
+	_assert(world.ship_combat_directives["wing1"].manual_target_ship_id == "enemy_alpha", "§33.1: a member's last-assigned weapon target must also survive becoming the new guide -- command transfer must not clear it")
+
 func _test_incapacitated_guide_skips_also_incapacitated_first_in_line() -> void:
 	var world := SimulationWorld.new()
 	var guide := _make_ship(Vector3.ZERO)
@@ -754,6 +825,8 @@ func _init() -> void:
 	_test_member_far_out_converges_over_many_ticks()
 	_test_succession_order_registered_on_formation_state()
 	_test_guide_destroyed_and_removed_transfers_command_after_delay()
+	_test_succession_window_member_holds_last_commanded_thrust()
+	_test_succession_window_manual_target_designation_survives_guide_loss()
 	_test_incapacitated_guide_skips_also_incapacitated_first_in_line()
 	_test_default_succession_falls_back_to_member_list_when_unset()
 	_test_no_fit_successor_leaves_formation_leaderless_without_crashing()

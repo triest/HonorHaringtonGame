@@ -1632,3 +1632,52 @@ rather than thrown away. Erasing them now would be optimizing for a
 requirement (cleanup/memory) the spec explicitly does NOT ask for yet
 (§63.2's retention policy is UNKNOWN/open) at the cost of data a later
 pass might actually want.
+
+## §33.1 Succession-window initiative -- closed by documentation + tests, not new code
+
+`_resolve_formation_keeping`'s guide-lost branch (see the §33 section
+above) already `continue`s past ordinary station-keeping for every
+member of a leaderless formation, for the whole recognition delay
+(`COMMAND_TRANSFER_DELAY_S`). Investigating §33.1 ("a subordinate ship
+is not without orders" during that window) found this early `continue`
+was ALREADY sufficient to satisfy all three of §33.1's concrete
+requirements, as a structural side effect rather than a designed one:
+
+* `ShipPhysicsState.commanded_thrust_local` is never reset to zero
+  between ticks by default (it is a per-tick command, overwritten only
+  by whichever resolver runs this tick) -- so a member that receives NO
+  new station-keeping command this tick simply keeps whatever thrust
+  vector it was already flying, satisfying "hold its current tactical
+  vector" with no new state needed.
+* Weapon/missile-launch target selection (`_resolve_weapon_target`,
+  `ship_combat_directives`) has no coupling anywhere to formation guide
+  status -- engagement genuinely continues through the window untouched,
+  satisfying "keep engaging its last AI-assigned target".
+* Since neither thrust nor target is perturbed, a member's position
+  relative to its neighbors does not jump during the (short,
+  engineering-tuned) window either, satisfying "keep covering/screening
+  a neighboring ship" in the loose sense the current (still
+  omnidirectional) PD model supports -- true directional coverage is
+  §22.1's separate, still-unimplemented topic.
+
+Given that, this pass deliberately did NOT add a new mechanism (there
+was nothing missing to build). It instead: (1) rewrote the doc comment
+on that branch in `simulation_world.gd` to state explicitly that this
+IS the §33.1 implementation, with the reasoning above, so a future pass
+does not read the early `continue` as an oversight and "fix" it by
+adding station-keeping thrust during the window; and (2) added two
+headless tests to `test_formation.gd` that pin the behavior down so a
+future change that broke it would fail loudly:
+`_test_succession_window_member_holds_last_commanded_thrust` (asserts
+bit-for-bit equality of `commanded_thrust_local` across the whole
+window) and `_test_succession_window_manual_target_designation_
+survives_guide_loss` (asserts a manual §30 target designation survives
+both the window and the transfer itself).
+
+Honest scope note: a formation member's ORIENTATION/turn rate was never
+driven by `_resolve_formation_keeping` in the first place (that function
+only ever computed `commanded_thrust_local`, never touched
+`angular_velocity`) -- so "hold current tactical vector" has nothing to
+freeze there; whatever else was independently commanding a ship's
+turning (an active `IndividualOrder`, if any) is unaffected by guide
+loss for the same reason target selection is.

@@ -1223,3 +1223,54 @@ Dictionary + 1 new line in `remove_ship` + 1 new line in
 methods (~150 lines) in `simulation_world.gd`. `_resolve_formation_
 keeping`, `_resolve_formation_orders`, `FormationOrder`, `FormationState`
 and every other Milestone 10 mechanism are byte-for-byte unchanged.
+
+## §30 "target"/"target priority"/"weapon mode" — ShipCombatDirective как отдельный класс от IndividualCommandState
+
+Решение: НЕ расширять `IndividualCommandState`/`IndividualOrder` (kinematic-
+очередь §30 course/speed/orientation из предыдущего прохода) новыми Kind
+для target/weapon mode, а завести отдельный маленький класс
+`ShipCombatDirective` с двумя полями (`manual_target_ship_id`,
+`weapons_free`) и без какой-либо очереди/queue/completion-семантики.
+
+Почему: `IndividualOrder.is_complete()` — центральная идея всей
+kinematic-модели §30/§35 (курс/скорость/ориентация — это манёвры,
+которые СХОДЯТСЯ и завершаются, после чего можно исполнить следующий
+приказ из очереди). "Держать цель X" или "не открывать огонь" — это не
+манёвр, а ПОСТОЯННАЯ ПОЗИЦИЯ без условия завершения (она снимается только
+явным следующим приказом командира, не физической сходимостью). Пытаться
+описать это как `IndividualOrder.Kind.HOLD_TARGET` с `is_complete() ->
+false` технически работало бы, но смешало бы две разные по природе вещи
+в одной модели и усложнило бы `_resolve_individual_orders` необходимостью
+различать "kinematic-приказ" и "posture-приказ" внутри одной queue.
+Отдельный класс с отдельным Dictionary (`ship_combat_directives`,
+параллельно `individual_orders`) держит это разделение явным на уровне
+типов, а не комментариев.
+
+Fallback-политика при невалидной designation (уничтожена/потеряна с
+датчиков) — сознательно "откатиться на автоматический выбор", а НЕ "не
+стрелять": `SimulationWorld._resolve_weapon_target` пытается
+`TacticalAI.select_directed_weapon_target` первым, и только если та
+вернула null-форму — падает на прежний `TacticalAI.select_weapon_target`.
+Альтернатива ("designation невалидна => held fire, пока не переназначат")
+тоже была бы честной инженерно, но не соответствует ни одной реальной
+доктрине ("экипаж продолжает стрелять по всё ещё видимым враждебным
+целям, если конкретно назначенная цель пропала с экранов", а не
+"замирает"). Обе альтернативы задокументированы здесь, чтобы будущий
+проход мог пересмотреть это решение осознанно, а не заново открывать
+тот же вопрос с нуля.
+
+`weapons_free` — ОДИН флаг на энергооружие И ракетные пуски вместе, а не
+два отдельных ("energy_weapons_free"/"missiles_free"). §30 перечисляет
+"weapon mode" и "missile launch" отдельными пунктами ТЗ, так что это
+СОЗНАТЕЛЬНОЕ упрощение (см. ASSUMPTIONS.md) — разделение на два
+независимых флага тривиально, если геймплейно понадобится "держать
+энергооружие, но продолжать пускать ракеты" (или наоборот); отложено
+как честно логированный, а не спрятанный, пробел.
+
+Точечная защита (Point Defense) сознательно НЕ подключена к этому
+директиву — `TacticalAI.select_pd_target` выбирает цель по принципиально
+другому критерию (какая РАКЕТА реально целится в ЭТОТ корабль, а не
+"какой вражеский корабль атаковать"), так что "designate target"/"hold
+fire" в смысле §30 не имеет прямого аналога для PD; §29/§30's
+"counter-missile policy"/"point-defense policy" остаются отдельным,
+пока не реализованным, пунктом.

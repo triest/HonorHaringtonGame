@@ -1187,3 +1187,74 @@ POWER/STRUCTURAL_INTEGRITY/DEFENSIVE_SYSTEMS по-прежнему нет; §31'
 COMMAND_TRANSFER_DELAY_S) для индивидуальных приказов не рассмотрен —
 индивидуальный приказ применяется мгновенно в тот же тик, когда issued,
 без задержки на "передачу приказа кораблю"; Milestone 12+ не начаты.
+
+## 2026-09-19 (проход: Milestone 11 продвинут — §30 "target"/"target priority"/"weapon mode")
+
+* Новый класс `ShipCombatDirective` (`project/simulation/ship_combat_directive.gd`):
+  постоянная (не kinematic-очередь, без понятия "завершения") боевая
+  директива на корабль — `manual_target_ship_id` (§30 "target"/"target
+  priority") и `weapons_free` (§30 "weapon mode": true = свободен открывать
+  огонь как раньше, false = held fire). Намеренно ОТДЕЛЬНЫЙ класс от
+  `IndividualCommandState` (kinematic-приказы §30 course/speed/orientation
+  из прошлого прохода) — держать позицию/цель это не манёвр с завершением,
+  а постоянная позиция, так что впихивать её в order/queue модель было бы
+  нечестно.
+* `TacticalAI.select_directed_weapon_target(ship, contacts, hostile_ship_ids,
+  target_ship_id)`: та же "no cheat vision" проверка usable-контакта, что и
+  у `select_weapon_target`, но выбирает НАЗНАЧЕННУЮ цель, а не ближайшую.
+  Возвращает all-null форму, если цель не в списке hostile, не usable
+  контакт, либо пустая строка — никакого решения о fallback сама функция
+  не принимает.
+* `SimulationWorld`: `ship_combat_directives: Dictionary` (ship_id ->
+  ShipCombatDirective, лениво создаётся, чистится в `remove_ship`),
+  публичное API `set_ship_target`/`clear_ship_target`/`set_ship_weapons_free`,
+  и общий `_resolve_weapon_target(ship_id, ship, contacts, hostile_ids)`,
+  используемый ОБОИМИ `_resolve_weapons_ai` и `_resolve_missile_launch_ai`:
+  если есть валидная (ещё usable) назначенная цель — стреляем по ней;
+  иначе честный fallback на прежний автоматический nearest-hostile выбор
+  (не "перестать стрелять", если назначенная цель уничтожена/потеряна с
+  датчиков — ни одна доктрина не ожидает "продолжать стрелять по старому
+  пеленгу цели, которую больше не видно"). `weapons_free == false`
+  пропускает и энергооружие, и пуск ракет для этого корабля ЦЕЛИКОМ, но
+  ракетные трубы по-прежнему считают cooldown каждый тик (`tube.advance`
+  вызывается БЕЗУСЛОВНО до проверки директивы) — held fire это решение
+  fire control, не повреждение оборудования.
+* НЕ затронута точечная защита (PD) — её выбор цели (`select_pd_target`)
+  основан на угрозе (какая ракета реально целится в ЭТОТ корабль), а не на
+  выборе вражеского КОРАБЛЯ, принципиально другая задача — см.
+  ASSUMPTIONS.md.
+* Новый файл `test_ship_combat_directive.gd` (11 сквозных тестов через
+  `SimulationWorld.tick_simulation()`, 22 assertion): дефолты директивы
+  (no target, weapons_free=true, бихевиорально идентично прошлому
+  поведению); без designation — бьёт по ближайшему (regression-guard);
+  designation бьёт по НЕ ближайшей, специально назначенной цели;
+  `clear_ship_target` возвращает автоматику; designation на уничтоженную
+  ДО тика цель честно даёт fallback на оставшегося hostile, а не "не
+  стрелять вообще"; `weapons_free=false` подавляет и энергооружие
+  (cooldown у mount остаётся нетронутым — выстрела не было вовсе), и пуск
+  ракет (ammo не тратится, но `time_since_last_launch_s` у трубы всё
+  равно продвигается); designation одинаково применяется к пуску ракет
+  (не только к энергооружию); прямые проверки мутации state через
+  `set_ship_target`/`clear_ship_target`/`set_ship_weapons_free`;
+  `remove_ship` чистит `ship_combat_directives`. Плюс 4 юнит-теста
+  `select_directed_weapon_target` в `test_tactical_ai.gd` (валидная
+  designation среди нескольких hostile; designation вне hostile-списка;
+  designation с UNKNOWN-контактом; пустая строка designation).
+* Полный прогон headless-тестов ПОДТВЕРЖДЁН: все 27 файлов
+  `project/simulation/tests/` (было 26, +1 новый файл) зелёные
+  (Godot v4.3-stable_linux.x86_64, скачан заново). Регрессий не найдено.
+
+Честно НЕ сделано (открыто дальше, см. ASSUMPTIONS.md): §30/§29 items,
+которые всё ещё нужны — "missile launch" как отдельное разовое действие
+(не постоянная посадка weapons_free), "counter-missile policy"/
+"point-defense policy" (PD принципиально другая задача выбора цели, см.
+выше), "sensor mode", "ECM mode", "defensive posture", "target priority"
+за пределами простого single-target designation (ранжирование
+нескольких целей); "approach" как отдельный примитив; многоуровневая
+иерархия команд §28 (Fleet/Task Force/Squadron/Division/Element/Ship,
+по-прежнему плоская); ECM не деградирует точность/захват PD; §25
+consumer'ов для COMMUNICATIONS/POWER/STRUCTURAL_INTEGRITY/
+DEFENSIVE_SYSTEMS по-прежнему нет; коммуникационная задержка (§31 "account
+for communication limitations") для индивидуальных приказов/директив
+по-прежнему не рассмотрена — designation/weapons_free тоже применяются
+мгновенно, тем же тиком; Milestone 12+ не начаты.

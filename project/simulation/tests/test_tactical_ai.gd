@@ -114,6 +114,41 @@ func _test_weapon_target_selection_no_hostiles_returns_null() -> void:
 	var result := TacticalAI.select_weapon_target(ship, {}, [])
 	_assert(result["ship_id"] == null, "no contacts/hostiles should return a null ship_id, not a crash or a bogus default")
 
+## §30 "target"/"target priority" directed selection (Milestone 11,
+## second slice) -- see ship_combat_directive.gd.
+func _test_directed_target_selection_returns_designated_hostile_even_if_farther() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var near_hostile := _make_ship(Vector3(500, 0, 0))
+	var far_hostile := _make_ship(Vector3(5000, 0, 0))
+	var contacts := {
+		"near": _make_contact(near_hostile, ContactState.Type.DETECTED, Vector3(500, 0, 0)),
+		"far": _make_contact(far_hostile, ContactState.Type.TRACKED, Vector3(5000, 0, 0)),
+	}
+	var result := TacticalAI.select_directed_weapon_target(ship, contacts, ["near", "far"], "far")
+	_assert(result["ship_id"] == "far", "a manually designated target should be selected even though it is not the nearest hostile")
+	_assert(result["ship"] == far_hostile, "the returned ship should be the designated target's true object")
+
+func _test_directed_target_selection_rejects_non_hostile_designation() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var neutral_ship := _make_ship(Vector3(10, 0, 0))
+	var contacts := {"neutral": _make_contact(neutral_ship, ContactState.Type.TRACKED, Vector3(10, 0, 0))}
+	var result := TacticalAI.select_directed_weapon_target(ship, contacts, [], "neutral")
+	_assert(result["ship_id"] == null, "a designated target not in the hostile list should not be selectable, even if a usable contact exists for it")
+
+func _test_directed_target_selection_rejects_unusable_contact() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var hostile_ship := _make_ship(Vector3(500, 0, 0))
+	var contacts := {"hostile": _make_contact(hostile_ship, ContactState.Type.UNKNOWN, Vector3(500, 0, 0))}
+	var result := TacticalAI.select_directed_weapon_target(ship, contacts, ["hostile"], "hostile")
+	_assert(result["ship_id"] == null, "a designated target this ship's sensors have lost (UNKNOWN state) should not be selectable")
+
+func _test_directed_target_selection_rejects_empty_designation() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var hostile_ship := _make_ship(Vector3(500, 0, 0))
+	var contacts := {"hostile": _make_contact(hostile_ship, ContactState.Type.TRACKED, Vector3(500, 0, 0))}
+	var result := TacticalAI.select_directed_weapon_target(ship, contacts, ["hostile"], "")
+	_assert(result["ship_id"] == null, "an empty designation string should never resolve to a target")
+
 func _init() -> void:
 	_test_pd_ignores_undetected_missiles()
 	_test_pd_ignores_missiles_not_targeting_this_ship()
@@ -123,6 +158,10 @@ func _init() -> void:
 	_test_weapon_target_selection_filters_by_hostile_list()
 	_test_weapon_target_selection_nearest_among_hostiles()
 	_test_weapon_target_selection_no_hostiles_returns_null()
+	_test_directed_target_selection_returns_designated_hostile_even_if_farther()
+	_test_directed_target_selection_rejects_non_hostile_designation()
+	_test_directed_target_selection_rejects_unusable_contact()
+	_test_directed_target_selection_rejects_empty_designation()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

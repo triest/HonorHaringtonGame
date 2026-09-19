@@ -47,6 +47,7 @@ const FormationState = preload("res://simulation/formation_state.gd")
 const FormationOrder = preload("res://simulation/formation_order.gd")
 const IndividualOrder = preload("res://simulation/individual_order.gd")
 const IndividualCommandState = preload("res://simulation/individual_command_state.gd")
+const ShipCombatDirective = preload("res://simulation/ship_combat_directive.gd")
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
 
 var clock: SimClock
@@ -61,6 +62,7 @@ var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> Sen
 var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: minimal hostility model, see class doc)
 var formations: Dictionary = {}       # formation_id -> FormationState (§27/§28/§29, Milestone 10 first slice)
 var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
+var ship_combat_directives: Dictionary = {}  # ship_id -> ShipCombatDirective (§30 target/weapon mode, Milestone 11 second slice)
 
 ## ASSUMPTION (§26 "retreat"/"disengage", no canonical figure found): a
 ## ship whose HullState integrity fraction drops to or below this stops
@@ -124,6 +126,7 @@ func remove_ship(ship_id: String) -> void:
 	sensor_contacts.erase(ship_id)
 	teams.erase(ship_id)
 	individual_orders.erase(ship_id)
+	ship_combat_directives.erase(ship_id)
 
 func get_ship(ship_id: String) -> ShipPhysicsState:
 	return ships.get(ship_id)
@@ -716,6 +719,52 @@ func is_ship_overriding_formation(ship_id: String) -> bool:
 	var state = individual_orders.get(ship_id)
 	return state != null and state.is_active()
 
+## §30 "target"/"target priority"/"weapon mode" (Milestone 11, second
+## slice). Returns this ship's ShipCombatDirective, creating a default
+## (no manual target, weapons free -- i.e. behaviorally identical to
+## before this pass) one on first use, exactly the same lazy-creation
+## convention as _get_or_create_individual_command_state.
+func _get_or_create_combat_directive(ship_id: String) -> ShipCombatDirective:
+	if not ship_combat_directives.has(ship_id):
+		ship_combat_directives[ship_id] = ShipCombatDirective.new()
+	return ship_combat_directives[ship_id]
+
+## §30 "target"/"target priority": designate `ship_id`'s weapon target.
+## Applies to both ship-to-ship energy weapons and missile launches (see
+## _resolve_weapon_target). Does not itself validate `target_ship_id` --
+## an invalid/non-hostile/undetected designation simply fails to select
+## in _resolve_weapon_target every tick until it becomes valid or is
+## cleared (see ShipCombatDirective doc comment).
+func set_ship_target(ship_id: String, target_ship_id: String) -> void:
+	_get_or_create_combat_directive(ship_id).set_manual_target(target_ship_id)
+
+## Reverts `ship_id` to automatic (TacticalAI) nearest-hostile target
+## selection.
+func clear_ship_target(ship_id: String) -> void:
+	if ship_combat_directives.has(ship_id):
+		ship_combat_directives[ship_id].clear_manual_target()
+
+## §30 "weapon mode": true = free to fire (default, pre-existing
+## behavior), false = hold fire -- see ShipCombatDirective.weapons_free.
+func set_ship_weapons_free(ship_id: String, is_free: bool) -> void:
+	_get_or_create_combat_directive(ship_id).set_weapons_free(is_free)
+
+## Shared target-selection policy for BOTH _resolve_weapons_ai and
+## _resolve_missile_launch_ai (§30 "target"/"target priority", Milestone
+## 11 second slice): if `ship_id` has a manually designated target AND it
+## is still a valid usable hostile contact, use it; otherwise (no
+## directive, no designation, or the designation is no longer valid) fall
+## back to TacticalAI's pre-existing automatic nearest-hostile-contact
+## selection -- never "no target" purely because a stale designation
+## exists (see ShipCombatDirective doc comment for the reasoning).
+func _resolve_weapon_target(ship_id: String, ship, contacts: Dictionary, hostile_ids: Array) -> Dictionary:
+	var directive = ship_combat_directives.get(ship_id)
+	if directive != null and directive.manual_target_ship_id != "":
+		var directed: Dictionary = TacticalAI.select_directed_weapon_target(ship, contacts, hostile_ids, directive.manual_target_ship_id)
+		if directed.get("ship_id") != null:
+			return directed
+	return TacticalAI.select_weapon_target(ship, contacts, hostile_ids)
+
 ## §30/§31 (Milestone 11, this pass): executes each ship's active
 ## individual order, OVERWRITING whatever `_resolve_formation_keeping`
 ## (which ran just before this, unconditionally, for every formation
@@ -870,12 +919,15 @@ func _resolve_damage_response(dt: float) -> void:
 			continue
 		ship.commanded_thrust_local = ship.orientation.inverse() * away_world
 
-## ТЗ §17 Weapons + §26 Tactical AI ("select targets" / "use weapons").
-## Each ship with at least one weapon mount and a team assigned picks the
-## nearest usable hostile contact (via `TacticalAI.select_weapon_target`,
-## sensor-limited) and fires every ready, arc-capable mount at it. A ship
-## with no team, or no hostile contacts, does not fire -- there is no
-## default-hostile fallback (see `is_hostile`).
+## ТЗ §17 Weapons + §26 Tactical AI ("select targets" / "use weapons") +
+## §30 "target"/"target priority"/"weapon mode" (Milestone 11, second
+## slice). Each ship with at least one weapon mount and a team assigned
+## picks its target via `_resolve_weapon_target` (a commander's manual
+## designation if one is active and still valid, else the pre-existing
+## automatic nearest-usable-hostile-contact selection) and fires every
+## ready, arc-capable mount at it. A ship with no team, no hostile
+## contacts, or an explicit "hold fire" combat directive does not fire --
+## there is no default-hostile fallback (see `is_hostile`).
 func _resolve_weapons_ai(dt: float) -> void:
 	for ship_id in ships.keys():
 		var mounts: Array = weapon_mounts.get(ship_id, [])
@@ -885,6 +937,9 @@ func _resolve_weapons_ai(dt: float) -> void:
 			continue
 		if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
 			continue  # disengaging -- see _resolve_damage_response
+		var directive = ship_combat_directives.get(ship_id)
+		if directive != null and not directive.weapons_free:
+			continue  # §30 "weapon mode": hold fire
 
 		var ship: ShipPhysicsState = ships[ship_id]
 		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
@@ -892,7 +947,7 @@ func _resolve_weapons_ai(dt: float) -> void:
 		if hostile_ids.is_empty():
 			continue
 
-		var selection: Dictionary = TacticalAI.select_weapon_target(ship, contacts, hostile_ids)
+		var selection: Dictionary = _resolve_weapon_target(ship_id, ship, contacts, hostile_ids)
 		var target_ship_id = selection.get("ship_id")
 		if target_ship_id == null:
 			continue
@@ -900,18 +955,20 @@ func _resolve_weapons_ai(dt: float) -> void:
 		for mount in mounts:
 			fire_weapon(ship_id, mount, target_ship_id)
 
-## §26 "launch missiles" -- first real launch DECISION (not just firing
-## already-mounted weapons). Every tube always advances its own cooldown
-## (`tube.advance(dt)`), even for a ship with no team/hostiles/that is
-## disengaging, so ammo/cooldown bookkeeping stays correct regardless of
-## whether the AI is currently choosing to shoot. Target selection reuses
-## `TacticalAI.select_weapon_target` (same nearest-usable-hostile-contact
-## rule, same "no cheat vision" -- distance is measured to the CONTACT's
-## estimated position, not the target's true position) rather than a
-## separate missile-specific selector, since there is no missile-specific
-## targeting criterion implemented yet (see tactical_ai.gd HONEST SCOPE).
-## A critically damaged/disengaging ship (see _resolve_damage_response)
-## does not launch new missiles, same as it does not fire weapons.
+## §26 "launch missiles" + §30 "target"/"target priority"/"weapon mode"
+## (Milestone 11, second slice) -- first real launch DECISION (not just
+## firing already-mounted weapons). Every tube always advances its own
+## cooldown (`tube.advance(dt)`), even for a ship with no team/hostiles/
+## that is disengaging/holding fire, so ammo/cooldown bookkeeping stays
+## correct regardless of whether the AI is currently choosing to shoot --
+## an explicit "hold fire" directive is a fire-control decision, not
+## equipment damage or a jammed tube. Target selection goes through
+## `_resolve_weapon_target` (manual designation if active and valid, else
+## the pre-existing automatic nearest-usable-hostile-contact rule -- same
+## "no cheat vision": distance is measured to the CONTACT's estimated
+## position, not the target's true position). A critically damaged/
+## disengaging ship, or one under a "hold fire" combat directive, does
+## not launch new missiles, same as it does not fire energy weapons.
 func _resolve_missile_launch_ai(dt: float) -> void:
 	for ship_id in ships.keys():
 		var tubes: Array = missile_tubes.get(ship_id, [])
@@ -924,6 +981,9 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 			continue
 		if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
 			continue  # disengaging -- see _resolve_damage_response
+		var directive = ship_combat_directives.get(ship_id)
+		if directive != null and not directive.weapons_free:
+			continue  # §30 "weapon mode": hold fire
 
 		var ship: ShipPhysicsState = ships[ship_id]
 		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
@@ -931,7 +991,7 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 		if hostile_ids.is_empty():
 			continue
 
-		var selection: Dictionary = TacticalAI.select_weapon_target(ship, contacts, hostile_ids)
+		var selection: Dictionary = _resolve_weapon_target(ship_id, ship, contacts, hostile_ids)
 		var target_ship = selection.get("ship")
 		var target_contact = selection.get("contact")
 		if target_ship == null or target_contact == null:

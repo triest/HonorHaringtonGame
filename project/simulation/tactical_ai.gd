@@ -105,6 +105,28 @@ static func select_weapon_target(ship, contacts: Dictionary, hostile_ship_ids: A
 	return {"ship_id": best_ship_id, "ship": best_ship, "contact": best_contact}
 
 
+## §30 "target"/"target priority" -- directed target selection
+## (Milestone 11, second slice). Same return shape as
+## select_weapon_target ({"ship_id", "ship", "contact"}, all null on
+## failure), but picks `target_ship_id` specifically -- a commander's
+## standing designation (see ShipCombatDirective) -- instead of nearest-
+## hostile, honoring the exact same "no cheat vision" contact-usability
+## rule (must still be a USABLE contact, not merely "still exists" --
+## an order to fire on a contact this ship's own sensors have lost track
+## of is not something any crew could execute on). Returns the all-null
+## shape when `target_ship_id` is empty, not in `hostile_ship_ids`, or
+## not currently a usable contact -- this function makes NO fallback
+## decision itself; SimulationWorld._resolve_weapon_target decides
+## whether to fall back to automatic nearest-hostile selection.
+static func select_directed_weapon_target(ship, contacts: Dictionary, hostile_ship_ids: Array, target_ship_id: String) -> Dictionary:
+	if target_ship_id == "" or not hostile_ship_ids.has(target_ship_id):
+		return {"ship_id": null, "ship": null, "contact": null}
+	var contact = contacts.get(target_ship_id)
+	if contact == null or not _is_usable(contact.state):
+		return {"ship_id": null, "ship": null, "contact": null}
+	return {"ship_id": target_ship_id, "ship": contact.target, "contact": contact}
+
+
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice.
 ##
 ## ASSUMPTION (no canonical figure found for a Honorverse "break off"

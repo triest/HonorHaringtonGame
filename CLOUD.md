@@ -31,6 +31,24 @@ Physics and damage run through the exact same code/formulas for every ship regar
   range-damage numbers, autocannon specs, several compensator ratings
   and crew counts -- see ASSUMPTIONS.md.
 
+
+## 1.5. SHIP TYPE HIERARCHY AND NAMED CLASSES, RMN + HAVEN (AGENTS.md §8.2)
+* CANON tonnage bands (ascending): LAC 11-21k t; Frigate (no band
+  given); Destroyer 65-80k t (Roland-class RMN reached CL-equivalent
+  mass by 2nd Havenite War -- band is traditional/era reference, not
+  fixed); Light Cruiser 90-150k t avg; Heavy Cruiser 160-350k t;
+  Battlecruiser 780k t-2.5M t (smallest formal capital ship); Dreadnought
+  5-6.5M t; Superdreadnought 7-9M t (both = ship of the wall).
+* RMN named classes: Medusa (SD), Agamemnon -- full specs in §1.4.
+* Haven (People's Navy/RHN) named classes: Sultan-class BC (859,250t,
+  707m, 489.2G); Warlord-class BC (918,750t, 723m, 389.9G/487.4G max);
+  Nevada-class (type/specs not pulled -- UNKNOWN).
+* Grayson named classes (types only, no specs pulled yet): Raoul
+  Courvosier (BC), Jason Alvarez (CA), Nathan (CL), Jackalope (DN LAC
+  carrier), Manticore's Gift (SD), Benjamin the Great (SD), Honor
+  Harrington (pod-layer SD), Ararat (pre-Alliance DD).
+* NOT implemented: no ShipClass/database records exist in code yet for
+  any of these -- reference material to seed §8/§48 from.
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

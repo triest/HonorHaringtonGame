@@ -365,6 +365,80 @@ for what remains UNKNOWN and would need further sourcing.
 
 ---
 
+## 8.2 Ship type hierarchy and named example classes -- Manticore and Haven
+
+Extends §8.1 with the general type/tonnage hierarchy every ship class
+sits in, plus a small set of named example classes on both sides of
+the main Manticore-Haven conflict, sourced 2026-09-19 (Honorverse Wiki
+"Ship Types" article, class articles, and the independent long-running
+fan reference "Honorverse Ships List" (cs.cmu.edu/~tpope) -- factual
+numeric/categorical data extracted, no book prose reproduced).
+
+**CANON ship type hierarchy (by mass, ascending):**
+
+* Light Attack Craft (LAC): 11,000-21,000 tons; intrasystem only,
+  cannot enter hyperspace; traditional roles picket/customs.
+* Frigate: smaller than a destroyer; picket/convoy-escort roles;
+  increasingly obsolete by the late 1800s PD internal timeline.
+* Destroyer (DD): traditionally 65,000-80,000 tons; picket/escort/
+  reconnaissance. NOTE: the Manticoran Roland-class destroyer reached
+  light-cruiser-equivalent mass by the Second [Havenite] War -- the
+  tonnage BAND above is a traditional/earlier-era reference, not a
+  hard rule for every era (consistent with §8.1's own era caveat).
+* Light Cruiser (CL): 90,000-150,000 tons average; armed with grasers
+  rather than lasers; reconnaissance/commerce protection/raiding.
+* Heavy Cruiser (CA): 160,000-350,000 tons; independent picket duty,
+  heavy commerce protection, capital-ship screening.
+* Battlecruiser (BC): 780,000 tons to 2.5 million tons; smallest ship
+  formally classed as a capital ship; commerce raiding, heavy
+  screening, light task-group combat element.
+* Dreadnought (DN): 5-6.5 million tons; ship of the wall; first-rate
+  navies only.
+* Superdreadnought (SD): 7-9 million tons; largest warships built;
+  ship of the wall.
+
+**Named example classes, Manticoran Royal Navy (RMN):**
+
+* Medusa-class (SD) and Agamemnon-class -- full specs already in §8.1.
+  Both consistent with the SD/wall-of-battle tonnage bands above
+  (Agamemnon at 1,750,750 tons sits well above the general BC band,
+  consistent with §8.1's note that these are specific,
+  possibly-later-generation examples, not the type-average number).
+
+**Named example classes, People's Republic of Haven (People's Navy /
+later Republic of Haven Navy):**
+
+* Sultan-class (battlecruiser): mass 859,250 tons; length 707 m;
+  acceleration 489.2 G.
+* Warlord-class (battlecruiser): mass 918,750 tons; length 723 m;
+  acceleration 389.9 G (487.4 G maximum).
+* Nevada-class: role/type not re-verified with full specs this pass --
+  present in the source material as a named class; treat as UNKNOWN
+  until specs are pulled.
+
+**Named example classes, Grayson Space Navy (for later cross-faction
+consistency, since §43.1 already requires identical physics/damage
+rules for every side):**
+
+* Raoul Courvosier-class (battlecruiser); Jason Alvarez-class (heavy
+  cruiser); Nathan-class (light cruiser); Jackalope-class (dreadnought,
+  LAC carrier); Manticore's Gift-class (superdreadnought); Benjamin
+  the Great-class (superdreadnought); Honor Harrington-class (pod-layer
+  superdreadnought); Ararat-class (pre-Alliance-era destroyer).
+  Numeric specs (mass/length/acceleration) NOT pulled for any of these
+  this pass -- names/types only, UNKNOWN otherwise.
+
+**HONEST GAP:** none of the above (type hierarchy or named classes) is
+wired into `project/simulation` as actual `ShipClass`/database data
+yet -- §8's Ship Database is still not implemented as data-driven
+records for named classes. This subsection is reference material to
+seed that database from, not a description of anything currently in
+the codebase. §8.1's caveat applies here too: tonnage bands are
+type-average references, not universal per-ship constants, and any
+class/faction not listed here still falls under §8's "do not invent
+exact numbers" rule.
+
+
 # 9. Impeller Wedge
 
 The impeller wedge is a fundamental part of both movement and combat.

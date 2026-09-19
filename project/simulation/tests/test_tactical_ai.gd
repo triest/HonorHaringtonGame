@@ -8,6 +8,7 @@ const SensorContact = preload("res://simulation/sensor_contact.gd")
 const ContactState = preload("res://simulation/contact_state.gd")
 const ShipPhysicsState = preload("res://simulation/ship_physics_state.gd")
 const MissileState = preload("res://simulation/missile_state.gd")
+const HullState = preload("res://simulation/hull_state.gd")
 
 var _failures: int = 0
 var _passed: int = 0
@@ -149,6 +150,73 @@ func _test_directed_target_selection_rejects_empty_designation() -> void:
 	var result := TacticalAI.select_directed_weapon_target(ship, contacts, ["hostile"], "")
 	_assert(result["ship_id"] == null, "an empty designation string should never resolve to a target")
 
+## §34.1 Doubling -- TacticalAI.select_formation_target_for_member.
+func _test_formation_target_selection_degenerates_to_plain_selection_when_uncoordinated() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var near_hostile := _make_ship(Vector3(500, 0, 0))
+	var far_hostile := _make_ship(Vector3(5000, 0, 0))
+	var contacts := {
+		"near": _make_contact(near_hostile, ContactState.Type.DETECTED, Vector3(500, 0, 0)),
+		"far": _make_contact(far_hostile, ContactState.Type.TRACKED, Vector3(5000, 0, 0)),
+	}
+	var result := TacticalAI.select_formation_target_for_member(ship, contacts, ["near", "far"], {}, {})
+	_assert(result["ship_id"] == "near", "with no hulls tracked and no prior assignments, coordinated selection should match plain nearest-hostile selection")
+
+func _test_formation_target_selection_avoids_overcommitted_target_when_alternative_exists() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var near_hostile := _make_ship(Vector3(500, 0, 0))
+	var far_hostile := _make_ship(Vector3(5000, 0, 0))
+	var contacts := {
+		"near": _make_contact(near_hostile, ContactState.Type.DETECTED, Vector3(500, 0, 0)),
+		"far": _make_contact(far_hostile, ContactState.Type.TRACKED, Vector3(5000, 0, 0)),
+	}
+	# "near" already has 2 formation-mates assigned (the default cap) -- a
+	# third member should be steered to "far" instead of piling on, even
+	# though "near" is still the nearer contact.
+	var assigned_counts := {"near": 2}
+	var result := TacticalAI.select_formation_target_for_member(ship, contacts, ["near", "far"], {}, assigned_counts, 2)
+	_assert(result["ship_id"] == "far", "a target already claimed by max_useful_attackers formation-mates should be deprioritized while an uncommitted alternative exists (§34.1)")
+
+func _test_formation_target_selection_still_picks_overcommitted_target_if_it_is_the_only_option() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var only_hostile := _make_ship(Vector3(500, 0, 0))
+	var contacts := {"only": _make_contact(only_hostile, ContactState.Type.DETECTED, Vector3(500, 0, 0))}
+	var assigned_counts := {"only": 5}
+	var result := TacticalAI.select_formation_target_for_member(ship, contacts, ["only"], {}, assigned_counts, 2)
+	_assert(result["ship_id"] == "only", "a ship should never be left without a target purely because the only visible hostile is already over-committed")
+
+func _test_formation_target_selection_deprioritizes_neutralized_target() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var wounded := _make_ship(Vector3(500, 0, 0))  # nearer, but hull already critically damaged
+	var healthy := _make_ship(Vector3(5000, 0, 0))
+	var wounded_hull := HullState.new()
+	wounded_hull.max_integrity = 1000.0
+	wounded_hull.integrity = 100.0  # 10% -- below the default 0.3 critical fraction
+	var healthy_hull := HullState.new()
+	var contacts := {
+		"wounded": _make_contact(wounded, ContactState.Type.DETECTED, Vector3(500, 0, 0)),
+		"healthy": _make_contact(healthy, ContactState.Type.TRACKED, Vector3(5000, 0, 0)),
+	}
+	var hulls := {"wounded": wounded_hull, "healthy": healthy_hull}
+	var result := TacticalAI.select_formation_target_for_member(ship, contacts, ["wounded", "healthy"], hulls, {})
+	_assert(result["ship_id"] == "healthy", "an already-near-destroyed target should be deprioritized in favor of a full-health one, even though it is nearer (avoid overkill, §34.1)")
+
+func _test_formation_target_selection_still_picks_neutralized_target_if_it_is_the_only_option() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var wounded := _make_ship(Vector3(500, 0, 0))
+	var wounded_hull := HullState.new()
+	wounded_hull.max_integrity = 1000.0
+	wounded_hull.integrity = 50.0
+	var contacts := {"wounded": _make_contact(wounded, ContactState.Type.DETECTED, Vector3(500, 0, 0))}
+	var hulls := {"wounded": wounded_hull}
+	var result := TacticalAI.select_formation_target_for_member(ship, contacts, ["wounded"], hulls, {})
+	_assert(result["ship_id"] == "wounded", "a lone near-dead target is still better than no target at all")
+
+func _test_formation_target_selection_no_hostiles_returns_null() -> void:
+	var ship := _make_ship(Vector3.ZERO)
+	var result := TacticalAI.select_formation_target_for_member(ship, {}, [], {}, {})
+	_assert(result["ship_id"] == null, "no contacts/hostiles should return a null ship_id, same as select_weapon_target")
+
 func _init() -> void:
 	_test_pd_ignores_undetected_missiles()
 	_test_pd_ignores_missiles_not_targeting_this_ship()
@@ -162,6 +230,13 @@ func _init() -> void:
 	_test_directed_target_selection_rejects_non_hostile_designation()
 	_test_directed_target_selection_rejects_unusable_contact()
 	_test_directed_target_selection_rejects_empty_designation()
+
+	_test_formation_target_selection_degenerates_to_plain_selection_when_uncoordinated()
+	_test_formation_target_selection_avoids_overcommitted_target_when_alternative_exists()
+	_test_formation_target_selection_still_picks_overcommitted_target_if_it_is_the_only_option()
+	_test_formation_target_selection_deprioritizes_neutralized_target()
+	_test_formation_target_selection_still_picks_neutralized_target_if_it_is_the_only_option()
+	_test_formation_target_selection_no_hostiles_returns_null()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

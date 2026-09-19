@@ -228,3 +228,89 @@ static func select_formation_successor(formation, ships: Dictionary, hulls: Dict
 		return candidate_id
 
 	return ""
+
+
+## §34.1 Doubling -- formation-coordinated target selection (first
+## slice), used by SimulationWorld._resolve_formation_target_assignment
+## in place of plain `select_weapon_target` for ships whose formation is
+## running a coordinated assignment pass this tick. Same underlying
+## information as `select_weapon_target` (only USABLE contacts among
+## `hostile_ids`, same "no cheat vision" contract, distance measured to
+## the CONTACT's estimated position) PLUS two additional, deliberately
+## simple coordination signals the caller maintains across this same
+## formation's members for this tick:
+##
+## * `hulls` (ship_id -> HullState, may be null/missing per id): a
+##   candidate whose tracked hull integrity is at or below
+##   `critical_fraction` (same threshold `is_critically_damaged` already
+##   uses for a ship's OWN retreat decision -- deliberately reused rather
+##   than inventing a second "how damaged is too damaged" number, see
+##   ASSUMPTIONS.md) is treated as already effectively neutralized for
+##   further concentration purposes. A candidate with no tracked hull is
+##   never treated as neutralized this way (nothing to judge it against).
+## * `assigned_counts` (target_ship_id -> int, how many OTHER formation-
+##   mates were already assigned to each candidate earlier THIS tick): a
+##   candidate already claimed by `max_useful_attackers` or more
+##   formation-mates is treated as already sufficiently committed.
+##   ASSUMPTION (no canon "how many ships' fire usefully concentrates on
+##   one hull" figure exists): max_useful_attackers defaults to 2. This
+##   is the concrete mechanism behind §34.1's "don't treat 'already 4
+##   ships shooting at it' and 'nobody shooting at it' as equally good" --
+##   it does not attempt to model actual expected damage/kill probability
+##   (weapon damage resolution is itself probabilistic per mount/range/
+##   wedge, see weapon_resolution.gd, far too complex to duplicate here
+##   as a look-ahead heuristic), just a simple, deterministic commitment
+##   cap.
+##
+## Selection is tiered, so a ship is NEVER left without a target purely
+## because every visible hostile happens to be neutralized/over-
+## committed (honest scope note, same convention this module uses
+## everywhere else -- no fallback decision is ever "give up"):
+##   Tier 0 -- not neutralized, not over-committed;
+##   Tier 1 -- not neutralized, over-committed (used only if Tier 0 empty);
+##   Tier 2 -- neutralized (used only if Tiers 0 and 1 are both empty).
+## Within a tier, nearest CONTACT distance wins, same tie-break rule as
+## `select_weapon_target`. With `assigned_counts` empty and no candidate
+## neutralized, this degenerates EXACTLY to `select_weapon_target`'s
+## result -- a formation of one (or a member with no formation-mates
+## assigned anything yet this tick) behaves identically to before this
+## pass existed.
+##
+## Returns the same {"ship_id", "ship", "contact"} shape as
+## `select_weapon_target` (all null if no usable hostile contact exists
+## at all).
+static func select_formation_target_for_member(ship, contacts: Dictionary, hostile_ids: Array, hulls: Dictionary, assigned_counts: Dictionary, max_useful_attackers: int = 2, critical_fraction: float = 0.3) -> Dictionary:
+	var best_contact_id_by_tier: Array = [null, null, null]
+	var best_distance_by_tier: Array = [INF, INF, INF]
+
+	for contact_id in contacts.keys():
+		if not hostile_ids.has(contact_id):
+			continue
+		var contact = contacts[contact_id]
+		if not _is_usable(contact.state):
+			continue
+
+		var neutralized := false
+		var hull = hulls.get(contact_id)
+		if hull != null and hull.max_integrity > 0.0 and (hull.integrity / hull.max_integrity) <= critical_fraction:
+			neutralized = true
+		var over_committed: bool = assigned_counts.get(contact_id, 0) >= max_useful_attackers
+
+		var tier: int = 0
+		if neutralized:
+			tier = 2
+		elif over_committed:
+			tier = 1
+
+		var distance: float = ship.position.distance_to(contact.estimated_position)
+		if distance < best_distance_by_tier[tier]:
+			best_distance_by_tier[tier] = distance
+			best_contact_id_by_tier[tier] = contact_id
+
+	for tier in range(3):
+		var chosen_id = best_contact_id_by_tier[tier]
+		if chosen_id != null:
+			var chosen_contact = contacts[chosen_id]
+			return {"ship_id": chosen_id, "ship": chosen_contact.target, "contact": chosen_contact}
+
+	return {"ship_id": null, "ship": null, "contact": null}

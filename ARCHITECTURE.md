@@ -1681,3 +1681,72 @@ only ever computed `commanded_thrust_local`, never touched
 freeze there; whatever else was independently commanding a ship's
 turning (an active `IndividualOrder`, if any) is unaffected by guide
 loss for the same reason target selection is.
+
+
+## §34.1 Doubling -- formation-coordinated target assignment (first slice)
+
+Adds one new per-tick pass, `SimulationWorld._resolve_formation_target_assignment`,
+between `_resolve_damage_response` and `_resolve_weapons_ai`/
+`_resolve_missile_launch_ai`. Architecturally this is the first place in
+the codebase where MULTIPLE ships' weapon-target selection is computed
+together in one pass rather than each ship independently calling
+`TacticalAI.select_weapon_target` in isolation -- previously every
+target-selection call (`_resolve_weapons_ai`, `_resolve_missile_launch_ai`,
+`launch_missiles_now`) went through `_resolve_weapon_target` per-ship,
+with zero cross-ship state. That function's priority chain is now three
+levels instead of two: manual §30 designation, then this tick's §34.1
+formation assignment (`_formation_assigned_targets`, keyed by ship_id,
+rebuilt every tick), then the original automatic nearest-hostile
+fallback -- each level honestly falls through to the next on a stale/
+invalid entry, matching the pre-existing manual-designation fallback
+pattern rather than inventing a new "no target" failure mode.
+
+Deliberate scope boundary: the coordination pass only decides WHICH
+enemy ship_id each formation member is nudged toward; it does not touch
+HOW that target is engaged (arc checks, actual fire, missile flight) --
+those still go through the exact same `WeaponResolution`/missile-tube
+code paths as before, just fed a possibly-different `target_ship_id`.
+This keeps the change additive and low-risk: with `assigned_counts`
+empty (a formation of one member, or the very first member evaluated
+each tick) `TacticalAI.select_formation_target_for_member` is
+mathematically identical to `select_weapon_target`, so single-ship and
+pre-existing formation-of-one behavior is provably unchanged.
+
+The "expected contribution" weighting §34.1 asks for is deliberately
+NOT a damage/DPS simulation -- weapon damage resolution is already its
+own probabilistic system per mount/range/wedge (`weapon_resolution.gd`)
+and duplicating a look-ahead damage model here would be a second,
+inevitably-diverging source of truth. Instead two simple, honestly-
+labeled ASSUMPTION signals stand in for it: a target's hull integrity
+fraction against the SAME `CRITICAL_HULL_FRACTION` threshold already
+used for a ship's own retreat decision (deliberately reused, not a new
+number), and a flat per-tick commitment cap (`MAX_USEFUL_ATTACKERS_PER_TARGET`,
+default 2) on how many formation-mates can be "freshly" assigned to one
+target before a still-uncommitted target is preferred instead. This is
+a bin-packing-style greedy heuristic, not a combat-outcome predictor --
+it answers "should ship N try somewhere else" using only information
+already cheaply available (hull fraction, a same-tick counter), not
+"how many more hits until this target dies."
+
+Sequencing is sequential-greedy WITHIN one formation, one tick: members
+are walked in the formation's existing deterministic order (guide,
+then `member_offsets.keys()` insertion order -- the same convention
+`_resolve_formation_keeping` already uses), and each member's choice
+updates a local `assigned_counts` tally that the NEXT member's choice
+sees. This is deliberately simple over a "globally optimal" assignment
+(e.g. an actual bipartite matching/auction algorithm) -- correct-enough,
+deterministic (§43: no RNG, no iteration-order-sensitive ties beyond
+Dictionary insertion order, which this codebase already relies on
+elsewhere), and cheap to compute every tick for every formation.
+
+Ungoverned ships (no formation) and formations with no currently valid
+guide (`TacticalAI.is_guide_lost`) are completely untouched by this
+pass -- they keep using `_resolve_weapon_target`'s pre-existing
+automatic fallback exactly as before this feature existed. This is a
+deliberate simplification, not an oversight: §34.1 frames doubling as
+something run "by the guide ship's side of the command hierarchy",
+so a headless formation (mid §33 succession-window transfer, or simply
+never given a guide) has no hierarchy to run the pass from, and members
+fall back to individual judgement, consistent with how every other
+guide-dependent mechanic in this codebase (formation-keeping, formation
+orders) already degrades when there is no guide.

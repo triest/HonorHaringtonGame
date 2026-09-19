@@ -10,6 +10,8 @@ const FormationOrder = preload("res://simulation/formation_order.gd")
 const ShipPhysicsState = preload("res://simulation/ship_physics_state.gd")
 const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const HullState = preload("res://simulation/hull_state.gd")
+const WeaponData = preload("res://simulation/weapon_data.gd")
+const WeaponMount = preload("res://simulation/weapon_mount.gd")
 
 var _failures: int = 0
 var _passed: int = 0
@@ -815,6 +817,86 @@ func _test_change_formation_becomes_new_design_for_later_leader_transfer() -> vo
 	_assert(formation.member_offsets.has("wing_a"), "wing_a should be carried forward as an ordinary member after the transfer")
 	_assert(formation.member_offsets["wing_a"].distance_to(Vector3(500.0, 0, 800.0)) < 0.01, "leader transfer after a reshape should re-plan from the RESHAPED design, not the pre-reshape one")
 
+## §34.1 Doubling -- SimulationWorld._resolve_formation_target_assignment,
+## end-to-end through tick_simulation (not just the TacticalAI helper in
+## isolation). Three formation members (guide + 2 wings, deterministic
+## order guide/wing1/wing2) all start able to see two hostiles: "hostile_a"
+## much nearer to everyone (would win plain independent nearest-contact
+## selection for all three members), "hostile_b" much farther (would be
+## ignored by plain independent selection). With the default cap
+## (MAX_USEFUL_ATTACKERS_PER_TARGET = 2), the first two members in
+## deterministic order should still double up on hostile_a, but the third
+## should be steered to hostile_b instead of piling on a third time.
+func _test_formation_target_assignment_avoids_overcommitting_to_one_target() -> void:
+	var world := SimulationWorld.new()
+
+	var guide := _make_ship(Vector3.ZERO)
+	var wing1 := _make_ship(Vector3(100, 0, 0))
+	var wing2 := _make_ship(Vector3(-100, 0, 0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing1", wing1)
+	world.add_ship("wing2", wing2)
+	world.set_team("guide", "red")
+	world.set_team("wing1", "red")
+	world.set_team("wing2", "red")
+
+	var formation := world.add_formation("wall", "guide")
+	formation.set_station("wing1", Vector3(500, 0, 0))
+	formation.set_station("wing2", Vector3(-500, 0, 0))
+
+	var hostile_a := _make_ship(Vector3(0, 0, 5000))
+	var hostile_b := _make_ship(Vector3(0, 0, 50000))
+	world.add_ship("hostile_a", hostile_a)
+	world.add_ship("hostile_b", hostile_b)
+	world.set_team("hostile_a", "blue")
+	world.set_team("hostile_b", "blue")
+	world.hulls["hostile_a"] = HullState.new()
+	world.hulls["hostile_b"] = HullState.new()
+
+	var weapon := WeaponData.new()
+	weapon.max_range_m = 500_000.0
+	weapon.damage_per_hit = 0.0  # isolate assignment from actual damage/kill dynamics -- this test only checks WHO was assigned to WHOM
+	weapon.recharge_time_s = 0.0
+	for id in ["guide", "wing1", "wing2"]:
+		world.add_weapon_mount(id, WeaponMount.new(weapon, WeaponMount.broadside_arc()))
+
+	for i in range(5):
+		world.tick_simulation(1.0 / 60.0)
+
+	var assigned: Dictionary = world._formation_assigned_targets
+	_assert(assigned.get("guide") == "hostile_a", "first member in deterministic formation order should get the nearest target")
+	_assert(assigned.get("wing1") == "hostile_a", "second member should still double up on the nearest target (2 <= default MAX_USEFUL_ATTACKERS_PER_TARGET)")
+	_assert(assigned.get("wing2") == "hostile_b", "third member should NOT pile onto an already-double-committed target while an uncommitted hostile exists (§34.1)")
+
+## §34.1: a formation whose guide is lost gets NO coordinated assignment
+## this tick -- members fall back to independent selection, exactly like
+## before this pass existed (honest scope: no phantom coordinator for a
+## headless formation).
+func _test_formation_target_assignment_skipped_when_guide_lost() -> void:
+	var world := SimulationWorld.new()
+
+	var wing1 := _make_ship(Vector3(100, 0, 0))
+	world.add_ship("wing1", wing1)
+	world.set_team("wing1", "red")
+
+	var formation := world.add_formation("wall", "guide_gone")  # guide never added -> is_guide_lost() true
+	formation.set_station("wing1", Vector3(500, 0, 0))
+
+	var hostile := _make_ship(Vector3(0, 0, 5000))
+	world.add_ship("hostile", hostile)
+	world.set_team("hostile", "blue")
+
+	var weapon := WeaponData.new()
+	weapon.max_range_m = 500_000.0
+	weapon.damage_per_hit = 0.0
+	weapon.recharge_time_s = 0.0
+	world.add_weapon_mount("wing1", WeaponMount.new(weapon, WeaponMount.broadside_arc()))
+
+	world.tick_simulation(1.0 / 60.0)
+
+	var assigned: Dictionary = world._formation_assigned_targets
+	_assert(not assigned.has("wing1"), "a formation with no valid guide should not get a coordinated assignment entry this tick")
+
 func _init() -> void:
 	_test_formation_state_basics()
 	_test_member_thrusts_toward_station()
@@ -847,6 +929,9 @@ func _init() -> void:
 	_test_change_formation_can_add_a_new_member()
 	_test_change_formation_member_actually_flies_to_new_station()
 	_test_change_formation_becomes_new_design_for_later_leader_transfer()
+
+	_test_formation_target_assignment_avoids_overcommitting_to_one_target()
+	_test_formation_target_assignment_skipped_when_guide_lost()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

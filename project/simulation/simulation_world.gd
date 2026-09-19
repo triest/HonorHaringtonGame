@@ -64,6 +64,7 @@ var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: m
 var formations: Dictionary = {}       # formation_id -> FormationState (§27/§28/§29, Milestone 10 first slice)
 var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
 var ship_combat_directives: Dictionary = {}  # ship_id -> ShipCombatDirective (§30 target/weapon mode, Milestone 11 second slice)
+var _formation_assigned_targets: Dictionary = {}  # ship_id -> target_ship_id (§34.1 Doubling, rebuilt every tick by _resolve_formation_target_assignment, empty for ships with no governed formation)
 var _pending_command_transmissions: Array = []  # Array[Dictionary{ready_at:float, ship_id:String, callable:Callable}] -- §25/§31 communication-delayed individual orders, see transmit_individual_order_now/transmit_ship_target/etc. below
 
 ## ТЗ §45 Replay (Milestone 12): null (default) means recording is OFF,
@@ -81,6 +82,7 @@ var _tick_index: int = 0
 ## firing offensively and instead thrusts away from its known hostile
 ## contacts. See TacticalAI.is_critically_damaged / select_retreat_vector_world.
 const CRITICAL_HULL_FRACTION: float = 0.3
+const MAX_USEFUL_ATTACKERS_PER_TARGET: int = 2  # §34.1 Doubling -- ASSUMPTION, see TacticalAI.select_formation_target_for_member doc comment
 
 ## ASSUMPTION (§33 Formation Leader, step 4 "account for communication
 ## limitations" -- see FormationState.guide_lost_since for why this is
@@ -457,6 +459,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_formation_keeping(dt)
 	_resolve_individual_orders(dt)
 	_resolve_damage_response(dt)
+	_resolve_formation_target_assignment(dt)
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
 	_integrate_ships(dt)
@@ -1194,18 +1197,30 @@ func order_missile_launch(ship_id: String, target_ship_id: String = "") -> int:
 
 ## Shared target-selection policy for BOTH _resolve_weapons_ai and
 ## _resolve_missile_launch_ai (§30 "target"/"target priority", Milestone
-## 11 second slice): if `ship_id` has a manually designated target AND it
-## is still a valid usable hostile contact, use it; otherwise (no
-## directive, no designation, or the designation is no longer valid) fall
-## back to TacticalAI's pre-existing automatic nearest-hostile-contact
-## selection -- never "no target" purely because a stale designation
-## exists (see ShipCombatDirective doc comment for the reasoning).
+## 11 second slice, extended by §34.1 Doubling this pass): priority order
+## is (1) a manually designated target (§30), if `ship_id` has one AND it
+## is still a valid usable hostile contact; else (2) this tick's
+## formation-coordinated assignment (§34.1,
+## `_resolve_formation_target_assignment`), if this ship belongs to a
+## governed formation that computed one AND it is still a valid usable
+## hostile contact; else (3) TacticalAI's pre-existing automatic nearest-
+## hostile-contact selection. A stale/no-longer-valid entry at any
+## priority level falls through to the next, exactly like the pre-
+## existing manual-designation fallback -- never "no target" purely
+## because a stale designation/assignment exists (see
+## ShipCombatDirective doc comment for the original reasoning, which
+## applies identically here).
 func _resolve_weapon_target(ship_id: String, ship, contacts: Dictionary, hostile_ids: Array) -> Dictionary:
 	var directive = ship_combat_directives.get(ship_id)
 	if directive != null and directive.manual_target_ship_id != "":
 		var directed: Dictionary = TacticalAI.select_directed_weapon_target(ship, contacts, hostile_ids, directive.manual_target_ship_id)
 		if directed.get("ship_id") != null:
 			return directed
+	var formation_assigned_id = _formation_assigned_targets.get(ship_id, "")
+	if formation_assigned_id != "":
+		var assigned: Dictionary = TacticalAI.select_directed_weapon_target(ship, contacts, hostile_ids, formation_assigned_id)
+		if assigned.get("ship_id") != null:
+			return assigned
 	return TacticalAI.select_weapon_target(ship, contacts, hostile_ids)
 
 ## §30/§31 (Milestone 11, this pass): executes each ship's active
@@ -1365,6 +1380,93 @@ func _resolve_damage_response(dt: float) -> void:
 		if away_world == Vector3.ZERO:
 			continue
 		ship.commanded_thrust_local = ship.orientation.inverse() * away_world
+
+## §34.1 Doubling -- formation-coordinated target assignment (first
+## slice). Runs once per tick, BEFORE `_resolve_weapons_ai`/
+## `_resolve_missile_launch_ai`, for every formation that currently has a
+## valid (not lost, see TacticalAI.is_guide_lost) guide -- "run by the
+## guide ship's side of the command hierarchy" per §34.1's own wording. A
+## formation whose guide is lost/mid-transfer (§33) does NOT get
+## coordinated assignment this tick -- its members simply fall back to
+## each individually running TacticalAI.select_weapon_target via
+## _resolve_weapon_target's existing fallback, exactly as before this
+## pass, since there is no guide side of the hierarchy to run the pass
+## FROM (honest: no phantom coordinator invented for a headless
+## formation).
+##
+## For each governed formation, walks its members in the formation's own
+## deterministic order (guide first, then `member_offsets.keys()` in
+## their existing Dictionary insertion order -- same convention used
+## throughout this codebase, e.g. `_resolve_formation_keeping`) and, for
+## each member actually able to independently choose a target this tick
+## (has a team, is not critically damaged/disengaging, is NOT holding
+## fire under a §30 "weapon mode" directive, and does NOT have an active
+## §30 manual target designation -- a commander's explicit single-ship
+## override already outranks automatic selection everywhere else in this
+## codebase, e.g. `_resolve_individual_orders` overriding
+## `_resolve_formation_keeping`, and this pass deliberately keeps that
+## same precedence rather than overriding an override), computes a
+## coordinated pick via `TacticalAI.select_formation_target_for_member`
+## using a running `assigned_counts` tally SHARED across this formation's
+## members for this tick only -- so member 2's pick already "sees" member
+## 1's pick this same tick, true sequential coordination, not just
+## simultaneous independent guesses that happen to look similar.
+##
+## Stores the result in `_formation_assigned_targets[ship_id]`, which
+## `_resolve_weapon_target` consults (after manual designation, before
+## the ordinary automatic fallback) for BOTH energy weapons and missile
+## launch target selection -- one assignment pass drives both weapon
+## types identically, since §34.1 does not distinguish between them.
+## §34.2 (missile time-on-target staggering) is a SEPARATE, still-open
+## piece of work -- this pass only coordinates WHICH target is chosen,
+## not WHEN missiles launched against it arrive (see ASSUMPTIONS.md).
+##
+## `_formation_assigned_targets` is fully rebuilt (cleared, then
+## repopulated) every tick, exactly like every other per-tick AI decision
+## in this file -- there is no "sticky" assignment carried across ticks;
+## a member is free to be reassigned next tick as the tactical picture
+## (damage, new contacts, lost contacts) changes.
+func _resolve_formation_target_assignment(dt: float) -> void:
+	_formation_assigned_targets.clear()
+
+	for formation_id in formations.keys():
+		var formation: FormationState = formations[formation_id]
+		if TacticalAI.is_guide_lost(formation.guide_ship_id, ships, hulls, CRITICAL_HULL_FRACTION):
+			continue  # no guide side of the hierarchy to run this pass from this tick -- see doc comment above
+
+		var member_ids: Array = [formation.guide_ship_id]
+		for member_id in formation.member_offsets.keys():
+			member_ids.append(member_id)
+
+		var assigned_counts: Dictionary = {}
+
+		for ship_id in member_ids:
+			var ship: ShipPhysicsState = ships.get(ship_id)
+			if ship == null or ship.is_wreck:
+				continue
+			var has_weapons: bool = not weapon_mounts.get(ship_id, []).is_empty() or not missile_tubes.get(ship_id, []).is_empty()
+			if not has_weapons:
+				continue
+			if not teams.has(ship_id) or teams[ship_id] == "":
+				continue
+			if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
+				continue
+			var directive = ship_combat_directives.get(ship_id)
+			if directive != null and not directive.weapons_free:
+				continue
+			if directive != null and directive.manual_target_ship_id != "":
+				continue  # §30 commander override outranks automatic coordination, same precedence as everywhere else
+
+			var hostile_ids: Array = _hostile_ship_ids(ship_id)
+			if hostile_ids.is_empty():
+				continue
+			var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+			var selection: Dictionary = TacticalAI.select_formation_target_for_member(ship, contacts, hostile_ids, hulls, assigned_counts, MAX_USEFUL_ATTACKERS_PER_TARGET, CRITICAL_HULL_FRACTION)
+			var target_id = selection.get("ship_id")
+			if target_id == null:
+				continue
+			_formation_assigned_targets[ship_id] = target_id
+			assigned_counts[target_id] = assigned_counts.get(target_id, 0) + 1
 
 ## ТЗ §17 Weapons + §26 Tactical AI ("select targets" / "use weapons") +
 ## §30 "target"/"target priority"/"weapon mode" (Milestone 11, second

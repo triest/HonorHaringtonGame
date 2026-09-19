@@ -3,3 +3,9 @@ project/.godot/
 Claude outputs/*.py
 
 _to_delete/
+
+# Persisted deploy key for the scheduled task's device_bash VM (each cron
+# firing gets a fresh ephemeral VM with no SSH key of its own -- see
+# ARCHITECTURE.md). NEVER commit this; restored into ~/.ssh at the start
+# of each scheduled run instead.
+.git-deploy-key/

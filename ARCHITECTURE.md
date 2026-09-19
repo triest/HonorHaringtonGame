@@ -1125,3 +1125,101 @@ CHANGE_SPEED, где `is_complete` буквально проверяет физ�
 Ничего существующего не переписано — `_resolve_formation_keeping`,
 `_transfer_formation_command`, все прежние Kind остались буквально без
 изменений.
+
+## §30/§31 Individual Ship Orders / Individual Override — parallel per-ship order system, not a generalization of FormationOrder
+
+Milestone 11 first slice. Key architectural decision: rather than
+generalizing `FormationOrder`/`FormationState`'s order machinery to
+apply to "a guide OR an arbitrary ship", this pass adds a SEPARATE,
+structurally parallel pair of classes -- `IndividualOrder`
+(`individual_order.gd`) and `IndividualCommandState`
+(`individual_command_state.gd`) -- keyed by `ship_id` directly in a new
+`SimulationWorld.individual_orders: Dictionary`, independent of
+`formations`. `CHANGE_COURSE`/`CHANGE_SPEED` are near-verbatim
+duplicates of `FormationOrder`'s same-named kinds (same exact-stop
+clamp law). This duplication is a deliberate trade: `FormationOrder` is
+mature, fully tested, and lives in a hot path
+(`_resolve_formation_orders`); refactoring it into a shared base class
+in the SAME pass that introduces a brand-new concept (per-ship override
+state, §31) would risk destabilizing already-correct, already-tested
+code for the sake of avoiding ~40 lines of duplication. If a future pass
+finds itself adding a THIRD kinematic-order consumer, that would be the
+right moment to extract a shared base (§43 "avoid premature
+abstraction" cuts both ways).
+
+`_resolve_individual_orders(dt)` runs in `tick_simulation` between
+`_resolve_formation_keeping(dt)` and `_resolve_damage_response(dt)`.
+This ordering IS the entire override mechanism: `_resolve_formation_
+keeping` unconditionally sets `commanded_thrust_local` for every
+formation member every tick (unchanged, no special-casing added there
+at all); `_resolve_individual_orders` then OVERWRITES that value for
+any ship with an active `IndividualCommandState`, and
+`_resolve_damage_response` (critical-damage auto-retreat) can still
+overwrite it again after that. No new field on `FormationState` or
+`ShipPhysicsState` was needed to represent "this ship is overriding its
+formation" (§31's explicit requirement) -- `IndividualCommandState.
+is_active()` (mirrored publicly as `SimulationWorld.
+is_ship_overriding_formation(ship_id)`) already answers exactly that
+question, and simply becoming inactive (order queue drains, or
+`return_ship_to_formation` clears it) is sufficient to hand control
+back with no separate "resume" step, since formation station-keeping
+was never actually stopped for that ship -- it was just being
+overwritten every tick.
+
+`_resolve_individual_orders` has no notion of "formation member" at
+all -- it iterates `individual_orders.keys()`, which can include a ship
+that is not in any formation. This is intentional: Milestone 11's
+actual target is independent single-ship command (not merely
+"overriding a formation"), and building the resolver around "ship_id
+with an order" rather than "member of a formation with an order"
+makes both use cases (a lone ship under direct command, and a
+formation member temporarily overridden) go through the identical code
+path with zero extra branching.
+
+### CHANGE_ORIENTATION: first code driving `angular_velocity` from an order
+
+Closes a gap that had been re-logged in every Milestone 10 pass's
+CHANGELOG/ASSUMPTIONS entry: nothing anywhere in the codebase computed
+`angular_velocity` from AI/order logic -- it was purely a
+scenario/test-set field that `KinematicsUtils.integrate_orientation`
+consumed, never produced.
+
+`_resolve_individual_orientation_order` computes entirely in the
+ship's own BODY/local frame: it transforms the world-space
+`target_facing_world` into local coordinates
+(`ship.orientation.inverse() * target_facing_world`) and finds the
+axis/angle that rotates local `Vector3.FORWARD` onto that local target
+vector, then sets `ship.angular_velocity` to that axis scaled by an
+exact-stop-clamped turn rate (`min(max_angular_speed_rad_s,
+angle_err / dt)`). Doing this in LOCAL frame (rather than computing a
+world-frame axis/angle and using that directly) is required by how
+`KinematicsUtils.integrate_orientation` actually composes rotations:
+`orientation * delta_rotation` right-multiplies the incremental
+rotation, which is the standard convention for a BODY-frame angular
+velocity (rotating about a body axis leaves that axis's own world
+direction unchanged -- exactly the property real body-fixed rate
+gyros/thrusters have). Doing the axis/angle computation in world frame
+and assigning the result directly to `angular_velocity` would silently
+produce wrong turns whenever the ship's current orientation is not
+close to identity -- both frames coincide exactly at identity
+orientation, which is why `test_individual_orders.gd` deliberately
+includes a case starting from a NON-identity orientation (a mistake
+here would pass the identity-orientation test and fail only that one).
+See ASSUMPTIONS.md for the full frame derivation.
+
+Antiparallel (180-degree) target facings are a genuine edge case: the
+cross product used to find the rotation axis is exactly zero there, so
+an arbitrary perpendicular axis is substituted for that one tick (this
+order does not, and has never claimed to, constrain roll around the
+forward axis -- no code anywhere in this project models roll/bank).
+Once the ship has turned even slightly away from exact antiparallel,
+the cross product becomes well-defined again and normal convergence
+resumes.
+
+Range of changes: 2 new files (`individual_order.gd`, ~160 lines;
+`individual_command_state.gd`, ~50 lines) + 2 new preloads + 1 new
+Dictionary + 1 new line in `remove_ship` + 1 new line in
+`tick_simulation` + 6 new public methods + 2 new private resolver
+methods (~150 lines) in `simulation_world.gd`. `_resolve_formation_
+keeping`, `_resolve_formation_orders`, `FormationOrder`, `FormationState`
+and every other Milestone 10 mechanism are byte-for-byte unchanged.

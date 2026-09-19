@@ -1072,3 +1072,118 @@ change_course+change_speed); многоуровневая иерархия ко�
 точность/захват PD; §25 consumer'ов для COMMUNICATIONS/POWER/
 STRUCTURAL_INTEGRITY/DEFENSIVE_SYSTEMS по-прежнему нет; Milestone 11+
 не начаты.
+
+## 2026-09-19 (проход: Milestone 11 начат — §30/§31 Individual Ship Orders / Individual Override)
+
+Milestone 10 (Formation Command) остаётся в основном закрытым (см.
+предыдущую запись — "change formation" реализован); этот проход
+переходит к Milestone 11 ("Individual ship command + overrides",
+AGENTS.md §56), начиная с §30 Individual Ship Orders и §31 Individual
+Override — до сих пор НЕ реализованных вообще: до этого прохода у
+формации был единственный источник команд (FormationOrder на ведущего,
+Milestone 10), а у отдельного корабля не было НИКАКОГО способа получить
+явную индивидуальную интенцию, независимую от формации, и не было
+никакого представления "этот корабль сейчас переопределяет свою
+формацию" (§31 явно требует: "The override must be represented in
+simulation state").
+
+* Новый `IndividualOrder` (`individual_order.gd`): Kind
+  HOLD/CHANGE_COURSE/CHANGE_SPEED/CHANGE_ORIENTATION. Первые три —
+  прямые аналоги уже существующих `FormationOrder` Kind (та же
+  exact-stop acceleration clamp логика, см. предыдущие записи), но
+  применяются к ЛЮБОМУ отдельному кораблю, а не только к ведущему
+  формации. `CHANGE_ORIENTATION` — НОВЫЙ вид, закрывающий давно
+  честно залогированный пробел ("управление носовой ориентацией
+  (angular_velocity) от AI/приказов нигде не реализовано", упоминался
+  в нескольких предыдущих записях подряд): поворачивает нос корабля
+  (`orientation`) к заданному мировому направлению, независимо от
+  вектора скорости, той же exact-stop clamp техникой (угловая скорость
+  разгоняется до `max_angular_speed_rad_s` ровно настолько, чтобы не
+  проскочить остаточный угол за один тик) — сходится без колебаний,
+  без подбора коэффициентов, симметрично уже принятому подходу для
+  CHANGE_COURSE/CHANGE_SPEED. `withdraw_orders()` — составной
+  retreat/disengage (change_course + change_speed), зеркально
+  `FormationOrder.withdraw_orders`.
+* Новый `IndividualCommandState` (`individual_command_state.gd`):
+  `current_order`/`order_queue` + `issue_order(s)`/`issue_order_now`/
+  `clear_orders`/`is_active()` — зеркало `FormationState`'s
+  соответствующих полей/методов, но на уровне ОДНОГО корабля, а не
+  формации. `is_active()` — явное представление §31's "override must be
+  represented in simulation state".
+* `SimulationWorld`: новый `individual_orders: Dictionary` (ship_id ->
+  IndividualCommandState) + публичный API
+  `issue_individual_order(s)`/`issue_individual_order_now`/
+  `return_ship_to_formation`/`is_ship_overriding_formation` + новая
+  `_resolve_individual_orders(dt)`, запускается в `tick_simulation`
+  МЕЖДУ `_resolve_formation_keeping` и `_resolve_damage_response` —
+  т.е. индивидуальный приказ ПЕРЕЗАПИСЫВАЕТ thrust/angular_velocity,
+  которые station-keeping уже посчитал этому кораблю этим же тиком
+  (это и есть ВЕСЬ механизм §31 "override" — никакого отдельного флага
+  "режим переопределения" на формации или корабле не потребовалось,
+  активный `IndividualCommandState` сам по себе достаточное
+  представление), а критическое повреждение (`_resolve_damage_response`,
+  идёт ПОСЛЕ) по-прежнему может перебить даже явный индивидуальный
+  приказ — экипаж тонущего корабля уклоняется рефлекторно вне
+  зависимости от постоянного приказа. §30 "return to formation" — не
+  манёвр, а просто `clear_orders()`: как только `is_active()` становится
+  false, `_resolve_formation_keeping` (выполняется КАЖДЫЙ тик независимо
+  от индивидуальных приказов) автоматически снова начинает управлять
+  этим кораблём со следующего тика — ничего специально "возвращать" не
+  нужно. Работает одинаково и для кораблей БЕЗ формации вовсе (реальная
+  цель Milestone 11 — независимое индивидуальное командование, не
+  только оверрайд формации) — функция вообще не знает о понятии
+  "член формации", только "у этого ship_id есть активный
+  индивидуальный приказ".
+* 16 новых тестов в новом `test_individual_orders.gd`: базовые
+  свойства `IndividualCommandState` (неактивен по умолчанию,
+  issue_order активирует, clear_orders деактивирует, issue_order_now
+  прерывает очередь); ship без индивидуального приказа не считается
+  "overriding"; HOLD обнуляет thrust И angular_velocity каждый тик и
+  никогда не завершается сам; CHANGE_COURSE/CHANGE_SPEED на одиночном
+  корабле БЕЗ формации сходятся и завершаются; очередь withdraw_orders
+  реально проходит оба приказа подряд; CHANGE_ORIENTATION из identity
+  ориентации; CHANGE_ORIENTATION из НЕ-identity стартовой ориентации
+  (см. ASSUMPTIONS.md — дискриминирующий тест против путаницы body-
+  frame/world-frame, самый важный тест этого прохода); разворот на 180
+  градусов (fallback на произвольную ось при точно антипараллельных
+  векторах) — потребовал увеличенного тайм-бюджета теста (см.
+  ASSUMPTIONS.md, честно найденная и исправленная ошибка НЕ в коде, а
+  в первой версии самого теста); сквозной тест через
+  `SimulationWorld.tick_simulation()` — член формации на станции
+  (нулевой thrust station-keeping), затем явный индивидуальный приказ
+  переопределяет его thrust, ПОКА формационный `current_order` (HOLD_
+  FORMATION) остаётся нетронутым, приказ доходит до завершения, корабль
+  физически смещается со станции, и station-keeping реально снова
+  берёт управление на следующий тик; `return_ship_to_formation` может
+  отменить ЕЩЁ НЕ завершённый приказ, не только уже законченный;
+  удаление корабля с активным приказом не приводит к краху и чистит
+  `individual_orders`.
+* Полный прогон headless-тестов ПОДТВЕРЖДЁН: все 26 файлов
+  `project/simulation/tests/` (было 25, +1 новый файл) зелёные (Godot
+  v4.3-stable_linux.x86_64, скачан заново). Регрессий не найдено.
+
+INTERPRETATION, не канон: "orientation" здесь — направление НОСА
+корабля (`orientation * Vector3.FORWARD`), независимо от вектора
+скорости, что согласуется с уже принятой в проекте моделью
+всенаправленного impeller-thrust. См. ASSUMPTIONS.md за полный разбор
+допущений этого прохода (body-frame reasoning для angular_velocity,
+исходную ошибку в тесте на 180°, зачем IndividualOrder НЕ переиспользует
+FormationOrder несмотря на дублирование CHANGE_COURSE/CHANGE_SPEED).
+
+Честно НЕ сделано (открыто дальше): §30 items, требующие контекста
+цели/оружия (target, target priority, weapon mode, missile launch,
+counter-missile policy, point-defense policy, sensor mode, ECM mode,
+defensive posture) — вне рамок этого прохода; §29 items с тем же
+требованием контекста (attack, select target, target distribution,
+missile use, counter-missile posture, defensive posture, evasive
+maneuver) — по-прежнему не реализованы как формационные приказы;
+"approach" (движение к точке) по-прежнему не отдельный примитив-
+конструктор ни на уровне формации, ни на уровне отдельного корабля;
+многоуровневая иерархия команд §28 (Fleet/Task Force/Squadron/
+Division/Element/Ship) по-прежнему плоская; ECM по-прежнему не
+деградирует точность/захват PD; §25 consumer'ов для COMMUNICATIONS/
+POWER/STRUCTURAL_INTEGRITY/DEFENSIVE_SYSTEMS по-прежнему нет; §31's
+"account for communication limitations" (аналог §33's
+COMMAND_TRANSFER_DELAY_S) для индивидуальных приказов не рассмотрен —
+индивидуальный приказ применяется мгновенно в тот же тик, когда issued,
+без задержки на "передачу приказа кораблю"; Milestone 12+ не начаты.

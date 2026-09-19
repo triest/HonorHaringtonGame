@@ -45,6 +45,8 @@ const TacticalAI = preload("res://simulation/tactical_ai.gd")
 const MissileTube = preload("res://simulation/missile_tube.gd")
 const FormationState = preload("res://simulation/formation_state.gd")
 const FormationOrder = preload("res://simulation/formation_order.gd")
+const IndividualOrder = preload("res://simulation/individual_order.gd")
+const IndividualCommandState = preload("res://simulation/individual_command_state.gd")
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
 
 var clock: SimClock
@@ -58,6 +60,7 @@ var ecm_states: Dictionary = {}       # ship_id -> ECMState (optional)
 var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> SensorContact]
 var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: minimal hostility model, see class doc)
 var formations: Dictionary = {}       # formation_id -> FormationState (§27/§28/§29, Milestone 10 first slice)
+var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
 
 ## ASSUMPTION (§26 "retreat"/"disengage", no canonical figure found): a
 ## ship whose HullState integrity fraction drops to or below this stops
@@ -120,6 +123,7 @@ func remove_ship(ship_id: String) -> void:
 	ecm_states.erase(ship_id)
 	sensor_contacts.erase(ship_id)
 	teams.erase(ship_id)
+	individual_orders.erase(ship_id)
 
 func get_ship(ship_id: String) -> ShipPhysicsState:
 	return ships.get(ship_id)
@@ -207,6 +211,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_point_defense(dt)
 	_resolve_formation_orders(dt)
 	_resolve_formation_keeping(dt)
+	_resolve_individual_orders(dt)
 	_resolve_damage_response(dt)
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
@@ -666,6 +671,181 @@ func _transfer_formation_command(formation: FormationState, new_guide_id: String
 		for ship_id in new_offsets.keys():
 			refreshed_design[ship_id] = new_offsets[ship_id]
 		formation.design_offsets = refreshed_design
+
+## §30 Individual Ship Orders / §31 Individual Override (Milestone 11,
+## first slice). Returns this ship's IndividualCommandState, creating an
+## empty (inactive) one on first use so callers don't need to special-case
+## "this ship has never been individually ordered before".
+func _get_or_create_individual_command_state(ship_id: String) -> IndividualCommandState:
+	if not individual_orders.has(ship_id):
+		individual_orders[ship_id] = IndividualCommandState.new()
+	return individual_orders[ship_id]
+
+## §35 Command Queue at the single-ship level: queue an order to run once
+## this ship's current order (and anything already queued) completes.
+func issue_individual_order(ship_id: String, order: IndividualOrder) -> void:
+	_get_or_create_individual_command_state(ship_id).issue_order(order)
+
+func issue_individual_orders(ship_id: String, orders: Array) -> void:
+	_get_or_create_individual_command_state(ship_id).issue_orders(orders)
+
+## Interrupt whatever this ship is currently doing (individually) and
+## start `order` immediately -- e.g. an urgent "intercept incoming
+## missile" that shouldn't wait for an in-progress course change to
+## finish first.
+func issue_individual_order_now(ship_id: String, order: IndividualOrder) -> void:
+	_get_or_create_individual_command_state(ship_id).issue_order_now(order)
+
+## §30 "return to formation" / §31's worked example's second half. Drops
+## any individual order/queue for this ship -- NOT a maneuver, just a
+## command-authority change: once this returns, `_resolve_individual_orders`
+## stops touching this ship, so its formation's own station-keeping
+## (`_resolve_formation_keeping`, which runs every tick regardless of
+## individual-order state) simply takes back effect starting next tick. A
+## ship with no formation at all just keeps whatever thrust its last
+## individual order left it at.
+func return_ship_to_formation(ship_id: String) -> void:
+	if individual_orders.has(ship_id):
+		individual_orders[ship_id].clear_orders()
+
+## §31 ("The override must be represented in simulation state"): true
+## while `ship_id` has an active or queued individual order, i.e. is
+## currently under individual command rather than left entirely to its
+## formation (or to nothing, for a ship with no formation).
+func is_ship_overriding_formation(ship_id: String) -> bool:
+	var state = individual_orders.get(ship_id)
+	return state != null and state.is_active()
+
+## §30/§31 (Milestone 11, this pass): executes each ship's active
+## individual order, OVERWRITING whatever `_resolve_formation_keeping`
+## (which ran just before this, unconditionally, for every formation
+## member) computed for that ship this tick -- this is the entire
+## mechanism of "an individual ship can temporarily override its
+## formation's order" (§31): no special "override mode" flag on the
+## formation or the ship is needed, an active IndividualCommandState is
+## itself sufficient representation (see `is_ship_overriding_formation`),
+## and simply STOPPING here (queue drained, `clear_orders`/§30 "return to
+## formation") is sufficient to hand control back, since nothing then
+## overwrites `_resolve_formation_keeping`'s output again until this
+## function runs again next tick and finds nothing active.
+##
+## A ship with no formation at all is handled identically -- this
+## function has no notion of "formation member" at all, only "ship_id
+## with an active individual order", so Milestone 11's actual target
+## (independent single-ship command, not just formation overrides) works
+## via the exact same code path.
+##
+## CHANGE_COURSE/CHANGE_SPEED reuse the same EXACT-STOP acceleration
+## clamp as `_resolve_formation_orders` (see that function's doc comment
+## for the full rationale) so an individually-ordered ship converges on
+## its target course/speed without overshoot or oscillation, with no
+## tuned gains. CHANGE_ORIENTATION is new: see
+## `_resolve_individual_orientation_order`.
+func _resolve_individual_orders(dt: float) -> void:
+	for ship_id in individual_orders.keys():
+		var state: IndividualCommandState = individual_orders[ship_id]
+		if not state.is_active():
+			continue
+		var ship: ShipPhysicsState = ships.get(ship_id)
+		if ship == null:
+			continue
+
+		if state.current_order == null:
+			state.current_order = state.order_queue.pop_front()
+
+		var order: IndividualOrder = state.current_order
+
+		# HOLD is a standing order (§30's implicit "stop maneuvering"):
+		# it never auto-completes -- it actively zeroes both this ship's
+		# maneuver thrust AND its turn rate every tick until something
+		# else explicitly replaces it.
+		if order.kind == IndividualOrder.Kind.HOLD:
+			ship.commanded_thrust_local = Vector3.ZERO
+			ship.angular_velocity = Vector3.ZERO
+			continue
+
+		if order.kind == IndividualOrder.Kind.CHANGE_ORIENTATION:
+			_resolve_individual_orientation_order(ship, order, dt)
+			if order.is_complete(ship):
+				state.current_order = null
+			continue
+
+		# CHANGE_COURSE / CHANGE_SPEED.
+		if order.is_complete(ship):
+			state.current_order = null
+			# Zeroed on the exact tick of completion, mirroring
+			# FormationOrder's identical convention for its guide -- for
+			# a ship that also happens to be a formation member, this
+			# means one tick of zero thrust before station-keeping
+			# recomputes a fresh value next tick (negligible at this
+			# project's tick rates; see ASSUMPTIONS.md), rather than
+			# adding coupling here to know whether a formation would
+			# otherwise be driving this ship's thrust.
+			ship.commanded_thrust_local = Vector3.ZERO
+			continue
+
+		var max_accel: float = ship.effective_max_acceleration()
+		if max_accel <= 0.0:
+			continue
+		var velocity_error: Vector3 = order.target_velocity_mps - ship.velocity
+		var error_mag: float = velocity_error.length()
+		if error_mag <= 0.0001:
+			continue
+		var desired_accel_mag: float = min(max_accel, error_mag / dt)
+		var desired_accel: Vector3 = velocity_error.normalized() * desired_accel_mag
+		ship.commanded_thrust_local = ship.orientation.inverse() * (desired_accel / max_accel)
+
+## §30 "orientation" (Milestone 11, this pass): the first code anywhere
+## in this project to actually drive `angular_velocity` from an order
+## (previously an honestly-logged gap -- see CHANGELOG.md/ASSUMPTIONS.md
+## history). Turns `ship`'s nose to point along `order.target_facing_world`
+## using the same EXACT-STOP clamp philosophy as the kinematic orders
+## (accelerate the turn rate up to `max_angular_speed_rad_s`, but never so
+## fast that this tick's rotation would overshoot the remaining angle),
+## so a ship reaches its ordered facing and stops -- no oscillation, no
+## tuned gains.
+##
+## Works entirely in the ship's own BODY/local frame, not world frame:
+## `KinematicsUtils.integrate_orientation` composes
+## `orientation * delta_rotation`, which is the standard rigid-body
+## convention for a BODY-frame angular velocity (rotating about a body
+## axis leaves that axis's own world direction unchanged, exactly like a
+## real ship's own rate gyros/thrusters would command a turn rate in its
+## own frame, not in some external world frame). Transforming the world-
+## space target facing into the ship's local frame first
+## (`orientation.inverse() * target_facing_world`) and computing the
+## rotation axis/angle there keeps this consistent with that convention
+## -- see ASSUMPTIONS.md for the full derivation and why getting this
+## backwards would only be caught by a test that starts from a NON-
+## identity initial orientation (which test_individual_orders.gd
+## deliberately includes).
+func _resolve_individual_orientation_order(ship: ShipPhysicsState, order: IndividualOrder, dt: float) -> void:
+	var target_facing_local: Vector3 = ship.orientation.inverse() * order.target_facing_world
+	var forward_local: Vector3 = Vector3.FORWARD
+	var angle_err: float = forward_local.angle_to(target_facing_local)
+
+	if angle_err <= order.orientation_tolerance_rad:
+		ship.angular_velocity = Vector3.ZERO
+		return
+
+	var axis_local: Vector3 = forward_local.cross(target_facing_local)
+	if axis_local.length_squared() <= 0.000001:
+		# forward_local and target_facing_local are (anti)parallel --
+		# ASSUMPTION: no canonically "correct" roll-free axis exists for
+		# a pure 180-degree reversal, so an arbitrary perpendicular axis
+		# is picked (this order does not constrain roll around the
+		# forward axis at all, consistent with the rest of this codebase
+		# never having modeled roll/bank).
+		axis_local = forward_local.cross(Vector3.UP)
+		if axis_local.length_squared() <= 0.000001:
+			axis_local = forward_local.cross(Vector3.RIGHT)
+	axis_local = axis_local.normalized()
+
+	var max_turn_rate: float = ship.max_angular_speed_rad_s
+	if max_turn_rate <= 0.0:
+		return
+	var turn_rate: float = min(max_turn_rate, angle_err / dt)
+	ship.angular_velocity = axis_local * turn_rate
 
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting

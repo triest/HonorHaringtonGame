@@ -764,19 +764,39 @@ implied only for the succession-window case:
   able to recognize and exploit this rather than treating every ship
   in a broken formation as equally defended as one still in station.
 
-Classification: INTERPRETATION, not a pinned book citation. This
-session searched for the specific canon passage the user described
-(a formation's ships covering a neighbor's own point-defense gap, and
-that coverage failing when the formation is disrupted) and did not
-manage to retrieve a citable exact passage/quote -- see CANON_RULES.md
-"Шестнадцатая сверка" for what was and wasn't found. The rule above is
-built from what IS already pinned in this ТЗ (§41.1's wedge gap,
-§33.1's covering-neighbor language, §61's formation-fighting doctrine)
-plus §4.1 (logic/common sense where canon is silent on the exact
-mechanism): ships fighting in formation specifically FOR mutual
-support, with that support being geometric/directional and therefore
-losable, is consistent with everything else already established here,
-even without a pinned quote for this specific paragraph.
+Classification: CANON (episode confirmed, 2026-09-19 re-check --
+see CANON_RULES.md "Шестнадцатая сверка", revised). The user first
+supplied a set of specific quotes ("Formation Reno", "get those
+cruisers in tighter", "socketed back into the point defense net")
+attributed to *Field of Dishonor* (HH4); this session could NOT verify
+those as real book text -- multiple targeted phrase searches for the
+exact wording returned zero matches anywhere, which is a strong
+fabrication signal, so they are NOT used or cited below. What IS
+verified (via the Honorverse Wiki's own article on the First Battle of
+Hancock, cross-checked against *The Short Victorious War* (HH3) being
+the correct book -- NOT Field of Dishonor, which only covers the later
+court-martial): during that battle, when Admiral Sarnow was
+incapacitated and no scatter order had been issued, Captain Pavel
+Young panicked and ordered his own heavy cruiser squadron to scatter.
+Per the Wiki: "defense nets were disrupted", leaving HMS Cassandra
+exposed and taking heavy damage, until Honor Harrington countermanded
+the order and had the ships individually return to formation. This
+event is also WHY Young later faces the cowardice court-martial
+depicted in Field of Dishonor -- the two books are connected, but the
+battle itself is HH3's.
+
+This confirms the mechanic (formation-wide point-defense/missile-
+defense coverage is a single interlocking "net"; breaking formation
+disrupts that net for everyone in it, not just the ship that broke
+station) as a real plot-consequential event, not just flavor text. It
+does NOT confirm the specific dialogue Grok quoted, nor any verbatim
+description of the mechanism as "interlocking"/"fine-meshed" -- that
+phrasing is this ТЗ's own paraphrase of the Wiki summary, not a pinned
+primary-source quote. Treat this as CANON for the EVENT and its
+consequence (scatter -> nets disrupted -> a ship left exposed and
+badly hurt -> commander re-forms it), and INTERPRETATION for the exact
+mechanical rule (per-ship directional gaps covered by neighbors, §41.1/
+§33.1/§61) this ТЗ builds on top of that confirmed event.
 
 HONEST GAP (nothing above is implemented yet): `PointDefenseMount`/
 `PointDefenseResolution` currently model PD as omnidirectional --

@@ -140,9 +140,25 @@ Wiki 2026-09-18 -- see AGENTS.md §18.1 for full detail/citations):
   arc the first ship's own systems can't reach -- part of why "wall of
   battle" (§61) is the doctrine. Breaking formation (ship lost, out of
   station, straggling, dispersed order) genuinely loses that coverage
-  and exposes the uncovered gap to exploitation. INTERPRETATION --
-  no pinned book citation found this session (CANON_RULES.md
-  "Шестнадцатая сверка"), built from already-established §41.1/§33.1/
-  §61. NOT implemented: PD is currently omnidirectional (no firing-arc
-  model at all), and FormationState has no coverage concept.
+  and exposes the uncovered gap to exploitation.
+* **CANON (event, First Battle of Hancock, *The Short Victorious War*
+  HH3 -- NOT Field of Dishonor, which only covers the later
+  court-martial): confirmed via Honorverse Wiki, 2026-09-19.** Admiral
+  Sarnow incapacitated, no scatter order issued; Captain Pavel Young
+  panics and orders his own squadron to scatter anyway -- "defense
+  nets were disrupted", HMS Cassandra left exposed and heavily
+  damaged, until Harrington countermands and orders ships individually
+  back to formation. Confirms formation-wide PD/missile-defense
+  coverage as one interlocking net that breaking formation disrupts
+  for everyone in it, as a real plot-consequential event.
+* A separately user-supplied set of quotes ("Formation Reno", "get
+  those cruisers in tighter", "socketed back into the point defense
+  net", attributed to Field of Dishonor) could NOT be verified this
+  session -- zero search matches for the exact wording anywhere,
+  treated as unconfirmed/likely fabricated and NOT used or cited.
+* Classification: CANON for the event itself; INTERPRETATION for the
+  general per-ship-directional-gap mechanical rule (§41.1/§33.1/§61)
+  this ТЗ builds on top of it.
+* NOT implemented: PD is currently omnidirectional (no firing-arc model
+  at all), and FormationState has no coverage concept.
 

@@ -100,6 +100,51 @@ The project must maintain:
 * `CANON_RULES.md`
 * `ASSUMPTIONS.md`
 
+## 4.1 Where canon is silent: logic and common sense, not invention
+
+Canon comes first, always. Every mechanic MUST be checked against the
+source priority above before anything else happens to it. This
+subsection governs only the case canon genuinely does not cover --
+it is not a license to skip checking canon first, and it does not
+downgrade anything canon already settles.
+
+When the books, official materials, and careful interpretation
+(source priority levels 1-4 above) genuinely have nothing to say about
+a specific numeric value or mechanic, the gap MUST be filled with
+real-world engineering, physical, and tactical logic -- not an
+arbitrary "whatever feels right" number, and not silently left broken
+or stubbed. Concretely:
+
+* start from real physics (Newtonian mechanics, F=ma, conservation of
+  momentum/energy, thermodynamics where relevant) and real engineering
+  constraints (structural limits, power/heat budgets, sensor physics)
+  -- the Honorverse setting is itself built to be physically grounded
+  hard SF, so "what would actually be true/necessary given the physics
+  already established" is a legitimate, non-arbitrary source of
+  numbers, not a cop-out;
+* for tactics, doctrine, and command structure specifically, ground
+  the choice in real historical naval warfare -- AGENTS.md §61
+  ("Combat Philosophy -- Nelson in a Skirt") and §62 (mass/inertia/
+  compensator canon) are the existing worked examples of this: Honor
+  Harrington is explicitly written as Age-of-Sail warfare translated to
+  space, so filling a genuine tactical/doctrinal gap by reasoning from
+  historical squadron combat is following the setting's own internal
+  logic, not deviating from it;
+* prefer the simplest mechanism that is still internally consistent
+  with everything already established (existing CANON facts,
+  previously logged ASSUMPTIONs, the current codebase's existing
+  conventions) over a novel, unrelated invention -- do not solve the
+  same kind of gap two different ways in two different places;
+* still classify the result honestly as `INTERPRETATION` or
+  `ASSUMPTION` per §4 above (never as `CANON`), still document it in
+  `ASSUMPTIONS.md`/`CANON_RULES.md` with the reasoning that produced
+  it, and still make it configurable where §4 already requires that --
+  this subsection changes HOW a gap gets filled, not the classification/
+  documentation discipline §4 already mandates.
+
+The standing rule stays: never invent false precision, and never
+present a logic-filled gap as if it were a confirmed book fact.
+
 ---
 
 # 5. Required Documentation

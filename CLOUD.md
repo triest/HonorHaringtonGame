@@ -3,6 +3,9 @@
 ## 1. PROJECT MISSION
 Create a standalone Windows 3D tactical combat simulator set in the Honor Harrington / Honorverse universe. The final application MUST NOT require external AI APIs or cloud architectures at runtime.
 
+## 1.1. CANON FIRST, LOGIC WHERE CANON IS SILENT (AGENTS.md §4.1)
+Every mechanic checks canon first (books > official materials > confirmed reference > careful interpretation > fan material as supplementary only -- never authoritative for geometry). Only when canon genuinely has nothing to say: fill the gap with real physics/engineering logic and, for tactics/doctrine specifically, real historical naval warfare (see §61/§62) -- not arbitrary invention, and never presented as CANON. Still classify as INTERPRETATION/ASSUMPTION, still logged in CANON_RULES.md/ASSUMPTIONS.md with the reasoning.
+
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

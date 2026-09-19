@@ -1565,3 +1565,7 @@ asked to re-check target validity mid-flight". Revisit only if a future
 pass finds this looks wrong in practice (e.g. a homing missile visibly
 flying into empty space where a destroyed ship's wreck no longer visually
 exists once the render layer catches up to this).
+
+## Deploy-key проверка (2026-09-19T11:26Z)
+
+Переключён на выделенный repo-scoped deploy key (write access) для запланированной задачи вместо личного account-wide SSH-ключа. Проверено: ssh -T отвечает "Hi triest/HonorHaringtonGame!", push проходит.

@@ -749,6 +749,85 @@ func clear_ship_target(ship_id: String) -> void:
 func set_ship_weapons_free(ship_id: String, is_free: bool) -> void:
 	_get_or_create_combat_directive(ship_id).set_weapons_free(is_free)
 
+## §30 "missile launch" (Milestone 11) -- a discrete, one-time "fire a
+## salvo now" ORDER, deliberately distinct from BOTH `weapons_free`
+## ("weapon mode", a standing posture) and the continuous automatic
+## missile-launch AI (`_resolve_missile_launch_ai`, which fires every
+## ready in-range tube every tick using this ship's STANDING target
+## selection). This was an honestly-logged gap since §30/§31's first
+## slice (see ASSUMPTIONS.md/CHANGELOG.md history): nothing let a
+## commander say "loose a salvo at THIS target, right now" as a single
+## action independent of the ship's ongoing posture -- e.g. coordinating
+## a simultaneous alpha-strike salvo timing across several ships without
+## touching any ship's standing `manual_target_ship_id`/`weapons_free`.
+##
+## Calling this does NOT modify `ship_combat_directives[ship_id]` at
+## all -- the standing directive (if any) is left completely untouched,
+## and `_resolve_missile_launch_ai` resumes using it, unaffected, on the
+## very next tick. If `target_ship_id` is empty, this call falls back to
+## the SAME standing-target resolution the automatic AI already uses
+## (`_resolve_weapon_target`) -- "fire right now at whoever I'd normally
+## be engaging". If `target_ship_id` is given explicitly but is not a
+## currently USABLE hostile contact (destroyed, never hostile, or lost
+## from this ship's own sensors), this order simply does not fire --
+## UNLIKE the standing-directive fallback policy in
+## `_resolve_weapon_target`, a one-time explicit "fire at X" order does
+## NOT silently redirect to a different target the commander did not
+## name for this specific salvo (see ASSUMPTIONS.md for the fallback-
+## policy distinction between a standing designation and a one-shot
+## order).
+##
+## INTERPRETATION, not canon: this order respects `weapons_free` exactly
+## like the automatic AI does (a ship under an explicit "hold fire"
+## directive does not launch even on a direct one-time order) -- kept
+## consistent with `weapons_free` having exactly ONE meaning everywhere
+## it is checked, rather than adding an unspecified "explicit orders
+## bypass hold-fire" exception §30 does not actually call for either
+## way. Physical constraints (ammo, cooldown, `condition`, range) are
+## NEVER waived by an order, exactly like `fire_weapon()` already never
+## waives them for energy weapons -- a tube that isn't ready, or the
+## target that isn't in range, simply does not fire, and no missile is
+## created for it.
+##
+## Returns the number of missiles actually launched this call (0 if
+## none -- held fire, disengaging, no valid target, or no tube ready/
+## in range).
+func order_missile_launch(ship_id: String, target_ship_id: String = "") -> int:
+	var ship: ShipPhysicsState = ships.get(ship_id)
+	if ship == null:
+		return 0
+	var tubes: Array = missile_tubes.get(ship_id, [])
+	if tubes.is_empty():
+		return 0
+	if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
+		return 0  # disengaging -- same gate as the automatic AI
+	var directive = ship_combat_directives.get(ship_id)
+	if directive != null and not directive.weapons_free:
+		return 0  # §30 "weapon mode": hold fire, even for an explicit order
+
+	var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+	var hostile_ids: Array = _hostile_ship_ids(ship_id)
+	var selection: Dictionary
+	if target_ship_id != "":
+		selection = TacticalAI.select_directed_weapon_target(ship, contacts, hostile_ids, target_ship_id)
+	else:
+		selection = _resolve_weapon_target(ship_id, ship, contacts, hostile_ids)
+	var target_ship = selection.get("ship")
+	var target_contact = selection.get("contact")
+	if target_ship == null or target_contact == null:
+		return 0
+
+	var distance: float = ship.position.distance_to(target_contact.estimated_position)
+	var launched_count: int = 0
+	for tube in tubes:
+		if not tube.is_ready():
+			continue
+		if distance > tube.effective_max_range_m():
+			continue
+		_launch_missile_from_tube(ship_id, ship, target_ship, tube)
+		launched_count += 1
+	return launched_count
+
 ## Shared target-selection policy for BOTH _resolve_weapons_ai and
 ## _resolve_missile_launch_ai (§30 "target"/"target priority", Milestone
 ## 11 second slice): if `ship_id` has a manually designated target AND it

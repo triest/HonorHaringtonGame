@@ -1258,3 +1258,66 @@ DEFENSIVE_SYSTEMS по-прежнему нет; коммуникационная
 for communication limitations") для индивидуальных приказов/директив
 по-прежнему не рассмотрена — designation/weapons_free тоже применяются
 мгновенно, тем же тиком; Milestone 12+ не начаты.
+
+## Milestone 11: §30 "missile launch" as a discrete one-time order (`order_missile_launch`)
+
+Closes the honestly-logged gap from the previous pass ("'missile launch'
+as a distinct one-shot action separate from this standing posture"):
+until now, the ONLY way anything fired missiles was the fully-automatic
+`_resolve_missile_launch_ai` running every tick against each ship's
+standing target (manual designation or automatic nearest-hostile) and
+standing `weapons_free` posture. There was no way to say "fire a salvo at
+THIS target right now" as a single, explicit, one-time action.
+
+* New `SimulationWorld.order_missile_launch(ship_id: String,
+  target_ship_id: String = "") -> int`: fires from every ready, in-range
+  missile tube belonging to `ship_id` at the resolved target immediately,
+  and returns the number of missiles actually launched. Does NOT touch
+  the ship's standing `ShipCombatDirective` at all (leaves
+  `manual_target_ship_id`/`weapons_free` completely unread-from-state and
+  unwritten) — the automatic AI keeps using its own standing posture,
+  unaffected, starting the very next tick. Empty `target_ship_id` falls
+  back to the same standing-target resolution the automatic AI already
+  uses (`_resolve_weapon_target`); a non-empty `target_ship_id` that
+  isn't a currently usable hostile contact fires nothing and does NOT
+  fall back to automatic selection — a one-time order names its target or
+  fails, it doesn't get silently redirected (see ARCHITECTURE.md for the
+  full fallback-policy comparison against the standing-designation case).
+* Respects every existing physical/fire-control gate exactly like the
+  automatic AI does: `weapons_free == false` suppresses it too (kept ONE
+  consistent meaning for that flag everywhere), a critically damaged
+  (disengaging) ship never launches, and tube readiness (ammo, cooldown,
+  `condition`-scaled effective range) is never waived by an order —
+  matches `fire_weapon()`'s existing convention for energy weapons.
+* Callable directly (same "explicit shot trigger" convention `fire_weapon`
+  already established), not wired into `tick_simulation`'s per-tick
+  resolution loop at all — this is deliberate: a discrete order has no
+  "converging" state to check across ticks, unlike the kinematic
+  `IndividualOrder` queue (see ARCHITECTURE.md for why this did NOT
+  become a new `IndividualOrder.Kind` or a new state class).
+* New file `test_missile_launch_order.gd` (8 tests, 18 assertions):
+  no-target falls back to standing/automatic selection; explicit target
+  overrides the standing designation for one salvo WITHOUT mutating that
+  standing designation (verified directly against
+  `ship_combat_directives`); an invalid explicit target fires nothing and
+  does not fall back; hold-fire suppresses the explicit order too;
+  critically damaged ships don't launch; out-of-range targets don't
+  launch; only ready tubes fire and the returned count matches exactly
+  (a spent tube alongside a ready one); a nonexistent ship or a ship with
+  no tubes returns 0 without error.
+* Full headless run CONFIRMED: all 28 files in `project/simulation/tests/`
+  (was 27, +1 new file) green (Godot v4.3-stable_linux.x86_64, freshly
+  downloaded). No regressions.
+
+Честно НЕ сделано (см. ASSUMPTIONS.md за полный список): "counter-missile
+policy"/"point-defense policy"; "sensor mode"/"ECM mode"/"defensive
+posture"; "target priority" за пределами single-target designation
+(ранжирование/приоритизация нескольких целей); "approach" как отдельный
+примитив; многоуровневая иерархия команд §28 (Fleet/Task
+Force/Squadron/Division/Element/Ship, по-прежнему плоская); ECM не
+деградирует точность/захват PD; §25 consumer'ов для
+COMMUNICATIONS/POWER/STRUCTURAL_INTEGRITY/DEFENSIVE_SYSTEMS по-прежнему
+нет; коммуникационная задержка для директив/приказов (включая эту новую
+missile launch order — применяется мгновенно, тем же вызовом);
+`weapons_free` по-прежнему единый флаг на энергооружие и ракеты вместе,
+не два раздельных; Milestone 12+ не начаты.

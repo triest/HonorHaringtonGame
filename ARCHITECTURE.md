@@ -1274,3 +1274,79 @@ Fallback-политика при невалидной designation (уничто�
 fire" в смысле §30 не имеет прямого аналога для PD; §29/§30's
 "counter-missile policy"/"point-defense policy" остаются отдельным,
 пока не реализованным, пунктом.
+
+## §30 "missile launch" as a distinct one-shot order — `order_missile_launch`, no new state class
+
+Milestone 11, third slice. Closes the specific honestly-logged gap
+("'missile launch' as a distinct one-shot action separate from this
+standing posture") left open by the previous ShipCombatDirective slice.
+
+Decision: NOT a new state class, NOT a queueable `IndividualOrder.Kind`,
+just a plain public method, `SimulationWorld.order_missile_launch(ship_id,
+target_ship_id = "")`, callable directly and immediately (same convention
+`fire_weapon()` already established for energy weapons — "still callable
+directly ... to override AI target selection for one shot"). No new
+Dictionary, no new per-ship state at all: the method reads
+`ship_combat_directives`/`missile_tubes`/`sensor_contacts` that already
+exist and mutates nothing but the tubes it actually fires from (via the
+existing `_launch_missile_from_tube`).
+
+Why not a state class like ShipCombatDirective: that class exists because
+a *standing posture* (hold a target, hold fire) has no completion
+condition and must be checked every tick by the automatic AI loops. A
+missile-launch order has the opposite shape — it is a single action that
+either happens or doesn't, in the tick it's issued, and leaves nothing
+behind to check on subsequent ticks. Representing it as state (e.g. a
+one-shot flag consumed next tick) would need extra bookkeeping to avoid
+firing twice or firing a tick late, for zero benefit over just doing the
+work inline when the order is given.
+
+Why not an `IndividualOrder.Kind`: that queue is specifically for
+CONVERGING kinematic maneuvers (`is_complete(ship)` checks physical state
+against a target); a missile launch has no ship-state convergence to
+check at all — it is complete the instant the call returns. Forcing it
+into that model would mean adding a `Kind` whose `is_complete()` is
+trivially `true` on the very next check, i.e. reusing infrastructure
+built for a different problem shape purely for consistency, not because
+it fits.
+
+Standing-state independence is the key property tested by
+`test_missile_launch_order.gd`: calling `order_missile_launch(ship,
+explicit_target)` does not read, and provably does not write,
+`ship_combat_directives[ship].manual_target_ship_id` — the standing
+designation (if any) survives untouched, and the automatic AI resumes
+using it, unaffected, on the very next tick. This is what makes the verb
+genuinely distinct from `set_ship_target` + waiting for the automatic AI
+to fire: a commander can order one salvo at an off-designation target
+(e.g. a target of opportunity) without disturbing the ship's ongoing
+engagement plan.
+
+Fallback-policy asymmetry (INTERPRETATION, deliberately different from
+`_resolve_weapon_target`'s standing-designation policy): when
+`target_ship_id` is given explicitly but is not a currently usable
+hostile contact, `order_missile_launch` returns 0 and fires nothing — it
+does NOT fall back to automatic nearest-hostile selection the way a
+*standing* invalid designation does. Rationale: a standing designation
+going stale (target destroyed mid-engagement) is reasonably handled by
+"keep fighting the war, pick a new target automatically", but a one-time
+"fire at X" order naming a target that doesn't exist/isn't visible is
+better honored as "that specific order failed" than silently redirected
+to a target the commander never named for that salvo. Both policies are
+independently defensible; documented here so a future pass revisits this
+deliberately rather than being surprised the two entry points disagree.
+
+`weapons_free` is still respected by this one-shot order (an explicit
+"fire" does not bypass a standing "hold fire" directive) — kept
+consistent with `weapons_free` having exactly one meaning everywhere it
+is read, rather than inventing an unspecified "direct orders override
+posture" exception. Physical gates (ammo, cooldown, `condition`,
+critical-damage disengagement, tube range) are never waived by an order,
+identical to how `fire_weapon()` already never waives them.
+
+Range of changes: 1 new public method (~35 lines) in `simulation_world.gd`,
+no other file touched; `IndividualOrder`, `IndividualCommandState`,
+`ShipCombatDirective`, and every existing resolver are byte-for-byte
+unchanged. New test file `test_missile_launch_order.gd` (8 tests, 18
+assertions), calling the method directly rather than only through
+`tick_simulation` (this order is deliberately NOT part of the per-tick
+resolution loop at all).

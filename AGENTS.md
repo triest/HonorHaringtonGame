@@ -1253,6 +1253,30 @@ the simulation should produce the same result.
 
 Randomness must be seeded.
 
+## 43.1 One set of rules for every ship -- no faction/side special-casing
+
+Physics (§6/§11-§15: mass, thrust, inertia, relative velocity, speed-
+of-light constraints) and damage (§25, §25.1, §63: subsystem damage,
+hull/structural damage, mission-kill degradation, destruction/wreck
+state) MUST be computed by the exact same code path and formulas for
+EVERY ship in the simulation -- player-controlled, AI-controlled,
+allied, hostile, or neutral. There is no "player's side" branch and no
+"AI's side" branch in physics or damage resolution; a ship's team/
+ownership (`SimulationWorld.teams`, §26) is bookkeeping for targeting/
+hostility decisions ONLY, never an input to how much damage a hit does,
+how a ship accelerates, or whether/how it becomes a wreck.
+
+This follows directly from §43's determinism requirement above (a
+simulation that treats sides differently cannot be side-neutral-
+deterministic in any meaningful sense) and from §26's existing "AI must
+use the same basic information restrictions as the player. No cheat
+vision." -- that rule is about SENSING; this rule is the same principle
+applied to PHYSICS and DAMAGE: no side gets easier math, softer hits,
+faster regeneration, or gentler mass/inertia than any other. Difficulty
+or balance, if ever wanted, belongs in scenario/ship-database
+DATA (§8/§46/§48 -- e.g. deliberately fielding a weaker OPFOR loadout),
+never in a hidden multiplier keyed on which side a ship belongs to.
+
 ---
 
 # 44. Time Control

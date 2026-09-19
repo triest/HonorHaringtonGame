@@ -9,6 +9,9 @@ Every mechanic checks canon first (books > official materials > confirmed refere
 ## 1.2. NO HEALTH BARS (AGENTS.md §25.1)
 Damage is shown as combat capability, not an abstract HP bar: which subsystems are damaged/disabled, what that concretely costs (fewer working weapons, degraded tracking, slower turns, garbled comms), plus visible hull/structural damage and eventual wreck state (§63). A single scalar pool (current `HullState`) is a TEMPORARY dev placeholder only, never the permanent or player-facing model -- must be replaced by the full per-subsystem model before §59 Definition of Done. Per-subsystem numeric readouts (e.g. "SENSORS: 40%") are fine; one undifferentiated "ship health" bar is not.
 
+## 1.3. SAME RULES FOR EVERY SHIP (AGENTS.md §43.1)
+Physics and damage run through the exact same code/formulas for every ship regardless of side (player/AI/allied/hostile/neutral) -- team/ownership is targeting-only bookkeeping (§26), never an input to accel/mass/inertia or to damage resolution. No hidden per-side multipliers; any deliberate difficulty/balance choice belongs in scenario/ship-database DATA (e.g. a weaker OPFOR loadout), not in special-cased code.
+
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

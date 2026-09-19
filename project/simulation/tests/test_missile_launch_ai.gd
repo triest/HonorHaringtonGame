@@ -8,6 +8,8 @@ const MissileTube = preload("res://simulation/missile_tube.gd")
 const ShipPhysicsState = preload("res://simulation/ship_physics_state.gd")
 const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const HullState = preload("res://simulation/hull_state.gd")
+const KinematicsUtils = preload("res://simulation/kinematics_utils.gd")
+const MissileState = preload("res://simulation/missile_state.gd")
 
 var _failures: int = 0
 var _passed: int = 0
@@ -132,12 +134,156 @@ func _test_disengaging_ship_does_not_launch() -> void:
 
 	_assert(world.missiles.is_empty(), "a critically damaged, disengaging ship should not launch new missiles at a hostile")
 
+## ТЗ §34.2 Missile Time-on-Target: two formation-mates at DIFFERENT
+## ranges to the SAME §34.1-assigned hostile should NOT both launch the
+## instant they are ready -- the farther ship (longer flight time) is the
+## "pacing shot" and fires immediately, while the nearer ship (shorter
+## flight time, would otherwise arrive EARLY and alone) is held back so
+## its missile is estimated to land at the same time as the pacing shot's.
+func _test_formation_mates_stagger_missile_launch_for_simultaneous_arrival() -> void:
+	var world := SimulationWorld.new()
+	# "guide" is far from the hostile (long flight time -- the pacing shot);
+	# "wing" is much closer (short flight time -- should be held).
+	var guide := _make_ship(Vector3(2_000_000.0, 0, 0))
+	var wing := _make_ship(Vector3(500_000.0, 0, 0))
+	var hostile := _make_ship(Vector3.ZERO)
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+	world.add_ship("hostile", hostile)
+	world.set_team("guide", "red")
+	world.set_team("wing", "red")
+	world.set_team("hostile", "blue")
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(-1_500_000.0, 0, 0))
+
+	var guide_tube := MissileTube.new()
+	guide_tube.ammo_count = 1
+	guide_tube.reload_time_s = 0.0
+	guide_tube.max_range_m = 10_000_000.0
+	world.add_missile_tube("guide", guide_tube)
+
+	var wing_tube := MissileTube.new()
+	wing_tube.ammo_count = 1
+	wing_tube.reload_time_s = 0.0
+	wing_tube.max_range_m = 10_000_000.0
+	world.add_missile_tube("wing", wing_tube)
+
+	var dt := 1.0 / 60.0
+	world.tick_simulation(dt)
+
+	_assert(world.missiles.size() == 1, "only the farther ship (the pacing shot) should launch on the very first tick, not both formation-mates at once")
+	_assert(guide_tube.ammo_count == 0, "the far ship (guide) should be the one that fired immediately -- it has the longer flight time and needs no hold")
+	_assert(wing_tube.ammo_count == 1, "the near ship (wing) should be HELD this tick, not fire immediately, so its shorter-flight-time missile doesn't arrive early and alone")
+	_assert(world._missile_salvo_fire_at.has("wing"), "the near ship should have a §34.2 scheduled hold entry")
+	_assert(not world._missile_salvo_fire_at.has("guide"), "the pacing shot (far ship) needs no schedule -- it already fired")
+
+	# Compute the expected hold with the exact same formula the production
+	# code uses, then verify the actual scheduled fire_at matches it.
+	var guide_flight_time: float = KinematicsUtils.estimate_boost_coast_time_to_distance_s(2_000_000.0, MissileState.DEFAULT_DRIVE_MAX_ACCELERATION_MPS2, MissileState.DEFAULT_DRIVE_BURN_TIME_S)
+	var wing_flight_time: float = KinematicsUtils.estimate_boost_coast_time_to_distance_s(500_000.0, MissileState.DEFAULT_DRIVE_MAX_ACCELERATION_MPS2, MissileState.DEFAULT_DRIVE_BURN_TIME_S)
+	var expected_hold: float = guide_flight_time - wing_flight_time
+	_assert(expected_hold > 0.0, "sanity: the closer ship's missile really should be faster than the farther ship's")
+	var scheduled_fire_at: float = world._missile_salvo_fire_at["wing"]["fire_at"]
+	_assert(is_equal_approx(scheduled_fire_at, dt + expected_hold), "the scheduled fire_at should be now (after this tick's world_sim_time advance) plus exactly (far flight time - near flight time), the boost-coast estimate two missiles need to land together")
+
+	# Advance time until just before the hold should elapse -- wing must
+	# still not have fired.
+	var ticks_before: int = int((expected_hold - 0.05) / dt)
+	for i in range(ticks_before):
+		world.tick_simulation(dt)
+	_assert(wing_tube.ammo_count == 1, "the held ship must not fire before its scheduled coordinated launch time")
+
+	# Advance past the hold -- wing should now fire.
+	for i in range(20):
+		world.tick_simulation(dt)
+		if wing_tube.ammo_count < 1:
+			break
+	_assert(wing_tube.ammo_count == 0, "the held ship should fire once its scheduled §34.2 coordinated launch time arrives")
+	_assert(not world._missile_salvo_fire_at.has("wing"), "the schedule entry should be consumed (erased) once the held shot actually fires")
+	_assert(world.missiles.size() == 2, "both formation-mates should have launched exactly one missile each by now")
+
+## A single ship (no formation-mate also targeting the same hostile this
+## tick) must fire the instant it is ready -- §34.2 coordination must
+## degenerate to old behavior exactly like §34.1 already does, not
+## introduce an unexplained hold for a lone shooter.
+func _test_lone_formation_member_still_fires_immediately() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3(1_000_000.0, 0, 0))
+	var hostile := _make_ship(Vector3.ZERO)
+	world.add_ship("guide", guide)
+	world.add_ship("hostile", hostile)
+	world.set_team("guide", "red")
+	world.set_team("hostile", "blue")
+	world.add_formation("red_wall", "guide")  # a formation of exactly one member
+
+	var tube := MissileTube.new()
+	tube.ammo_count = 2
+	tube.reload_time_s = 0.0
+	tube.max_range_m = 10_000_000.0
+	world.add_missile_tube("guide", tube)
+
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(world.missiles.size() == 1, "a lone formation member with no one else sharing its target should launch immediately, unaffected by §34.2")
+	_assert(not world._missile_salvo_fire_at.has("guide"), "a lone shooter should never get a coordination hold entry")
+
+## §34.2's schedule must not survive a §30 manual target override that
+## redirects the held ship at a DIFFERENT hostile before its hold
+## elapses -- holding a shot timed for hostile A makes no sense once the
+## ship's actual target this tick is hostile B.
+func _test_manual_target_override_cancels_a_stale_tot_hold() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3(2_000_000.0, 0, 0))
+	var wing := _make_ship(Vector3(500_000.0, 0, 0))
+	var hostile_a := _make_ship(Vector3.ZERO)
+	var hostile_b := _make_ship(Vector3(500_000.0, 0, 2_000_000.0))
+	world.add_ship("guide", guide)
+	world.add_ship("wing", wing)
+	world.add_ship("hostile_a", hostile_a)
+	world.add_ship("hostile_b", hostile_b)
+	world.set_team("guide", "red")
+	world.set_team("wing", "red")
+	world.set_team("hostile_a", "blue")
+	world.set_team("hostile_b", "blue")
+	var formation := world.add_formation("red_wall", "guide")
+	formation.set_station("wing", Vector3(-1_500_000.0, 0, 0))
+
+	var guide_tube := MissileTube.new()
+	guide_tube.ammo_count = 1
+	guide_tube.reload_time_s = 0.0
+	guide_tube.max_range_m = 10_000_000.0
+	world.add_missile_tube("guide", guide_tube)
+
+	var wing_tube := MissileTube.new()
+	wing_tube.ammo_count = 1
+	wing_tube.reload_time_s = 0.0
+	wing_tube.max_range_m = 10_000_000.0
+	world.add_missile_tube("wing", wing_tube)
+
+	world.tick_simulation(1.0 / 60.0)
+	_assert(world._missile_salvo_fire_at.has("wing"), "sanity: wing should be holding a §34.2 schedule against hostile_a, same setup as the main staggered-launch test")
+
+	# Redirect wing at hostile_b via a §30 manual designation -- this now
+	# outranks the §34.1 formation assignment the stale hold was built for.
+	world.set_ship_target("wing", "hostile_b")
+	world.tick_simulation(1.0 / 60.0)
+
+	_assert(wing_tube.ammo_count == 0, "wing should fire immediately at its newly-designated target instead of continuing to hold a schedule timed for the old one")
+	var wing_missile = null
+	for m in world.missiles.values():
+		if m.target == hostile_b:
+			wing_missile = m
+	_assert(wing_missile != null, "the missile wing actually launched should be aimed at the manually-designated hostile_b, not the stale hostile_a schedule's target")
+
 func _init() -> void:
 	_test_missile_tube_ready_and_cooldown()
 	_test_ai_launches_missile_at_hostile_within_range()
 	_test_ai_does_not_launch_beyond_tube_range()
 	_test_ai_does_not_launch_without_a_team_or_hostile()
 	_test_disengaging_ship_does_not_launch()
+	_test_formation_mates_stagger_missile_launch_for_simultaneous_arrival()
+	_test_lone_formation_member_still_fires_immediately()
+	_test_manual_target_override_cancels_a_stale_tot_hold()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

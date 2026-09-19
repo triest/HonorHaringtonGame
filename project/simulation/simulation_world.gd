@@ -50,6 +50,7 @@ const IndividualCommandState = preload("res://simulation/individual_command_stat
 const ShipCombatDirective = preload("res://simulation/ship_combat_directive.gd")
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
 const ReplayLog = preload("res://simulation/replay_log.gd")
+const KinematicsUtils = preload("res://simulation/kinematics_utils.gd")
 
 var clock: SimClock
 
@@ -65,6 +66,18 @@ var formations: Dictionary = {}       # formation_id -> FormationState (§27/§2
 var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
 var ship_combat_directives: Dictionary = {}  # ship_id -> ShipCombatDirective (§30 target/weapon mode, Milestone 11 second slice)
 var _formation_assigned_targets: Dictionary = {}  # ship_id -> target_ship_id (§34.1 Doubling, rebuilt every tick by _resolve_formation_target_assignment, empty for ships with no governed formation)
+## §34.2 Missile Time-on-Target coordination: ship_id -> {"fire_at":
+## float world_sim_time, "target_ship_id": String}. UNLIKE
+## `_formation_assigned_targets`, this is deliberately NOT cleared and
+## rebuilt every tick -- a scheduled hold has to survive from the tick it
+## is decided until the (possibly much later) tick it actually fires,
+## the same "survives across ticks until consumed" convention already
+## used by `_pending_command_transmissions` below. An entry is removed
+## the instant it fires, or when `_resolve_missile_tot_coordination`
+## finds it stale (ship gone/wrecked, or its §34.1 assigned target moved
+## away from the one this schedule was built for). See
+## `_resolve_missile_tot_coordination` / `_resolve_missile_launch_ai`.
+var _missile_salvo_fire_at: Dictionary = {}
 var _pending_command_transmissions: Array = []  # Array[Dictionary{ready_at:float, ship_id:String, callable:Callable}] -- §25/§31 communication-delayed individual orders, see transmit_individual_order_now/transmit_ship_target/etc. below
 
 ## ТЗ §45 Replay (Milestone 12): null (default) means recording is OFF,
@@ -460,6 +473,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_individual_orders(dt)
 	_resolve_damage_response(dt)
 	_resolve_formation_target_assignment(dt)
+	_resolve_missile_tot_coordination(dt)
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
 	_integrate_ships(dt)
@@ -1468,6 +1482,110 @@ func _resolve_formation_target_assignment(dt: float) -> void:
 			_formation_assigned_targets[ship_id] = target_id
 			assigned_counts[target_id] = assigned_counts.get(target_id, 0) + 1
 
+## ТЗ §34.2 Missile Time-on-Target -- coordinate WHEN formation-mates
+## launch missiles at a shared §34.1-assigned target so that missiles
+## fired from different ranges (and therefore with different flight
+## times) arrive TOGETHER instead of strung out one at a time, each
+## individually easy for point defense to intercept. Runs once per tick,
+## AFTER `_resolve_formation_target_assignment` (needs this tick's
+## `_formation_assigned_targets` to know who is even shooting at the same
+## contact) and BEFORE `_resolve_missile_launch_ai` (the only consumer of
+## the schedule this pass produces).
+##
+## HONEST SCOPE: this coordinates ONLY members of the SAME formation
+## whose target this tick came from §34.1's coordinated assignment (not
+## a manual §30 designation, and not two different formations that
+## happen to have picked the same hostile independently -- both real,
+## narrower-than-ideal limits of this first slice, see ASSUMPTIONS.md).
+## For each formation, ships with a ready, in-range tube on their
+## assigned target and NOT already holding an earlier schedule are
+## grouped by target. A lone shooter (group size < 2) gets no entry in
+## `_missile_salvo_fire_at` at all, so `_resolve_missile_launch_ai` fires
+## it the instant it is ready -- EXACTLY the pre-§34.2 behavior (same
+## "degenerates to the old behavior" pattern §34.1 itself already uses).
+##
+## For an actual group (>= 2 candidates), each candidate's flight time to
+## the target is estimated by
+## `KinematicsUtils.estimate_boost_coast_time_to_distance_s` from the
+## CURRENT distance (this ship's real `position`, the target's
+## `SensorContact.estimated_position` -- same "no cheat vision"
+## measurement `TacticalAI` uses everywhere else), using the shared
+## DEFAULT drive constants every AI-launched missile actually gets (see
+## `_launch_missile_from_tube` -- no per-class missile drive data exists
+## yet, see ASSUMPTIONS.md §8). The slowest (longest-flight-time) member
+## fires immediately (no schedule entry -- it IS the pacing shot); every
+## faster member is given `fire_at = now + (max_flight_time -
+## its_own_flight_time)`, so that firing exactly then instead of right
+## now puts both missiles' estimated arrival at the same instant.
+##
+## A ship already holding a schedule from an earlier tick is skipped by
+## the GROUPING step below (its wait must not be re-timed mid-flight
+## using a fresh, unrelated snapshot of who else happens to be ready this
+## exact tick) but IS checked for staleness first, at the top of this
+## function: if it no longer exists, is a wreck, or its §34.1 assignment
+## has moved to a different target than the schedule was built for, the
+## stale entry is dropped so the ship is free to be re-grouped (or fire
+## immediately) on a later tick. A schedule is never re-validated here
+## against "is the tube still ready/in-range" -- `_resolve_missile_launch_ai`
+## already handles a not-yet-ready or now-out-of-range tube by simply not
+## firing that tick, schedule or not, and will fire (schedule permitting)
+## the moment it can.
+func _resolve_missile_tot_coordination(dt: float) -> void:
+	for ship_id in _missile_salvo_fire_at.keys().duplicate():
+		var schedule: Dictionary = _missile_salvo_fire_at[ship_id]
+		var scheduled_ship: ShipPhysicsState = ships.get(ship_id)
+		if scheduled_ship == null or scheduled_ship.is_wreck or _formation_assigned_targets.get(ship_id, "") != schedule.get("target_ship_id", ""):
+			_missile_salvo_fire_at.erase(ship_id)
+
+	for formation_id in formations.keys():
+		var formation: FormationState = formations[formation_id]
+		var member_ids: Array = [formation.guide_ship_id]
+		for member_id in formation.member_offsets.keys():
+			member_ids.append(member_id)
+
+		var groups: Dictionary = {}  # target_ship_id -> Array[{"ship_id": String, "flight_time_s": float}]
+		for ship_id in member_ids:
+			if _missile_salvo_fire_at.has(ship_id):
+				continue  # already scheduled from an earlier tick -- don't re-time mid-wait
+			var target_id = _formation_assigned_targets.get(ship_id, "")
+			if target_id == "":
+				continue
+			var ship: ShipPhysicsState = ships.get(ship_id)
+			if ship == null or ship.is_wreck:
+				continue
+			var tubes: Array = missile_tubes.get(ship_id, [])
+			if tubes.is_empty():
+				continue
+			var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+			var contact = contacts.get(target_id)
+			if contact == null:
+				continue
+			var distance: float = ship.position.distance_to(contact.estimated_position)
+			var ready_and_in_range := false
+			for tube in tubes:
+				if tube.is_ready() and distance <= tube.effective_max_range_m():
+					ready_and_in_range = true
+					break
+			if not ready_and_in_range:
+				continue
+			var flight_time_s: float = KinematicsUtils.estimate_boost_coast_time_to_distance_s(distance, MissileState.DEFAULT_DRIVE_MAX_ACCELERATION_MPS2, MissileState.DEFAULT_DRIVE_BURN_TIME_S)
+			if not groups.has(target_id):
+				groups[target_id] = []
+			groups[target_id].append({"ship_id": ship_id, "flight_time_s": flight_time_s})
+
+		for target_id in groups.keys():
+			var entries: Array = groups[target_id]
+			if entries.size() < 2:
+				continue  # a lone shooter needs no coordination -- fires the instant it is ready, unchanged from before §34.2
+			var max_flight_time_s: float = 0.0
+			for entry in entries:
+				max_flight_time_s = maxf(max_flight_time_s, entry["flight_time_s"])
+			for entry in entries:
+				var hold_s: float = max_flight_time_s - entry["flight_time_s"]
+				if hold_s <= dt * 0.5:
+					continue  # already the pacing shot (or close enough that holding costs a tick for nothing) -- fires immediately, no schedule needed
+				_missile_salvo_fire_at[entry["ship_id"]] = {"fire_at": world_sim_time + hold_s, "target_ship_id": target_id}
+
 ## ТЗ §17 Weapons + §26 Tactical AI ("select targets" / "use weapons") +
 ## §30 "target"/"target priority"/"weapon mode" (Milestone 11, second
 ## slice). Each ship with at least one weapon mount and a team assigned
@@ -1551,11 +1669,30 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 			continue
 
 		var distance: float = ship.position.distance_to(target_contact.estimated_position)
+		# §34.2 Missile Time-on-Target: a schedule here means
+		# _resolve_missile_tot_coordination decided this ship should hold this
+		# shot so it lands together with a formation-mate's longer-flight-time
+		# missile -- see that function's doc comment. No schedule (the common
+		# case) means fire the instant ready+in-range, exactly as before §34.2.
+		var salvo_schedule = _missile_salvo_fire_at.get(ship_id)
+		if salvo_schedule != null and salvo_schedule["target_ship_id"] != selection.get("ship_id"):
+			# §34.2: this tick's ACTUAL target (e.g. a §30 manual override issued
+			# after the hold was scheduled) no longer matches the target the
+			# hold was timed for -- honor the override immediately rather than
+			# delaying a shot at a DIFFERENT ship for a synchronization that no
+			# longer applies to it.
+			_missile_salvo_fire_at.erase(ship_id)
+			salvo_schedule = null
 		for tube in tubes:
 			if not tube.is_ready():
 				continue
 			if distance > tube.effective_max_range_m():
 				continue
+			if salvo_schedule != null and world_sim_time < salvo_schedule["fire_at"]:
+				continue  # still holding for the coordinated arrival time
+			if salvo_schedule != null:
+				_missile_salvo_fire_at.erase(ship_id)
+				salvo_schedule = null
 			_launch_missile_from_tube(ship_id, ship, target_ship, tube)
 
 ## Constructs and registers a new offensive MissileState launched by

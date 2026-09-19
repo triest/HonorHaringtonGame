@@ -80,9 +80,19 @@ var laserhead_damage: float = 400.0  ## ASSUMPTION placeholder total yield, spli
 var rod_spread_half_angle_rad: float = deg_to_rad(20.0)
 
 ## CANON example value (see class doc); ASSUMPTION as a universal default.
-var drive_max_acceleration_mps2: float = 46_000.0 * 9.80665
-var drive_burn_time_s: float = 180.0
-var drive_burn_remaining_s: float = 180.0
+## Named as constants (not just literal defaults below) so §34.2's
+## flight-time estimator (SimulationWorld._resolve_missile_tot_coordination,
+## via KinematicsUtils.estimate_boost_coast_time_to_distance_s) can
+## reference the EXACT same design values every AI-launched missile
+## actually gets at launch (see SimulationWorld._launch_missile_from_tube,
+## which never customizes these) instead of duplicating the CANON example
+## figure as a second, driftable literal.
+const DEFAULT_DRIVE_MAX_ACCELERATION_MPS2: float = 46_000.0 * 9.80665
+const DEFAULT_DRIVE_BURN_TIME_S: float = 180.0
+
+var drive_max_acceleration_mps2: float = DEFAULT_DRIVE_MAX_ACCELERATION_MPS2
+var drive_burn_time_s: float = DEFAULT_DRIVE_BURN_TIME_S
+var drive_burn_remaining_s: float = DEFAULT_DRIVE_BURN_TIME_S
 
 ## "Design" (un-throttled, full-power) values, captured once at launch
 ## configuration time so set_throttle() can be called more than once and

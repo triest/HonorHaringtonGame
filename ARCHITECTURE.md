@@ -1750,3 +1750,98 @@ never given a guide) has no hierarchy to run the pass from, and members
 fall back to individual judgement, consistent with how every other
 guide-dependent mechanic in this codebase (formation-keeping, formation
 orders) already degrades when there is no guide.
+
+
+## §34.2 Missile Time-on-Target -- staggered launch for simultaneous arrival (first slice)
+
+Adds one new per-tick pass, `SimulationWorld._resolve_missile_tot_coordination`,
+between `_resolve_formation_target_assignment` (§34.1, whose output this
+pass consumes) and `_resolve_weapons_ai`/`_resolve_missile_launch_ai`
+(the latter is the only consumer of what this pass produces). Where
+§34.1 answers "which enemy ship does each formation member shoot at",
+§34.2 answers a genuinely different question about the SAME
+coordinated group: "given that two formation-mates are about to launch
+missiles at the same ship from different ranges (and therefore
+different flight times), should they launch at the same instant, or
+should the closer one WAIT so both missiles arrive together instead of
+the closer one's arriving first, alone, and easy for point defense to
+handle in isolation."
+
+The core new mechanism is `KinematicsUtils.estimate_boost_coast_time_to_distance_s`
+(distance, acceleration, burn time) -> straight-line time-to-arrival,
+using the exact closed-form boost-then-coast kinematics MissileState
+already models (`estimated_powered_range_m()`'s inverse problem, solved
+for time instead of distance). This is deliberately a SCHEDULING
+heuristic, not a targeting solution: it ignores the target's own motion
+during the flight entirely, using only the CURRENT distance at the tick
+the estimate is made. A true intercept-time solve would need the same
+still-missing intercept-vector solver §41.1 Crossing the T is blocked
+on -- building that solver just for this scheduling heuristic would be
+solving a much harder problem than staggered-launch timing actually
+requires, and would tie two independent, still-open features together
+for no benefit to either.
+
+Persistence design (the interesting architectural choice here): unlike
+`_formation_assigned_targets`, which is fully rebuilt every tick,
+`_missile_salvo_fire_at` (ship_id -> {fire_at, target_ship_id}) is a
+genuinely PERSISTENT per-tick state, following the exact same
+"survives across ticks until consumed" convention `_pending_command_transmissions`
+already established for §25/§31 communication delay. This was not the
+first design considered -- a purely tick-local recompute (no persistent
+state, decide fresh every tick from whoever is currently ready) was
+tried first and found to be WRONG: once the "pacing" (longer-flight-time)
+ship in a pair fires, its tube immediately goes into cooldown and drops
+out of the READY-tube pool that same tick, so a tick-local grouping
+pass would see only the single remaining (still-waiting) ship left in
+the group next tick, conclude "group size 1, no coordination needed",
+and let it fire immediately -- destroying the entire stagger the tick
+after it was decided. Persisting the computed `fire_at` as an absolute
+`world_sim_time` target (the same "compute an absolute ready_at once,
+check `world_sim_time >= ready_at` every tick thereafter" pattern
+`_individual_order_transmission_delay_s`/`_resolve_pending_command_transmissions`
+already uses for §25/§31) avoids this entirely: the held ship's
+schedule does not depend on who else is still in the ready pool on any
+later tick.
+
+Staleness handling exists specifically because a persistent (not
+rebuilt-every-tick) schedule can outlive the conditions it was computed
+under. Two independent staleness checks, at two different points in the
+tick, catch two different failure modes: (1) at the TOP of
+`_resolve_missile_tot_coordination`, a schedule is dropped if the ship
+is gone/wrecked or its §34.1 `_formation_assigned_targets` entry has
+moved to a different target than the schedule was built for (the target
+died and a new one was auto-selected, or the tactical picture shifted);
+(2) inside `_resolve_missile_launch_ai` itself, immediately before
+honoring a schedule's hold, the schedule's `target_ship_id` is compared
+against `_resolve_weapon_target`'s ACTUAL resolved target for this tick
+-- this catches a §30 manual override arriving AFTER the hold was
+scheduled (manual designation outranks the §34.1 assignment the
+schedule was timed for, per the same precedence `_resolve_weapon_target`
+already enforces everywhere else), which check (1) alone would miss
+since `_formation_assigned_targets` itself does not change just because
+a manual override now shadows it. Both checks are exercised directly by
+`test_missile_launch_ai.gd::_test_manual_target_override_cancels_a_stale_tot_hold`.
+
+Same "degenerates to old behavior" pattern §34.1 already established:
+a lone shooter (no formation-mate sharing its §34.1-assigned target
+this tick, or the ONLY candidate in its group) gets no
+`_missile_salvo_fire_at` entry at all, so `_resolve_missile_launch_ai`'s
+existing ready+in-range check fires it the instant it can, byte-for-byte
+the pre-§34.2 code path -- proven by
+`_test_lone_formation_member_still_fires_immediately`. A `hold_s <= dt
+* 0.5` candidate (already the longest-flight-time member of its group,
+or close enough that waiting would cost a tick for no measurable
+synchronization benefit) also gets no schedule entry, for the same
+reason -- it fires immediately AS the pacing shot other members are
+timed against.
+
+Deliberate scope boundary, same spirit as §34.1's: this coordinates
+ONLY members of the SAME formation whose target this tick came from
+§34.1's own coordinated assignment. A manually (§30) designated target
+never enters this coordination at all (a commander's explicit override
+is deliberately left alone, same precedence as everywhere else in this
+codebase), and two different formations that happen to have
+independently targeted the same hostile are not coordinated with each
+other -- both real, narrower-than-AGENTS.md-§34.2's-literal-wording
+("one or more launching ships") limits of this first slice, honestly
+recorded in ASSUMPTIONS.md rather than silently scoped down.

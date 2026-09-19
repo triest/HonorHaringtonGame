@@ -1472,13 +1472,20 @@ salvo's tactical value depends on its members arriving close enough
 together to saturate that capacity, not just on the total missile
 count fired over the course of an engagement.
 
-Both §34.1 and §34.2 are OPEN, not yet implemented -- Tactical AI's
-current target/launch selection (§26, `tactical_ai.gd`) is honestly
-documented as nearest-usable-contact only, with no cross-ship
-coordination of any kind. This subsection specifies what "automatic
-target distribution" and coordinated missile fire are actually
-required to accomplish once that work is picked up, so the next pass
-is not left to invent the goal from scratch.
+§34.1 (formation-coordinated target assignment) and §34.2 (this
+staggered-launch coordination) are both now implemented as first
+slices -- see `TacticalAI.select_formation_target_for_member` /
+`SimulationWorld._resolve_formation_target_assignment` (§34.1) and
+`SimulationWorld._resolve_missile_tot_coordination` (§34.2), with
+tests in `test_formation.gd` and `test_missile_launch_ai.gd`. Honest
+scope of the §34.2 first slice: coordinates only members of the SAME
+formation sharing a §34.1-assigned target (not a manual §30
+designation, and not two different formations independently picking
+the same hostile), and estimates flight time with a straight-line
+boost-coast approximation that ignores the target's own motion during
+the flight (a true intercept-time solve needs the same still-missing
+intercept-vector solver as §41.1 Crossing the T). See CHANGELOG.md/
+ARCHITECTURE.md/ASSUMPTIONS.md for the implementation pass.
 
 ---
 

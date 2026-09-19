@@ -35,3 +35,30 @@ static func integrate_orientation(orientation: Quaternion, angular_velocity: Vec
 	var axis: Vector3 = angular_velocity.normalized()
 	var delta_rotation := Quaternion(axis, angle)
 	return (orientation * delta_rotation).normalized()
+
+## ТЗ §34.2 Missile Time-on-Target coordination: ENGINEERING ESTIMATE of
+## how long a missile launched RIGHT NOW would take to cover `distance_m`
+## in a straight line, given a constant boost-phase acceleration
+## `max_acceleration_mps2` for up to `burn_time_s` before coasting
+## ballistically at whatever speed the boost phase reached. This
+## deliberately ignores the TARGET's own motion during the flight (a true
+## intercept-time solve is a separate, still-open problem -- see
+## AGENTS.md §41.1 "Crossing the T", which needs the same missing
+## intercept-vector solver) and the missile's real guidance-driven curved
+## path (same idealization already used by
+## MissileState.estimated_powered_range_m()) -- it is a SCHEDULING
+## heuristic for "roughly how far apart should two salvo members launch
+## to land together", not a targeting solution. Returns INF if
+## `max_acceleration_mps2 <= 0.0` (a missile that cannot accelerate never
+## arrives).
+static func estimate_boost_coast_time_to_distance_s(distance_m: float, max_acceleration_mps2: float, burn_time_s: float) -> float:
+	if distance_m <= 0.0:
+		return 0.0
+	if max_acceleration_mps2 <= 0.0:
+		return INF
+	var burnout_distance_m: float = 0.5 * max_acceleration_mps2 * burn_time_s * burn_time_s
+	if distance_m <= burnout_distance_m:
+		return sqrt(2.0 * distance_m / max_acceleration_mps2)
+	var burnout_speed_mps: float = max_acceleration_mps2 * burn_time_s
+	var remaining_distance_m: float = distance_m - burnout_distance_m
+	return burn_time_s + remaining_distance_m / burnout_speed_mps

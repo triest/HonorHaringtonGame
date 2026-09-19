@@ -50,21 +50,43 @@ Physics and damage run through the exact same code/formulas for every ship regar
 * NOT implemented: no ShipClass/database records exist in code yet for
   any of these -- reference material to seed §8/§48 from.
 
-## 1.6. PER-CLASS ARMAMENT + SPECIFIC NAMED SHIPS (AGENTS.md §8.3)
+## 1.6. PER-CLASS ARMAMENT (AGENTS.md §8.3)
 * Sultan-class (Haven BC) armament: 46 missile tubes (3 chase/20 per
   broadside), 4 capital lasers, 12 anti-ship lasers, 12 grasers, 40
   counter-missile tubes, 36 anti-missile lasers, 1 tractor beam.
 * Warlord-class (Haven BC) armament: 64 missile tubes total
   (broadside 26M/6L/6G/16CM/12PD, chase 6M/2G/6CM/6PD), 12 lasers, 16
   grasers, 44 counter-missile tubes, 36 PD clusters.
-* Named individual hulls (small sample, data-shape reference only --
-  NOT exhaustive, do not invent more): HMS Thunderer, HMS Revenge
-  (RMN, Medusa-class); PNS Kerebin (Haven, Sultan-class); PNS Yavuz
-  (Haven, class UNKNOWN).
-* Data shape: Ship Database needs class records (§8.1/§8.2) PLUS
-  individual-ship instances referencing a class by name/hull -- not a
-  flat class-only list.
+* Per user direction: individual ship NAMES don't matter for this ТЗ,
+  only CLASSES and their characteristics -- no named-hull roster kept.
 * NOT implemented in code yet -- seed reference material.
+
+## 1.7. LOGICAL EXTRAPOLATION METHOD FOR MISSING CHARACTERISTICS (AGENTS.md §8.4)
+* Extends §1.1 (canon-first/logic principle) with a concrete method
+  for a class/weapon field §1.4-1.6 doesn't cover, instead of a round
+  invented number. Every result stays ASSUMPTION, with its anchor(s)
+  and method recorded next to the value.
+* Anchor: closest already-sourced class of the SAME type band (§1.5)
+  AND same era/tech generation -- not just any class of that type ever.
+* Mass: prefer a same-era analog's number over the §1.5 band's raw
+  midpoint.
+* Acceleration: within ONE era, scales roughly inversely with mass
+  (same compensator strength). CROSS-ERA WARNING (shown by our own
+  data): Sultan (859,250t/489.2G), Warlord (918,750t/389.9G),
+  Agamemnon (1,750,750t/554.1G) do NOT fit one inverse curve across
+  each other -- compensator tech itself improves between eras. Only
+  valid within one same-era anchor; if era is uncertain, mark UNKNOWN
+  instead.
+* Weapon mount counts: scale with hull mass/length via the closest
+  same-era anchor's count-per-ton/-meter ratio, rounded to an even,
+  broadside-symmetric integer.
+* Weapon PERFORMANCE (missile accel/range/warhead, energy-mount
+  range/power) is NEVER per-ship-extrapolated -- it belongs to the
+  weapon's own §1.4 record, inherited unchanged by any ship mounting
+  it. Only mount count/magazine capacity is per-hull.
+* Every extrapolated value records its anchor + step used, not just
+  the number. Disagreeing independent estimates -> UNKNOWN, not an
+  average or arbitrary pick.
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

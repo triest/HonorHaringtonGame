@@ -439,13 +439,18 @@ class/faction not listed here still falls under §8's "do not invent
 exact numbers" rule.
 
 
-## 8.3 Per-class armament detail and specific named vessels
+## 8.3 Per-class armament detail
 
-Extends §8.1/§8.2 with (a) full weapon-mount breakdowns for the two
-Havenite classes already named in §8.2, and (b) specific individual
-named ships (not just classes) on both sides, sourced 2026-09-19
-(Honorverse Wiki class/ship articles -- factual armament counts and
-proper names only, no book prose reproduced).
+Extends §8.1/§8.2 with full weapon-mount breakdowns for the two
+Havenite classes already named in §8.2, sourced 2026-09-19 (Honorverse
+Wiki class articles -- factual armament counts only, no book prose
+reproduced). Individual named hulls are NOT tracked here -- per
+explicit user direction, ship NAMES do not matter for this ТЗ, only
+CLASSES and their characteristics. The Ship Database (§8/§48) needs
+class records with full armament/performance data; it does not need a
+roster of specific canon-named individual vessels. A player/AI/
+scenario ship instance gets a scenario-assigned name/hull number like
+any other data record, never a name presented as a canon vessel.
 
 **Sultan-class (Haven, battlecruiser) armament:**
 46 LMF-5(d) missile tubes (3 in chase armament, 20 per broadside); 4
@@ -459,30 +464,75 @@ counter-missiles, 10 LAD-15 tethered ECM decoys.
 6M/2G/6CM/6PD); 12 lasers; 16 grasers; 44 counter-missile tubes; 36
 point-defense clusters total.
 
-**Specific named vessels (individual ships, not classes) --
-INDIVIDUAL SHIPS EXIST IN CANON AS DATA POINTS, not just their class:**
+**HONEST GAP:** none of the above is implemented as `ShipClass`
+database records in `project/simulation` yet. See §8.1/§8.2 for the
+same caveat -- this is seed reference material.
 
-* RMN (Manticore), Medusa-class: HMS Thunderer, HMS Revenge -- specific
-  named hulls of this class.
-* Haven (People's Navy/RHN), Sultan-class: PNS Kerebin -- specific
-  named hull.
-* Haven, unspecified/other class: PNS Yavuz -- named hull, class not
-  re-verified this pass (UNKNOWN).
 
-This list is intentionally a SMALL sample, not exhaustive -- the books
-name dozens of individual ships across the series. The purpose here is
-only to establish the DATA SHAPE the Ship Database (§8/§48) needs: a
-ship class record (§8.1/§8.2) plus individual ship instances that
-reference it by name/hull (own damage state, own crew, own history),
-not a single flat list of classes with no individual-hull concept.
-Do not invent additional named vessels beyond what is sourced here or
-found later with a citation -- an unnamed player/AI-scenario ship
-should just get a scenario-assigned name, never a name presented as if
-it were a canon vessel.
+## 8.4 Logical extrapolation method for missing characteristics
 
-**HONEST GAP:** none of the above is implemented as `ShipClass`/
-individual-ship database records in `project/simulation` yet. See
-§8.1/§8.2 for the same caveat -- this is seed reference material.
+Extends §4.1 ("logic where canon is silent") with a concrete,
+repeatable METHOD for filling a class/weapon field that §8.1-8.3 (or a
+future sourced addition) does not cover -- instead of picking an
+arbitrary round number. Every value produced this way is ASSUMPTION,
+never CANON, and must record which anchor(s) and ratio were used, so a
+later real citation can replace it cleanly.
+
+**Step 1 -- pick an anchor.** Prefer the closest already-sourced class
+of the SAME type band (§8.2) and the SAME era/technology generation
+(same rough missile Mark generation, same compensator generation --
+not just "any battlecruiser ever mentioned"). If no same-type anchor
+exists, use the nearest adjacent type band (one step up or down in
+§8.2's hierarchy) and scale explicitly rather than borrowing its raw
+numbers unchanged.
+
+**Step 2 -- mass/dimensions.** If tonnage is missing, prefer a
+same-era analog's number over the type band's raw midpoint (§8.2's
+bands are wide and mix eras -- a specific analog is a better estimate
+than the band center). If no analog exists, the band midpoint is the
+fallback.
+
+**Step 3 -- acceleration.** For ships sharing the SAME compensator
+generation/era, acceleration scales roughly inversely with mass
+(same compensator strength pushing more or less mass). Estimate:
+`unknown_accel ~= anchor_accel * (anchor_mass / unknown_mass)`.
+CROSS-ERA WARNING, demonstrated by data already in §8.1/§8.3: Sultan
+(859,250t, 489.2G), Warlord (918,750t, 389.9G) and Agamemnon
+(1,750,750t, 554.1G) do NOT follow one simple inverse curve across
+each other -- because compensator technology itself improves between
+these classes' eras (a later, more massive ship can still out-
+accelerate an earlier, lighter one). This inverse-scaling estimate is
+only valid WITHIN one same-era anchor, never across classes from
+visibly different tech generations -- if the era of the unknown class
+is itself uncertain, this method does not apply; mark UNKNOWN instead
+of guessing an era.
+
+**Step 4 -- weapon mount counts.** Missile-tube/energy-mount/PD counts
+scale roughly with hull mass/length within the same type band. Use the
+closest same-era anchor's own count-per-ton or count-per-meter ratio
+(§8.1/§8.3 already give several real ratios to calibrate against) and
+round to an even, broadside-symmetric integer -- real warships mount
+weapons in symmetric banks/pairs, not odd scattered counts.
+
+**Step 5 -- weapon PERFORMANCE is never per-ship-extrapolated.** A
+missile Mark's acceleration/range/warhead, or an energy mount's
+range/power, belongs to that WEAPON's own record (§8.1), inherited
+unchanged by whichever ship class mounts it -- never re-derived from
+the carrying ship's own mass or class. Only mount COUNT and magazine
+CAPACITY are per-hull; weapon performance numbers are per-weapon-Mark.
+
+**Step 6 -- record the method, don't just record the number.** Every
+extrapolated field must note, next to the value: which anchor class(es)
+it came from, which step above was used, and the ASSUMPTION tag. A
+number with no recorded method is indistinguishable from an invented
+one and violates §8's "do not invent exact numerical values" as much
+as a number with no source at all.
+
+**Step 7 -- when estimates disagree.** If two independently-derived
+estimates for the same field diverge widely, do not average them or
+pick arbitrarily -- widen to UNKNOWN and use a conservative
+placeholder consistent with §4.1, flagged for a future real citation,
+rather than manufacturing false precision.
 
 
 # 9. Impeller Wedge

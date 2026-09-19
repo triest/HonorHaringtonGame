@@ -823,6 +823,34 @@ missile system damage
 → reduced missile capability
 ```
 
+## 25.1 No health bars -- damage is combat capability, not a number
+
+Damage MUST NOT be represented, to the player or in the simulation's
+own player-facing model, as a single abstract "health" quantity with a
+bar/percentage that drains toward zero. This applies to both the UI
+(§38/§50) and to what the simulation exposes as a ship's condition:
+
+* the player-facing measure of "how hurt is this ship" MUST be its
+  actual, visible combat capability -- which subsystems (§25 list
+  above) are damaged/disabled, what that concretely costs it (fewer
+  working weapons, degraded tracking, slower turns, garbled comms),
+  and visible hull/structural damage (scorching, breaches, venting,
+  eventually the §63 wreck state) -- not a green-to-red bar with no
+  mechanical meaning of its own;
+* a single scalar hit-point pool is acceptable only as a genuinely
+  TEMPORARY internal placeholder during development (this is exactly
+  what `HullState` already is, per its own class doc and §58 Temporary
+  Simplifications) -- it must never become the permanent or
+  player-visible representation of damage, and must be replaced by the
+  full per-subsystem model before §59 Definition of Done;
+* this does not forbid displaying a numeric readout of an individual
+  subsystem's condition (e.g. "SENSORS: 40%") where that is the most
+  readable way to show real, mechanically-consequential state -- the
+  prohibition is specifically on a single undifferentiated "ship
+  health" bar that abstracts away which systems are actually hit and
+  what that does to the ship's ability to fight, sense, move, or
+  communicate.
+
 ---
 
 # 26. Tactical AI
@@ -1117,7 +1145,9 @@ Display where information is known:
 * counter-missiles;
 * sensor contacts;
 * threats;
-* system status;
+* system status -- per-subsystem condition and concrete combat
+  consequences (§25.1: no single "health bar," ever -- show what is
+  actually damaged and what that costs the ship);
 * commands;
 * battle reports.
 
@@ -1367,7 +1397,10 @@ Avoid:
 * Star Wars-like dogfighting;
 * arcade flight;
 * cartoon aesthetics;
-* tiny arena-like battles.
+* tiny arena-like battles;
+* video-game health bars/HP percentages as the way damage is shown
+  (§25.1) -- damage reads through subsystem status and visible
+  structural damage, not an abstracted bar.
 
 The scale of space should feel enormous.
 

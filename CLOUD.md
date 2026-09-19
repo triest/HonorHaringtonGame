@@ -6,6 +6,9 @@ Create a standalone Windows 3D tactical combat simulator set in the Honor Harrin
 ## 1.1. CANON FIRST, LOGIC WHERE CANON IS SILENT (AGENTS.md §4.1)
 Every mechanic checks canon first (books > official materials > confirmed reference > careful interpretation > fan material as supplementary only -- never authoritative for geometry). Only when canon genuinely has nothing to say: fill the gap with real physics/engineering logic and, for tactics/doctrine specifically, real historical naval warfare (see §61/§62) -- not arbitrary invention, and never presented as CANON. Still classify as INTERPRETATION/ASSUMPTION, still logged in CANON_RULES.md/ASSUMPTIONS.md with the reasoning.
 
+## 1.2. NO HEALTH BARS (AGENTS.md §25.1)
+Damage is shown as combat capability, not an abstract HP bar: which subsystems are damaged/disabled, what that concretely costs (fewer working weapons, degraded tracking, slower turns, garbled comms), plus visible hull/structural damage and eventual wreck state (§63). A single scalar pool (current `HullState`) is a TEMPORARY dev placeholder only, never the permanent or player-facing model -- must be replaced by the full per-subsystem model before §59 Definition of Done. Per-subsystem numeric readouts (e.g. "SENSORS: 40%") are fine; one undifferentiated "ship health" bar is not.
+
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

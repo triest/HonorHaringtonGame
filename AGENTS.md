@@ -1098,13 +1098,30 @@ A contact can contain:
 
 * estimated position;
 * estimated velocity;
+* estimated angular velocity;
+* estimated orientation;
 * uncertainty;
 * last update;
 * sensor source;
 * confidence.
 
-The player sees what their forces know.
+## 23.1 Active vs. Passive Sensing
 
+Sensors operate in two primary modes:
+
+1. **Passive Sensing**:
+   * Detects emissions (heat, gravitic signatures from impeller wedges).
+   * Does NOT reveal the observer's position.
+   * Lower detection range; cannot detect "silent" ships (those with impellers powered down/wedges down).
+
+2. **Active Scanning**:
+   * Emits a high-energy pulse to actively probe space.
+   * Can detect "silent" ships and provides higher precision/range.
+   * **BROADCASTS the observer's position**: An active scan creates a massive, unmistakable signature that allows any observer in range to immediately detect and track the scanner.
+
+The player and AI must manage this trade-off: stay silent and potentially blind, or scan and be revealed.
+
+The player sees what their forces know.
 AI sees what its forces know.
 
 Neither side gets automatic access to hidden world state.

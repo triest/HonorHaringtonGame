@@ -1,0 +1,18 @@
+name: Local LM Studio
+version: 1.0.0
+schema: v1
+
+models:
+  - name: LM Studio — Qwen Coder
+    provider: lmstudio
+    model: qwen3.6
+    apiBase: http://localhost:1234/v1
+    roles:
+      - chat
+      - edit
+      - apply
+    capabilities:
+      - tool_use
+
+# Для Agent/Chat/Edits Continue будет обращаться напрямую к LM Studio.
+# В поле `model` укажи ТОЧНЫЙ model ID из LM Studio, если он отличается от qwen3.6.

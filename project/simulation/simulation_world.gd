@@ -476,6 +476,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_missile_tot_coordination(dt)
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
+	_resolve_crossing_t_maneuver(dt)
 	_integrate_ships(dt)
 
 ## ТЗ §25 Subsystem Damage: run once at the START of every tick, before
@@ -1343,32 +1344,10 @@ func _resolve_individual_orders(dt: float) -> void:
 ## identity initial orientation (which test_individual_orders.gd
 ## deliberately includes).
 func _resolve_individual_orientation_order(ship: ShipPhysicsState, order: IndividualOrder, dt: float) -> void:
-	var target_facing_local: Vector3 = ship.orientation.inverse() * order.target_facing_world
-	var forward_local: Vector3 = Vector3.FORWARD
-	var angle_err: float = forward_local.angle_to(target_facing_local)
-
-	if angle_err <= order.orientation_tolerance_rad:
+	_steer_toward_world_facing(ship, order.target_facing_world, dt)
+	var remaining: Vector3 = ship.orientation.inverse() * order.target_facing_world
+	if Vector3.FORWARD.angle_to(remaining) <= order.orientation_tolerance_rad:
 		ship.angular_velocity = Vector3.ZERO
-		return
-
-	var axis_local: Vector3 = forward_local.cross(target_facing_local)
-	if axis_local.length_squared() <= 0.000001:
-		# forward_local and target_facing_local are (anti)parallel --
-		# ASSUMPTION: no canonically "correct" roll-free axis exists for
-		# a pure 180-degree reversal, so an arbitrary perpendicular axis
-		# is picked (this order does not constrain roll around the
-		# forward axis at all, consistent with the rest of this codebase
-		# never having modeled roll/bank).
-		axis_local = forward_local.cross(Vector3.UP)
-		if axis_local.length_squared() <= 0.000001:
-			axis_local = forward_local.cross(Vector3.RIGHT)
-	axis_local = axis_local.normalized()
-
-	var max_turn_rate: float = ship.max_angular_speed_rad_s
-	if max_turn_rate <= 0.0:
-		return
-	var turn_rate: float = min(max_turn_rate, angle_err / dt)
-	ship.angular_velocity = axis_local * turn_rate
 
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting

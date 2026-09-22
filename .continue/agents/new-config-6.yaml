@@ -1,0 +1,17 @@
+name: Local LM Studio
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Gemma 4 E4B
+    provider: openai
+    model: google/gemma-4-e4b
+    apiBase: http://127.0.0.1:1234/v1
+    apiKey: lm-studio
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      temperature: 0.2
+      maxTokens: 8192

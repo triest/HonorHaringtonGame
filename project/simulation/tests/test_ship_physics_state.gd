@@ -25,7 +25,7 @@ func _init() -> void:
 func _test_thrust_produces_velocity_and_position_change() -> int:
 	var s := ShipPhysicsState.new()
 	s.commanded_thrust_local = Vector3(0, 0, -1)
-	s.max_acceleration_mps2 = 100.0
+	s.max_thrust_n = 1.0e11 # Approx 100 m/s^2 for 1e9 kg
 	var dt := 1.0 / 60.0
 	for i in range(60):  # 1 simulated second
 		s.integrate(dt)
@@ -50,7 +50,7 @@ func _test_zero_thrust_preserves_velocity_inertially() -> int:
 func _test_velocity_never_exceeds_c() -> int:
 	var s := ShipPhysicsState.new()
 	s.commanded_thrust_local = Vector3(0, 0, -1)
-	s.max_acceleration_mps2 = 100000.0  # unrealistically high, to stress the clamp
+	s.max_thrust_n = 1.0e14 # Unrealistically high, to stress the clamp
 	var dt := 1.0 / 60.0
 	for i in range(60 * 60 * 5):  # 5 simulated hours
 		s.integrate(dt)

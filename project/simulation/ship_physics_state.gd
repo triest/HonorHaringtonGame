@@ -43,9 +43,23 @@ var commanded_thrust_local: Vector3 = Vector3.ZERO
 
 ## Physical properties (ASSUMPTION defaults; MUST be overridden by
 ## data-driven ship class definitions per ТЗ §8, not hardcoded per-ship).
+##
+## ТЗ §62.1: mass is load-bearing. Acceleration is F/m
+## (`effective_max_thrust() / mass_kg`), not a per-ship arcade cap.
 var mass_kg: float = 1.0e9
-var max_acceleration_mps2: float = 500.0 * 9.80665  # ASSUMPTION default (~500 g)
+## Rated impeller thrust in newtons. Default ~500 m/s^2 at the default
+## 1e9 kg mass (~51 g) -- placeholder, not a canon class rating.
+var max_thrust_n: float = 5.0e11
 var max_angular_speed_rad_s: float = 0.3
+
+## Compatibility alias used by existing tests/callers that still think
+## in m/s^2. Reading returns current F/m; writing sets `max_thrust_n`
+## so that F/m equals the requested acceleration at the CURRENT mass.
+var max_acceleration_mps2: float:
+	get:
+		return max_thrust_n / maxf(mass_kg, 1.0)
+	set(value):
+		max_thrust_n = value * maxf(mass_kg, 1.0)
 
 ## Hull dimensions for rendering/geometry purposes (ТЗ §7 Ship
 ## Representation, §8 Ship Database: "dimensions" is an explicit data
@@ -73,7 +87,7 @@ var defense: ShipDefenseState = null
 ## ТЗ §25 Damage: optional ShipSubsystems (the canonical, complete
 ## 11-subsystem container -- see ship_subsystems.gd). Null (the default)
 ## means "no subsystem damage modeling for this ship", identical to
-## pre-§25 behavior. When present, `effective_max_acceleration()` ALSO
+## pre-§25 behavior. When present, `effective_max_thrust()` ALSO
 ## scales by this ship's own PROPULSION and MANEUVERING subsystem
 ## condition, ON TOP OF (multiplied with, not replacing)
 ## `propulsion_condition`/`compensator_condition` above -- this is the
@@ -94,17 +108,23 @@ var subsystems = null
 ## no point defense, no formation/individual command, no damage-
 ## triggered retreat, no outgoing sensor observation): a wreck has no
 ## crew or power left to do any of those things. It REMAINS a valid
-## incoming sensor CONTACT for other ships (see _update_sensors) and a
+## incoming sensor CONTACT for other ships (via _update_sensors) and a
 ## valid physics object -- see AGENTS.md §63.1, "a destroyed ship must
 ## NOT disappear".
 var is_wreck: bool = false
 
-func effective_max_acceleration() -> float:
-	var result: float = max_acceleration_mps2 * propulsion_condition * compensator_condition
+func effective_max_thrust() -> float:
+	var result: float = max_thrust_n * propulsion_condition * compensator_condition
 	if subsystems != null:
 		result *= subsystems.get_condition(SubsystemType.Type.PROPULSION)
 		result *= subsystems.get_condition(SubsystemType.Type.MANEUVERING)
 	return result
+
+## Attainable linear acceleration in m/s^2 (ТЗ §62.1: a = F/m).
+## Existing maneuver code (formation-keeping, individual orders) reads
+## this rather than dividing by mass itself.
+func effective_max_acceleration() -> float:
+	return effective_max_thrust() / maxf(mass_kg, 1.0)
 
 ## Advances this ship's physical state by exactly one fixed simulation tick.
 ## Thrust -> acceleration -> velocity -> position (ТЗ §12).
@@ -120,7 +140,9 @@ func integrate(dt: float) -> void:
 		if thrust_world.length_squared() > 1.0:
 			thrust_world = thrust_world.normalized()
 
-	acceleration = thrust_world * effective_max_acceleration()
+	# F = ma => a = F / m
+	# We calculate acceleration based on the effective maximum thrust available.
+	acceleration = (thrust_world * effective_max_thrust()) / maxf(mass_kg, 1.0)
 
 	# Semi-implicit (symplectic) Euler via the shared kinematics helper, so
 	# ships and missiles apply identical integration + c-clamp logic

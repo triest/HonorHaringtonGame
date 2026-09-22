@@ -10,7 +10,7 @@ extends RefCounted
 ## ONLY from a `SensorContact` (estimated_position, state) -- never from
 ## a target's real `.position`/`.velocity` directly, exactly like the
 ## player would be limited to their own sensor picture. This is also a
-## correctness fix, not just a new feature: `SimulationWorld`'s earlier
+## correctness fix, and new feature: `SimulationWorld`'s earlier
 ## placeholder PD target-selection scanned `world.missiles` by TRUE
 ## position/identity, which was itself a "cheat vision" violation of §26
 ## -- this module replaces that with contact-based selection.
@@ -20,18 +20,27 @@ extends RefCounted
 ## nearest usable contact, deterministic (no RNG, §43), ties broken by
 ## Dictionary iteration order.
 ##
-## Second slice (this pass) adds a first "respond to damage"/"retreat"/
-## "disengage" rule: `is_critically_damaged()` + `select_retreat_vector_world()`.
-## Still NOT implemented: threat WEIGHTING beyond nearest-contact (salvo
-## size, time-to-impact, ship value), formation management, maneuvering/
-## distance selection independent of retreat, missile launch decisions,
-## "respond to destroyed ships"/"reform formations" -- all still-open
-## items from the §26 checklist, honestly left for later passes (see
-## ASSUMPTIONS.md).
+## Second slice adds a first "respond to damage"/"retreat"/"disengage"
+## rule: `is_critically_damaged()` + `select_retreat_vector_world()`.
+## This pass adds `compute_crossing_t_maneuver()` (§41.1): a desired
+## world velocity + facing that puts this ship on the enemy's bow/stern
+## axis with this ship's own beam toward the enemy. Still NOT
+## implemented: threat WEIGHTING beyond nearest-contact, formation-level
+## (wall) crossing-the-T as a formation order, intercept-time solving
+## against a maneuvering target (same idealization as §34.2).
 class_name TacticalAI
 
 const MissileState = preload("res://simulation/missile_state.gd")
 const ContactState = preload("res://simulation/contact_state.gd")
+const AttackGeometry = preload("res://simulation/attack_geometry.gd")
+
+## ASSUMPTION (engineering, not canon): time horizon over which the
+## crossing-the-T translator tries to close a lateral offset onto the
+## enemy's bow/stern axis. No Honorverse source gives a "how fast to
+## slide onto the T" number; 10 s is long enough that a ship uses a
+## fraction of its rated acceleration rather than slamming to the
+## geometric point in one tick.
+const CROSSING_T_HORIZON_S: float = 10.0
 
 static func _is_usable(state: int) -> bool:
 	return (
@@ -253,11 +262,11 @@ static func select_formation_successor(formation, ships: Dictionary, hulls: Dict
 ##   candidate already claimed by `max_useful_attackers` or more
 ##   formation-mates is treated as already sufficiently committed.
 ##   ASSUMPTION (no canon "how many ships' fire usefully concentrates on
-##   one hull" figure exists): max_useful_attackers defaults to 2. This
-##   is the concrete mechanism behind §34.1's "don't treat 'already 4
+##   one hull" figure exists): max_useful_attackers defaults to 2. This is
+##   the concrete mechanism behind §34.1's "don't treat 'already 4
 ##   ships shooting at it' and 'nobody shooting at it' as equally good" --
-##   it does not attempt to model actual expected damage/kill probability
-##   (weapon damage resolution is itself probabilistic per mount/range/
+##   it does not attempt to model real expected damage/kill probability
+##   (weapon damage resolution is also probabilistic per mount/range/
 ##   wedge, see weapon_resolution.gd, far too complex to duplicate here
 ##   as a look-ahead heuristic), just a simple, deterministic commitment
 ##   cap.
@@ -284,7 +293,7 @@ static func select_formation_target_for_member(ship, contacts: Dictionary, hosti
 	var best_distance_by_tier: Array = [INF, INF, INF]
 
 	for contact_id in contacts.keys():
-		if not hostile_ids.has(contact_id):
+		if not hostile_id_list_has_contact(hostile_ids, contact_id):
 			continue
 		var contact = contacts[contact_id]
 		if not _is_usable(contact.state):
@@ -314,3 +323,88 @@ static func select_formation_target_for_member(ship, contacts: Dictionary, hosti
 			return {"ship_id": chosen_id, "ship": chosen_contact.target, "contact": chosen_contact}
 
 	return {"ship_id": null, "ship": null, "contact": null}
+
+static func hostile_id_list_has_contact(list: Array, id: String) -> bool:
+	return list.has(id)
+
+## §41.1 Crossing the T.
+##
+## Pure geometry from THIS ship's sensor picture (estimated position /
+## velocity / orientation -- never the hostile's true `.orientation`).
+## Returns:
+##   desired_velocity_world -- world-space velocity to command
+##   desired_facing_world   -- world-space bow direction to turn toward
+## Both ZERO when there is no usable hostile contact.
+##
+## Objective, using the existing AttackGeometry sectors:
+##   enemy's sector toward us -> BOW or STERN (chase weapons only,
+##     bow/stern wedge gap exposed)
+##   our sector toward them  -> PORT or STARBOARD (broadside live)
+## That means sitting on the enemy's bow/stern AXIS and presenting
+## OUR beam to them, not sliding onto their flank (their flank is
+## where THEIR broadside lives -- the opposite of crossing the T).
+static func compute_crossing_t_maneuver(ship, contacts: Dictionary, hostile_ship_ids: Array) -> Dictionary:
+	var empty := {
+		"desired_velocity_world": Vector3.ZERO,
+		"desired_facing_world": Vector3.ZERO,
+	}
+	var target_data = select_weapon_target(ship, contacts, hostile_ship_ids)
+	var contact = target_data["contact"]
+	if contact == null:
+		return empty
+
+	var target_pos: Vector3 = contact.estimated_position
+	var from_enemy: Vector3 = ship.position - target_pos
+	if from_enemy.length_squared() <= 0.0:
+		return empty
+
+	var range_m: float = from_enemy.length()
+	var los: Vector3 = -from_enemy / range_m  # ship -> target
+
+	var enemy_bow: Vector3 = contact.estimated_orientation * Vector3.FORWARD
+	if enemy_bow.length_squared() <= 0.000001:
+		enemy_bow = Vector3.FORWARD
+	else:
+		enemy_bow = enemy_bow.normalized()
+
+	# Prefer remaining on whichever end of the bow-stern axis we already
+	# sit on; if we are on the beam (along ~ 0), prefer the BOW -- that
+	# is the classic crossing-ahead geometry.
+	var along: float = from_enemy.dot(enemy_bow)
+	var axial_sign: float = 1.0 if along >= 0.0 else -1.0
+	var desired_pos: Vector3 = target_pos + enemy_bow * (axial_sign * range_m)
+
+	var max_accel: float = ship.effective_max_acceleration()
+	var to_desired: Vector3 = desired_pos - ship.position
+	var close_vel := Vector3.ZERO
+	if to_desired.length_squared() > 1.0:
+		var close_speed: float = minf(to_desired.length() / CROSSING_T_HORIZON_S, max_accel * CROSSING_T_HORIZON_S)
+		close_vel = to_desired.normalized() * close_speed
+
+	# Bar of the T: a heading perpendicular to LOS so the target sits
+	# on our beam. Sign follows current bow so we do not reverse for
+	# no reason.
+	var bar: Vector3 = los.cross(Vector3.UP)
+	if bar.length_squared() <= 0.000001:
+		bar = los.cross(Vector3.RIGHT)
+	if bar.length_squared() <= 0.000001:
+		return empty
+	bar = bar.normalized()
+	var current_fwd: Vector3 = ship.orientation * Vector3.FORWARD
+	if current_fwd.dot(bar) < 0.0:
+		bar = -bar
+
+	var lateral: Vector3 = from_enemy - enemy_bow * along
+	var on_axis: bool = lateral.length() <= range_m * 0.25
+	var desired_vel: Vector3 = contact.estimated_velocity + close_vel
+	if on_axis:
+		desired_vel += bar * (max_accel * CROSSING_T_HORIZON_S)
+
+	return {
+		"desired_velocity_world": desired_vel,
+		"desired_facing_world": bar,
+	}
+
+## Convenience for callers that only need the velocity half.
+static func select_crossing_t_velocity(ship, contacts: Dictionary, hostile_ship_ids: Array) -> Vector3:
+	return compute_crossing_t_maneuver(ship, contacts, hostile_ship_ids)["desired_velocity_world"]

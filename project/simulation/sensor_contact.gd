@@ -28,9 +28,8 @@ var state: int = ContactState.Type.UNKNOWN
 ## Best current estimate (dead-reckoned when state == ESTIMATED).
 var estimated_position: Vector3 = Vector3.ZERO
 var estimated_velocity: Vector3 = Vector3.ZERO
-
-## Simulation time (SimClock.sim_time) of the most recent actual detection
-## (not a dead-reckoning update).
+var estimated_angular_velocity: Vector3 = Vector3.ZERO
+var estimated_orientation: Quaternion = Quaternion.IDENTITY
 var last_detection_sim_time: float = -INF
 
 ## Consecutive sim-seconds this contact has been continuously detected;

@@ -84,6 +84,14 @@ static func engage(mount: PointDefenseMount, ship, incoming_missile, dt: float, 
 		mount._tracking_time_s = 0.0
 		mount._hits_scored = 0
 
+	# Sector Coverage: PD mount is restricted to a specific firing arc (§22.1).
+	# If sector is null, it is treated as omnidirectional.
+	if mount.sector != null:
+		var target_dir: Vector3 = (incoming_missile.position - ship.position).normalized()
+		if not mount.sector.is_inside(target_dir, mount.arc_half_width_rad):
+			mount._reset_tracking()
+			return EngagementResult.new(Outcome.OUT_OF_RANGE) # Simplified as range/geometry failure
+
 	var distance: float = ship.position.distance_to(incoming_missile.position)
 	if distance > mount.effective_engagement_range_m():
 		mount._reset_tracking()

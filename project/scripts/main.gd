@@ -7,13 +7,23 @@ extends Node3D
 ## ship_defense_state.gd -- the first actually-visible prototype of the
 ## simulation, not just headless unit tests (ТЗ §56 Milestone 1-3 bring-up).
 ##
-## Still explicitly NOT done here: weapons firing automatically, missiles,
+## Still explicitly NOT done here: weapons firing automatically (no team
+## is assigned to either demo ship, so SimulationWorld's weapons/missile
+## AI never selects a target -- see AGENTS.md §56.1 item 6, "Hardcoded
+## 1v1/2v2 scenario vs TacticalAI", which is where that gets wired up),
 ## AI, tactical UI, camera controls beyond a fixed framing shot. See
 ## CHANGELOG.md for the authoritative "done vs not done" list.
+##
+## WeaponFx (scripts/weapon_fx.gd, ТЗ §56.1 item 3) IS wired into the
+## per-tick loop below, purely so item 6 has nothing left to connect
+## later -- with no team assigned yet, SimulationWorld.last_tick_weapon_
+## shots/missiles are always empty here, so nothing visibly fires until
+## item 6 sets teams and gives ships something to shoot at.
 
 var world: SimulationWorld
 var hulls: Dictionary = {}  # String ship_id -> HullState
 var mounts: Dictionary = {}  # String ship_id -> Array[WeaponMount]
+var weapon_fx: WeaponFx
 
 func _ready() -> void:
 	world = SimulationWorld.new()
@@ -45,13 +55,25 @@ func _ready() -> void:
 		laser.recharge_time_s = 4.0
 		mounts[ship_id] = [WeaponMount.new(laser, WeaponMount.bow_chaser_arc())]
 
+	weapon_fx = WeaponFx.new()
+	add_child(weapon_fx)
+
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()
 
+## NOTE on ordering: SimulationWorld itself connects to `world.clock.
+## simulation_tick` in ITS OWN _ready() (simulation_world.gd), which runs
+## synchronously during `add_child(world)` above -- BEFORE this method's
+## own connect() call a few lines later in this file's _ready(). Godot
+## calls a signal's listeners in connection order, so world.tick_
+## simulation() (which rebuilds last_tick_weapon_shots for this tick) has
+## already run by the time this handler fires, and weapon_fx.update()
+## below is reading this tick's fresh data, not last tick's.
 func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	for ship_id in mounts.keys():
 		for mount in mounts[ship_id]:
 			mount.tick(dt)
+	weapon_fx.update(world)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo
 ## ships from a distance proportional to their separation, computed from

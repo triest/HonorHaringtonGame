@@ -11,5 +11,9 @@ _to_delete/
 .git-deploy-key/
 .idea/
 
-# Persistent local Godot binary cache (downloaded once, kept on user's disk)
-.tools/
+# Persistent local Godot binary cache (downloaded once, kept on user's disk).
+# state.md is the exception -- it's the small machine-resume pointer the
+# honorverse-dev-pass skill reads/writes every pass and explicitly commits;
+# only the (large, re-downloadable) binary itself should be ignored.
+.tools/*
+!.tools/state.md

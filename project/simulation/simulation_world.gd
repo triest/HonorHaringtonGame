@@ -93,6 +93,21 @@ var _pending_command_transmissions: Array = []  # Array[Dictionary{ready_at:floa
 ## _record_event below are no-ops until start_recording() is called.
 var replay_log: ReplayLog = null
 
+## ТЗ §56.1 item 3 (weapon-fire visualization): every energy-weapon shot
+## actually fired THIS tick, for a renderer to poll after tick_simulation()
+## -- pure already-resolved facts (attacker/target ids+positions, outcome,
+## damage), per §42 "rendering only displays already-resolved simulation
+## state". Cleared and rebuilt every tick_simulation() call.
+## Deliberately SEPARATE from `_record_event`/`replay_log`: that log is a
+## no-op unless start_recording() was called (Milestone 12 Replay,
+## deprioritized -- see §56.1's OUT OF SCOPE list), but a live renderer
+## needs this every tick regardless of whether replay recording is on.
+## "Fired" means the mount actually consumed its recharge cycle (i.e. got
+## past the NOT_READY/OUT_OF_RANGE/NO_ARC checks in WeaponResolution.fire),
+## not just that it hit -- a blocked/attenuated shot still gets a visible
+## beam, it just did not penetrate.
+var last_tick_weapon_shots: Array = []  # Array[Dictionary]: {attacker_ship_id, target_ship_id, attacker_position: Vector3, target_position: Vector3, outcome: int, damage_dealt: float}
+
 ## Local tick counter, independent of SimClock.tick_count (most
 ## existing tests drive tick_simulation() directly without ever going
 ## through a SimClock), used only to timestamp replay commands/events.
@@ -588,6 +603,19 @@ func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 	var result = WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems, formation_coverage)
 	if result != null and result.outcome == WeaponResolution.Outcome.HIT_UNPROTECTED and result.damage_dealt > 0.0:
 		_record_event("weapon_hit", {"attacker_ship_id": attacker_ship_id, "target_ship_id": target_ship_id, "damage_dealt": result.damage_dealt})
+	if result != null and result.outcome != WeaponResolution.Outcome.NOT_READY and result.outcome != WeaponResolution.Outcome.OUT_OF_RANGE and result.outcome != WeaponResolution.Outcome.NO_ARC:
+		# §56.1 item 3: the mount actually fired this tick (recharge cycle
+		# consumed) -- record it for the renderer regardless of whether it
+		# penetrated, mirrors WeaponResolution.fire's own "shot is fired"
+		# comment just above `mount.trigger_cooldown()`.
+		last_tick_weapon_shots.append({
+			"attacker_ship_id": attacker_ship_id,
+			"target_ship_id": target_ship_id,
+			"attacker_position": attacker.position,
+			"target_position": target.position,
+			"outcome": result.outcome,
+			"damage_dealt": result.damage_dealt,
+		})
 	return result
 
 func _on_simulation_tick(dt: float, _tick: int, _sim_time: float) -> void:
@@ -599,6 +627,7 @@ func _on_simulation_tick(dt: float, _tick: int, _sim_time: float) -> void:
 func tick_simulation(dt: float) -> void:
 	_tick_index += 1
 	world_sim_time += dt
+	last_tick_weapon_shots.clear()
 	_resolve_pending_command_transmissions()
 	_sync_subsystem_driven_conditions()
 	_cleanup_inactive_missiles()

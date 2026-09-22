@@ -45,6 +45,7 @@ const TacticalAI = preload("res://simulation/tactical_ai.gd")
 const MissileTube = preload("res://simulation/missile_tube.gd")
 const FormationState = preload("res://simulation/formation_state.gd")
 const FormationOrder = preload("res://simulation/formation_order.gd")
+const CommandEchelon = preload("res://simulation/command_echelon.gd")
 const IndividualOrder = preload("res://simulation/individual_order.gd")
 const IndividualCommandState = preload("res://simulation/individual_command_state.gd")
 const ShipCombatDirective = preload("res://simulation/ship_combat_directive.gd")
@@ -63,6 +64,13 @@ var ecm_states: Dictionary = {}       # ship_id -> ECMState (optional)
 var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> SensorContact]
 var teams: Dictionary = {}            # ship_id -> String team id (ASSUMPTION: minimal hostility model, see class doc)
 var formations: Dictionary = {}       # formation_id -> FormationState (§27/§28/§29, Milestone 10 first slice)
+## §28 Command Hierarchy (this pass, first slice): echelon_id -> CommandEchelon,
+## an optional tree ABOVE `formations` (Fleet/Task Force/Squadron/Division/
+## Element by default, but configurable -- see CommandEchelon class doc).
+## Entirely unused by any pre-existing formation/ship code -- a scenario
+## that never calls add_command_echelon behaves identically to before this
+## pass.
+var command_echelons: Dictionary = {}
 var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
 var ship_combat_directives: Dictionary = {}  # ship_id -> ShipCombatDirective (§30 target/weapon mode, Milestone 11 second slice)
 var _formation_assigned_targets: Dictionary = {}  # ship_id -> target_ship_id (§34.1 Doubling, rebuilt every tick by _resolve_formation_target_assignment, empty for ships with no governed formation)
@@ -277,6 +285,117 @@ func clear_formation_orders(formation_id: String) -> void:
 	_record_command("clear_formation_orders", {"formation_id": formation_id})
 	formation.clear_orders()
 
+## §28 Command Hierarchy (this pass, first slice): register a
+## CommandEchelon node. `parent_id`, if given, must already be a
+## registered, non-leaf echelon (see CommandEchelon class doc) --
+## otherwise this call push_errors and still registers `echelon_id`,
+## but as a ROOT (empty parent_id), so a config mistake never silently
+## drops the echelon itself, only its intended place in the tree.
+## Self-parenting (`parent_id == echelon_id`) is refused the same way.
+func add_command_echelon(echelon_id: String, kind: String, parent_id: String = "") -> CommandEchelon:
+	var echelon := CommandEchelon.new()
+	echelon.echelon_id = echelon_id
+	echelon.kind = kind
+	if parent_id != "":
+		if parent_id == echelon_id:
+			push_error("SimulationWorld.add_command_echelon: echelon '%s' cannot be its own parent" % echelon_id)
+		else:
+			var parent: CommandEchelon = command_echelons.get(parent_id)
+			if parent == null:
+				push_error("SimulationWorld.add_command_echelon: parent echelon '%s' not found for '%s'" % [parent_id, echelon_id])
+			elif parent.is_leaf():
+				push_error("SimulationWorld.add_command_echelon: parent echelon '%s' is a leaf (commands formation '%s'), cannot also have child echelons" % [parent_id, parent.commanded_formation_id])
+			else:
+				echelon.parent_id = parent_id
+				parent.child_echelon_ids.append(echelon_id)
+	command_echelons[echelon_id] = echelon
+	return echelon
+
+func get_command_echelon(echelon_id: String) -> CommandEchelon:
+	return command_echelons.get(echelon_id)
+
+## Make `echelon_id` a LEAF node directly commanding `formation_id` (see
+## CommandEchelon class doc). Refused (push_error, no-op) if the echelon
+## already has child echelons -- an echelon is either internal OR a
+## leaf, never both. `formation_id` need not already exist in
+## `formations` (consistent with add_formation's own "guide need not
+## exist yet" flexibility) -- checked live by
+## _collect_formation_ids_under_echelon/issue_echelon_order.
+func attach_formation_to_echelon(echelon_id: String, formation_id: String) -> void:
+	var echelon: CommandEchelon = command_echelons.get(echelon_id)
+	if echelon == null:
+		push_error("SimulationWorld.attach_formation_to_echelon: echelon '%s' not found" % echelon_id)
+		return
+	if not echelon.child_echelon_ids.is_empty():
+		push_error("SimulationWorld.attach_formation_to_echelon: echelon '%s' has child echelons, cannot also command a formation directly" % echelon_id)
+		return
+	echelon.commanded_formation_id = formation_id
+
+## Recursive, cycle-safe walk of `echelon_id`'s subtree collecting every
+## LEAF's `commanded_formation_id` (deduplicated, insertion order --
+## deterministic, ТЗ §43). An echelon that does not exist, or a subtree
+## with no leaves yet (e.g. freshly created internal echelons with no
+## children attached), safely yields an empty Array rather than an
+## error -- issue_echelon_order then simply cascades to nobody.
+func _collect_formation_ids_under_echelon(echelon_id: String) -> Array:
+	var visited: Dictionary = {}
+	var result: Array = []
+	_collect_formation_ids_recursive(echelon_id, visited, result)
+	return result
+
+func _collect_formation_ids_recursive(echelon_id: String, visited: Dictionary, result: Array) -> void:
+	if visited.has(echelon_id):
+		return
+	visited[echelon_id] = true
+	var echelon: CommandEchelon = command_echelons.get(echelon_id)
+	if echelon == null:
+		return
+	if echelon.is_leaf():
+		if not result.has(echelon.commanded_formation_id):
+			result.append(echelon.commanded_formation_id)
+		return
+	for child_id in echelon.child_echelon_ids:
+		_collect_formation_ids_recursive(child_id, visited, result)
+
+## §28 Command Hierarchy (this pass, first slice): cascade `order` down
+## to every formation subordinate to `echelon_id`'s subtree, via the
+## same per-formation `issue_order` FormationState already exposes -- an
+## echelon-level order is exactly "issue this same intention to every
+## formation under my command", nothing more. INTERPRETATION, not
+## canon: no Honorverse source specifies the exact mechanics of how a
+## fleet-level order propagates to individual formations; "identical
+## order, fanned out to every subordinate formation" is the most direct
+## reading of §29's order list applying at any echelon, not a numeric
+## assumption -- see ASSUMPTIONS.md.
+##
+## Recorded ONCE at the echelon level for replay (see
+## apply_recorded_command below) rather than once per formation, so
+## replay re-derives the recipient set from whatever the command
+## hierarchy looks like AT REPLAY TIME -- consistent with how
+## issue_formation_order already re-looks-up its formation_id live
+## rather than baking in a snapshot.
+##
+## Each recipient formation gets its OWN independent clone of `order`
+## (via FormationOrder.to_dict()/from_dict() round-trip -- already
+## tested, see test_replay_log.gd), never the same shared object
+## instance -- required because some order kinds mutate themselves
+## per-tick against ONE specific guide (APPROACH recomputes
+## target_velocity_mps from the guide's live position every tick, see
+## _resolve_formation_orders) or carry formation-specific data
+## (CHANGE_FORMATION's new_offsets_local); sharing one instance across
+## formations with different guides/rosters would corrupt whichever
+## formation's tick happened to run last.
+func issue_echelon_order(echelon_id: String, order) -> void:
+	if not command_echelons.has(echelon_id):
+		return
+	_record_command("issue_echelon_order", {"echelon_id": echelon_id, "order": order.to_dict()})
+	var formation_ids: Array = _collect_formation_ids_under_echelon(echelon_id)
+	for formation_id in formation_ids:
+		var formation: FormationState = formations.get(formation_id)
+		if formation == null:
+			continue
+		formation.issue_order(FormationOrder.from_dict(order.to_dict()))
+
 ## ТЗ §26: minimal hostility bookkeeping. Two ships are hostile to each
 ## other only if BOTH have a non-empty team assigned AND the teams
 ## differ -- a ship with no team set is neutral (never selected as a
@@ -390,6 +509,8 @@ func apply_recorded_command(entry: Dictionary) -> void:
 			issue_formation_order_now(args["formation_id"], FormationOrder.from_dict(args["order"]))
 		"clear_formation_orders":
 			clear_formation_orders(args["formation_id"])
+		"issue_echelon_order":
+			issue_echelon_order(args["echelon_id"], FormationOrder.from_dict(args["order"]))
 		_:
 			push_warning("SimulationWorld.apply_recorded_command: unknown command '%s', skipped" % command_name)
 

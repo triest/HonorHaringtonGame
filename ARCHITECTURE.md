@@ -2054,3 +2054,99 @@ a moving target (re-deriving `target_point_world` from a tracked ship's
 live position each tick, or accepting some kind of target-reference
 instead of a bare Vector3) is a real, named, un-implemented next step,
 not silently out of scope -- see ASSUMPTIONS.md/CHANGELOG.md.
+
+## §28 Command Hierarchy -- configurable echelon tree above FormationState (first slice, 2026-09-22)
+
+Until this pass, §28's "Fleet > Task Force > Squadron > Division >
+Element > Ship" default hierarchy was an honestly-logged gap: `formations`
+in SimulationWorld is, and remains, a completely FLAT
+`Dictionary[String, FormationState]` (one guide + direct members each) --
+every existing mechanic (station-keeping, succession/§33, formation
+orders/§29, bow/stern coverage/§22.1, target-doubling/§34.1) is built on
+that flat assumption and none of it changes in this pass.
+
+Design choice: a SEPARATE tree structure (`CommandEchelon`, new file
+`command_echelon.gd`) sitting ABOVE the flat formations, rather than
+teaching `FormationState` itself to nest (e.g. letting a "member" be
+another formation instead of a ship). The rejected nested-FormationState
+approach would have required a type discriminant everywhere
+`member_offsets`/`ships.get()` currently assume a ship_id resolves to a
+`ShipPhysicsState` (station-keeping math, bow/stern coverage geometry,
+target-doubling -- all of `_resolve_formation_keeping` and friends), i.e.
+touching and re-validating every already-tested formation mechanic. The
+chosen design touches NONE of that: `CommandEchelon` nodes form their own
+tree via `parent_id`/`child_echelon_ids`, and a LEAF echelon simply
+references an existing `formation_id` by name (`commanded_formation_id`).
+An echelon-level order does not invent new physics -- it is fanned out
+("cascaded") as ordinary, independent `FormationOrder`s onto each
+subordinate formation's existing `order_queue`, so `_resolve_formation_orders`
+and `_resolve_formation_keeping` run completely unmodified and every
+previously-passing test in `test_formation.gd`/`test_replay_log.gd`
+still passes unchanged (verified by re-running both this pass, not just
+inspecting the diff).
+
+Configurability (§28: "must be configurable because organizational
+structures can differ by faction and era") is satisfied by NOT hardcoding
+a 5-level enum: `CommandEchelon.kind` is a free-form String, and tree
+depth is whatever `add_command_echelon(id, kind, parent_id)` calls build
+-- a scenario using the canonical Honorverse hierarchy just happens to
+set `kind` to "Fleet"/"Task Force"/"Squadron"/"Division"/"Element" at
+each level; nothing in the class or SimulationWorld API enforces that
+specific depth or those specific names.
+
+An echelon node is either INTERNAL (has `child_echelon_ids`, no
+commanded formation) or a LEAF (`commanded_formation_id` set, no
+children) -- never both. This binary split is enforced defensively
+(`add_command_echelon`/`attach_formation_to_echelon` push_error and
+refuse rather than corrupt the tree) specifically so
+`_collect_formation_ids_under_echelon`'s recursive walk never needs to
+special-case a node that is somehow both -- one unambiguous recursion,
+visited-set guarded against accidental cycles (a misconfiguration, not
+something the builder API can currently produce, but the walk is
+defensive regardless rather than trusting callers).
+
+`issue_echelon_order(echelon_id, order)` clones `order` independently
+per recipient formation via the EXISTING `FormationOrder.to_dict()`/
+`from_dict()` round-trip (already exercised by `test_replay_log.gd`)
+rather than sharing one object instance across formations. This is not
+a stylistic choice -- it is required correctness: `APPROACH` orders
+mutate their own `target_velocity_mps` every tick from ONE specific
+guide's live position (`_approach_target_velocity`), and
+`CHANGE_FORMATION` carries a `new_offsets_local` Dictionary meant for one
+formation's roster; a single shared instance handed to two formations
+with different guides/rosters would have the later-processed formation's
+tick silently overwrite state the earlier formation still needed. A
+dedicated test (`_test_issue_echelon_order_gives_each_formation_an_independent_order_instance`)
+proves the clones diverge correctly rather than merely asserting they
+are distinct objects.
+
+Replay (§45): the cascade is recorded ONCE at the echelon level
+(`_record_command("issue_echelon_order", {"echelon_id": ..., "order": ...})`),
+not once per subordinate formation. `apply_recorded_command` replays it
+by calling the same public `issue_echelon_order`, which RE-DERIVES the
+recipient formation set live from `command_echelons`/`formations` at
+replay time -- the same "re-look-up, don't bake in a snapshot" convention
+`issue_formation_order`'s replay entry already uses for its single
+`formation_id`. This means a hierarchy that has changed between
+recording and replay (a division reassigned to a different squadron,
+say) would replay against the CURRENT tree, not the tree as it existed
+at record time -- an honestly-noted limitation, not a bug: no mechanic
+exists yet to reparent/detach echelons at runtime, so within this pass's
+actual capabilities the tree is static for the lifetime of one
+SimulationWorld and the distinction cannot currently be observed. See
+ASSUMPTIONS.md.
+
+Scope boundary, honestly carried forward (unchanged targets from previous
+passes' "Честно НЕ сделано" lists, all still open after this one): PD
+firing-arc/facing model from scratch; AI/targeting preferring formation-
+uncovered breaches (§26/§34); applying §22.1 formation coverage to the
+raised-sidewall acute-angle bypass case; data-driven ship/weapon class
+database (§8/§48); a shared intercept-vector solver for §34.2/§41.1;
+APPROACH orders against a moving target. Also newly opened by this pass,
+not yet closed: echelon-level LEADER/succession (§33 remains
+FORMATION-level only -- an echelon has no notion of "who commands it" or
+what happens if that commander is lost, only "which formations sit under
+it"); reparenting/detaching an echelon at runtime; any echelon-specific
+order semantics beyond straight fan-out (e.g. "target distribution" at
+Fleet scale meaningfully differs per subordinate, not just the same
+order repeated).

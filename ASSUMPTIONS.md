@@ -1960,3 +1960,82 @@ PD firing-arc/facing модель; AI/targeting предпочтение неп�
 ПОДНЯТОГО sidewall под острым углом; data-driven база классов кораблей/
 оружия (§8/§48); intercept-vector solver, общий для §34.2/§41.1;
 approach-приказ на движущуюся цель (см. выше).
+
+## §28 Command Hierarchy -- echelon order cascading (first slice) 2026-09-22
+
+`CommandEchelon` + `SimulationWorld.add_command_echelon`/
+`attach_formation_to_echelon`/`issue_echelon_order`. See ARCHITECTURE.md
+for the full design rationale. Here -- honest ASSUMPTION/INTERPRETATION/
+scope entries:
+
+* **INTERPRETATION, not canon: "an echelon-level order is the same
+  order, fanned out identically to every subordinate formation."** No
+  Honorverse source specifies the exact mechanics of how a fleet-level
+  order propagates down to individual formations/divisions. This is the
+  most direct reading of §29's order list applying "at any echelon", but
+  it is a simplification -- real fleet command would plausibly translate
+  an order differently per subordinate (e.g. a "target distribution"
+  order at Fleet scale should assign DIFFERENT targets to different
+  Task Forces, not the same target to everyone). That translation layer
+  does not exist yet -- this pass only does identical fan-out, honestly
+  narrower than the eventual §29 order list requires at echelon scale.
+* **`kind: String`, not an enum of the five canonical levels.** Direct
+  reading of §28's own explicit requirement ("must be configurable
+  because organizational structures can differ by faction and era") --
+  not a numeric assumption, a structural one: depth and naming are
+  caller-chosen, nothing in the code enforces "exactly Fleet/Task
+  Force/Squadron/Division/Element/Ship" or exactly five levels above
+  Ship.
+* **An echelon is either purely internal (children) or purely a leaf
+  (one commanded formation) -- never both, enforced defensively.** Not
+  a canon question at all; an engineering choice to keep the recursive
+  "collect every formation under this echelon" walk unambiguous (no
+  node needs to be treated as "part internal, part leaf"). A real
+  chain of command in principle CAN have a commander who both leads a
+  sub-unit directly and has subordinate commanders under them
+  simultaneously (e.g. a squadron commander whose own flagship IS part
+  of the wall) -- this project does not attempt to model that nuance
+  yet; a future pass wanting it would need to relax this constraint
+  deliberately, not accidentally.
+* **Echelon-level leader/succession does NOT exist.** §33 "Formation
+  Leader" (successor selection on guide loss, `guide_lost_since`,
+  `COMMAND_TRANSFER_DELAY_S`) is implemented ONLY on `FormationState`,
+  unchanged by this pass. A `CommandEchelon` has no leader ship, no
+  succession list, and no concept of "this echelon's commander was
+  lost" -- an open question for whenever formation command hierarchy
+  needs to answer "what happens to Squadron orders when the Squadron
+  Commander's own ship, embedded in one of its Divisions, is
+  destroyed?" (a real, not-yet-designed question, not silently
+  skipped).
+* **The tree is static for a SimulationWorld's lifetime -- no
+  reparent/detach API.** `add_command_echelon`'s `parent_id` is set
+  once at creation; nothing lets a caller move an existing echelon
+  under a different parent, or detach a formation from one echelon and
+  reattach it elsewhere, later. Interacts with the replay honesty note
+  in ARCHITECTURE.md: because reparenting cannot currently happen, the
+  "replay re-derives the recipient set live rather than baking in a
+  snapshot" design cannot currently diverge from "replay reproduces
+  exactly the same cascade as recording" in practice -- but the
+  distinction would matter the moment reparenting is added, so it is
+  recorded here rather than assumed away.
+* **Formation-id collection order is Dictionary insertion order,
+  deterministic (ТЗ §43), not any notion of priority/seniority between
+  sibling echelons.** No source specifies an order in which a fleet-
+  level order should conceptually reach its Task Forces (it is not a
+  simulated transmission delay -- see FormationState.guide_lost_since's
+  own doc comment on why light-lag is not yet modeled at this
+  project's current tactical ranges); this is purely "in what order
+  does `issue_echelon_order`'s for-loop touch formations", which has no
+  gameplay-visible effect since every formation's own order_queue still
+  advances independently starting the same simulated tick either way.
+
+Честно НЕ сделано (next candidates, by the same list this and previous
+passes have been working down, now with §28's first slice closed):
+PD firing-arc/facing model from scratch; AI/targeting preferring
+formation-uncovered breaches (§26/§34); applying §22.1 formation
+coverage to the raised-sidewall acute-angle bypass case; data-driven
+ship/weapon class database (§8/§48); a shared intercept-vector solver
+for §34.2/§41.1; APPROACH orders against a moving target; echelon-level
+leader/succession; per-subordinate order translation (e.g. differentiated
+target distribution) instead of identical fan-out; reparenting/detaching
+an echelon at runtime.

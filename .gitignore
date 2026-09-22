@@ -10,3 +10,6 @@ _to_delete/
 # of each scheduled run instead.
 .git-deploy-key/
 .idea/
+
+# Persistent local Godot binary cache (downloaded once, kept on user's disk)
+.tools/

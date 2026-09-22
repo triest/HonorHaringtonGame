@@ -2203,3 +2203,68 @@ world-space точка) -- если понадобится "approach to a moving
 (`formation_ai.gd`, `formation.gd`, `test_formation_ai.gd`,
 `_calib_test_1789772709.gd`), давно вытесненные текущими
 `formation_state.gd`/`formation_order.gd`/`test_formation.gd`.
+
+## 2026-09-22 (проход: Milestone 10/14 debt -- §28 Command Hierarchy, конфигурируемое дерево эшелонов, первый срез)
+
+Godot-бинарь закэширован постоянно в `.tools/godot/` на диске
+пользователя (`.gitignore` дополнен `.tools/`) -- больше не будет
+перекачиваться каждый проход. По списку честно залогированных пробелов
+(по возрастанию, из предыдущего прохода) первый кандидат -- "многоуровневая
+иерархия команд §28 (Fleet/Task Force/Squadron/Division/Element)".
+
+* Новый файл `command_echelon.gd` -- `CommandEchelon`: узел дерева
+  ОТДЕЛЬНОГО от плоских `FormationState`, конфигурируемый (`kind` --
+  свободная строка, не хардкод из 5 уровней, ровно как требует §28:
+  "The hierarchy must be configurable"). Узел либо ВНУТРЕННИЙ
+  (`child_echelon_ids`), либо ЛИСТ (`commanded_formation_id` указывает
+  на существующий `formation_id` в `SimulationWorld.formations`) --
+  никогда оба сразу.
+* `simulation_world.gd` -- `command_echelons: Dictionary` (echelon_id ->
+  CommandEchelon) + `add_command_echelon()`, `get_command_echelon()`,
+  `attach_formation_to_echelon()`, `_collect_formation_ids_under_echelon()`
+  (рекурсивный обход поддерева, cycle-safe, дедуплицирует) и
+  `issue_echelon_order()` -- каскадирует один и тот же `FormationOrder`
+  на ВСЕ формации под эшелоном, каждой -- СВОЙ независимый клон через
+  уже протестированный `to_dict()/from_dict()` round-trip (не общий
+  объект-ссылка -- иначе тик одной формации по чужому мутирующему полю
+  APPROACH сломал бы другую). Записывается в replay ОДИН раз на уровне
+  эшелона (`apply_recorded_command` -- новый case `issue_echelon_order`),
+  список формаций-получателей переизвлекается заново при replay, а не
+  замораживается снимком.
+* Ничего в существующем плоском формационном коде (`_resolve_formation_orders`,
+  `_resolve_formation_keeping`, §33 succession, §22.1 coverage, §34.1
+  doubling) не изменено -- дерево эшелонов сидит СТРОГО НАД плоскими
+  формациями, каскадируя обычные `FormationOrder` в их обычные
+  `order_queue`.
+* Тесты: новый `test_command_echelon.gd` -- 24 теста (класс `CommandEchelon`
+  напрямую: is_leaf/to_dict/from_dict/защитное копирование массива;
+  построение дерева: root, parent-child линковка, отказ self-parent,
+  отказ на несуществующего родителя, отказ добавить ребёнка к
+  родителю-листу, отказ сделать формацию у эшелона с детьми; сбор
+  formation_id: один лист, двух-дивизионная эскадра, пустой внутренний
+  узел, дедупликация одной формации под двумя листьями, несуществующий
+  эшелон; каскад через РЕАЛЬНЫЙ `SimulationWorld.tick_simulation()` --
+  CHANGE_COURSE на две независимые формации одновременно, независимость
+  клонов APPROACH-приказа (разные target_velocity_mps для гвардов в
+  разных стартовых позициях к одной точке), безопасный no-op на
+  неизвестный эшелон/formation_id; replay -- запись ровно ОДНОЙ команды
+  на каскад из двух формаций, полный round-trip воспроизведения через
+  `apply_recorded_command` на свежем мире). Полный прогон ВСЕХ 31
+  headless-тестовых файлов проекта (Godot v4.3-stable, бинарь взят из
+  постоянного кэша `.tools/godot/`, скачан ОДИН раз этой сессией) -- 0
+  провалов, включая существующие `test_formation.gd` (128 ассертов),
+  `test_replay_log.gd` (67), `test_simulation_world.gd` (10) --
+  подтверждено, что новый код НЕ затронул ни одного уже существующего
+  формационного/replay-механизма.
+
+Честно НЕ сделано (следующие кандидаты по списку пользователя, по
+возрастанию, после закрытия §28-первого-среза): PD firing-arc/facing
+модель с нуля; AI/целеуказание, предпочитающее непокрытые формацией
+бреши (§26/§34); формационное прикрытие (§22.1) для случая обхода
+поднятого sidewall под острым углом; data-driven база классов кораблей/
+оружия (§8/§48); intercept-vector solver, общий для §34.2/§41.1;
+approach-приказ на движущуюся цель; эшелон-уровневый leader/succession
+(§33 по-прежнему только на уровне формации, не эшелона); дифференцированная
+трансляция приказа по подчинённым (например честная "target distribution"
+на уровне Fleet -- сейчас только идентичный fan-out одного и того же
+приказа всем); reparenting/detach эшелона в рантайме.

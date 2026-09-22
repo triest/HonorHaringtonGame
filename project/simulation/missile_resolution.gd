@@ -45,7 +45,7 @@ const LasingRod = preload("res://simulation/lasing_rod.gd")
 const DamageType = preload("res://simulation/damage_type.gd")
 const SubsystemDamageResolution = preload("res://simulation/subsystem_damage_resolution.gd")
 
-enum Outcome { NOT_ARMED, ALREADY_DETONATED, NO_TARGET, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, HIT_UNPROTECTED }
+enum Outcome { NOT_ARMED, ALREADY_DETONATED, NO_TARGET, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, FORMATION_COVERED, HIT_UNPROTECTED }
 
 class RodResult:
 	var sector
@@ -106,8 +106,13 @@ static func compute_rod_positions(missile) -> Array:
 ## damage application, e.g. for a dry-run check). target_subsystems:
 ## optional ShipSubsystems (ТЗ §25) belonging to missile.target; when
 ## provided, each rod's penetrating damage also degrades a
-## sector-appropriate subsystem.
-static func resolve_detonation(missile, target_hull, target_subsystems = null) -> DetonationResult:
+## sector-appropriate subsystem. formation_bow_covered/formation_stern_
+## covered: optional bools (ТЗ §22.1, computed by
+## SimulationWorld._formation_bow_stern_coverage), both defaulting false
+## so every pre-existing caller/test is unaffected -- forwarded to each
+## rod's own ShipDefenseState.resolve_attack call, same as target_hull/
+## target_subsystems above.
+static func resolve_detonation(missile, target_hull, target_subsystems = null, formation_bow_covered: bool = false, formation_stern_covered: bool = false) -> DetonationResult:
 	if missile.has_detonated:
 		return DetonationResult.new(Outcome.ALREADY_DETONATED)
 	if not missile.warhead_armed:
@@ -127,6 +132,7 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null) -
 	var total_damage: float = 0.0
 	var any_unprotected: bool = false
 	var any_attenuated: bool = false
+	var any_formation_covered: bool = false
 	var subsystem_damage_totals: Dictionary = {}
 
 	for rod_position in rod_positions:
@@ -142,7 +148,7 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null) -
 		# ТЗ §21.25 CANON: laserhead penetrates sidewalls more effectively than
 		# a plain explosive/kinetic warhead -- pass LASERHEAD so
 		# ShipDefenseState applies its penetration multiplier.
-		var resolution = defense.resolve_attack(rod_position, target.position, target.orientation, DamageType.Type.LASERHEAD)
+		var resolution = defense.resolve_attack(rod_position, target.position, target.orientation, DamageType.Type.LASERHEAD, formation_bow_covered, formation_stern_covered)
 		var rod_damage: float = damage_per_rod * resolution.transmitted_fraction
 		total_damage += rod_damage
 
@@ -152,6 +158,9 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null) -
 		elif resolution.kind == ShipDefenseState.ResolutionKind.SIDEWALL_ATTENUATED:
 			rod_outcome = Outcome.SIDEWALL_ATTENUATED
 			any_attenuated = true
+		elif resolution.kind == ShipDefenseState.ResolutionKind.FORMATION_COVERED:
+			rod_outcome = Outcome.FORMATION_COVERED
+			any_formation_covered = true
 		else:
 			any_unprotected = true
 
@@ -167,6 +176,8 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null) -
 	var overall_outcome: int = Outcome.WEDGE_BLOCKED
 	if any_unprotected:
 		overall_outcome = Outcome.HIT_UNPROTECTED
+	elif any_formation_covered:
+		overall_outcome = Outcome.FORMATION_COVERED
 	elif any_attenuated:
 		overall_outcome = Outcome.SIDEWALL_ATTENUATED
 

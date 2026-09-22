@@ -231,6 +231,14 @@ Wiki 2026-09-18 -- see AGENTS.md §18.1 for full detail/citations):
   INTERPRETATION only for the per-ship DIRECTIONAL gap/coverage model
   (§41.1/§33.1/§61) this ТЗ uses to implement that confirmed
   principle as concrete geometry.
-* NOT implemented: PD is currently omnidirectional (no firing-arc model
-  at all), and FormationState has no coverage concept.
+* IMPLEMENTED (first slice, 2026-09-22), wedge half only:
+  `SimulationWorld._formation_bow_stern_coverage()` + `ShipDefenseState.
+  resolve_attack()`'s new `FORMATION_COVERED` path -- a covering,
+  cohesive-formation neighbor near a ship's bow/stern axis attenuates
+  (0.5 ASSUMPTION multiplier) an otherwise-fully-UNPROTECTED bow/stern
+  hit. NOT implemented: PD is still fully omnidirectional (no firing-arc
+  model at all, so PD has no coverage concept yet); the raised-sidewall
+  acute-angle-bypass case is untouched by formation coverage; AI/
+  targeting does not yet prefer uncovered gaps. See AGENTS.md §22.1 /
+  ASSUMPTIONS.md / CHANGELOG.md (2026-09-22) for the full picture.
 

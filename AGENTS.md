@@ -1060,22 +1060,37 @@ build that confirmed CANON principle into concrete, testable geometry
 -- the books establish that the network effect is real, not the exact
 per-ship arc mechanics this simulator needs to compute it.
 
-HONEST GAP (nothing above is implemented yet): `PointDefenseMount`/
-`PointDefenseResolution` currently model PD as omnidirectional --
-range and reaction/recharge time only (see `point_defense_mount.gd`),
-with NO firing-arc/facing concept at all, so there is currently no
-per-ship "gap" for PD to begin with, only the already-modeled wedge
-bow/stern gap (§41.1). `FormationState` (§29/Milestone 10) tracks
-station offsets but has no concept of one ship's coverage extending
-to a neighbor's defense at all. Implementing §22.1 for real needs, in
-order: (1) a PD/wedge firing-arc model per ship (extends §41.1's
-existing sector vocabulary, `attack_geometry.gd`), (2) a formation-
-level check of which neighbor (if any) is in a position to cover a
-given ship's gap arc this tick, (3) folding that coverage into PD/
-wedge resolution so a covered gap is actually harder to hit through
-than an uncovered one, and (4) AI/targeting (§26/§34) preferring
-gaps that are currently uncovered. See ASSUMPTIONS.md for per-step
-cost notes, same pattern as the §33.1/§34.1/§34.2/§41.1 entry.
+IMPLEMENTED (first slice, 2026-09-22): the WEDGE bow/stern gap half of
+this is now real. `SimulationWorld._formation_bow_stern_coverage()`
+checks whether a living, non-wreck formation neighbor (guide or member,
+same formation, formation cohesion required -- no coverage while the
+guide is lost) sits within `FORMATION_COVERAGE_MAX_DISTANCE_M` and
+`FORMATION_COVERAGE_CONE_HALF_WIDTH_RAD` of a ship's own bow (resp.
+stern) axis, reusing `AttackGeometry`'s own "classify a direction in my
+local frame" idea rather than a new formula. `ShipDefenseState.resolve_
+attack()` takes the result as two new optional bool params and, when a
+ship's bow/stern has NO functioning sidewall of its own (not raised, or
+burned out) AND a neighbor is covering it, attenuates the hit
+(`ResolutionKind.FORMATION_COVERED`, ASSUMPTION multiplier 0.5) instead
+of transmitting in full -- wired into both `WeaponResolution.fire()`
+(via `SimulationWorld.fire_weapon()`) and `MissileResolution.
+resolve_detonation()` (via `SimulationWorld._update_missiles()`). See
+CHANGELOG.md/ARCHITECTURE.md/ASSUMPTIONS.md (2026-09-22) for the full
+mechanism and honest scope limits.
+
+STILL HONESTLY OPEN, same numbering as before: (1) PD firing-arc model
+-- `PointDefenseMount`/`PointDefenseResolution` remain fully
+omnidirectional, so this pass adds NO coverage concept for PD at all,
+only for the pre-existing wedge bow/stern gap; (2)/(3) done for wedge
+only, as above -- the RAISED-sidewall acute-angle-bypass case (§41.1's
+other bow/stern mechanic) is deliberately untouched by formation
+coverage in this first slice, a narrower reading than "a covered gap is
+harder to hit through than an uncovered one" in full generality; (4)
+AI/targeting (§26/§34) still does not prefer currently-uncovered gaps --
+`_formation_bow_stern_coverage` is read by defense resolution only, not
+by any targeting/AI pass. See ASSUMPTIONS.md for per-step cost notes on
+what a PD arc model and AI-side gap-seeking would each still require,
+same pattern as the §33.1/§34.1/§34.2/§41.1 entry.
 
 ---
 

@@ -2051,3 +2051,77 @@ POWER/DEFENSIVE_SYSTEMS §25-пробелов); визуализация обл�
   координация TOT; учёт per-Марка характеристик ракеты вместо общих
   DEFAULT-констант (базы ракет как data-driven записей всё ещё нет, см.
   §8.1-8.4).
+
+## 2026-09-22 (проход: §22.1 Formation mutual defensive coverage -- первый срез, только wedge)
+
+По списку пользователя -- следующий честно залогированный пробел после
+закрытия §41.1 Crossing the T тем же днём (§22.1 явно называлась
+"следующий кандидат" в записи ASSUMPTIONS.md по итогам предыдущего
+прохода).
+
+* `simulation_world.gd` -- новый `_formation_bow_stern_coverage(ship_id)`
+  -> `{"bow": bool, "stern": bool}`: живой (не wreck) сосед по той же
+  формации (guide или member), в пределах новых констант
+  `FORMATION_COVERAGE_MAX_DISTANCE_M` (5000 м) и
+  `FORMATION_COVERAGE_CONE_HALF_WIDTH_RAD` (30°) от носовой/кормовой оси
+  корабля, при ДЕЙСТВУЮЩЕМ guide формации (тот же `TacticalAI.
+  is_guide_lost` ворот когезии, что уже использует
+  `_resolve_formation_keeping`/`_is_station_kept_formation_member`) --
+  переиспользует ту же идею "классифицировать направление в своей
+  локальной системе", что уже есть в `AttackGeometry`, вместо новой
+  формулы угла.
+* `ship_defense_state.gd` -- новый `ResolutionKind.FORMATION_COVERED` +
+  два новых опциональных bool-параметра `resolve_attack()`
+  (`formation_bow_covered`/`formation_stern_covered`, оба по умолчанию
+  false -- ни один существующий вызов/тест не затронут). Когда у
+  корабля НЕТ действующего sidewall на носу/корме (не поднят ИЛИ
+  выгорел) И сосед прикрывает эту ось -- вместо полного UNPROTECTED
+  (transmitted_fraction 1.0) теперь FORMATION_COVERED с множителем 0.5
+  (ASSUMPTION, честно без канонической опоры, как и остальные плейсхолдеры
+  в этом файле). Сознательно НЕ применяется к уже существующему случаю
+  обхода ПОДНЯТОГО sidewall под острым углом (§41.1) -- отдельная,
+  более узкая область действия этого первого среза.
+* `weapon_resolution.gd`/`missile_resolution.gd` -- новый
+  `Outcome.FORMATION_COVERED` в обоих; `WeaponResolution.fire()` принимает
+  новый опциональный `target_formation_coverage: Dictionary`,
+  `MissileResolution.resolve_detonation()` -- два новых опциональных
+  bool-параметра, оба прокидываются в `resolve_attack()`. Для ракеты с
+  несколькими стержнями (§21.1) `overall_outcome` теперь различает три
+  степени тяжести: HIT_UNPROTECTED (хуже всего) > FORMATION_COVERED >
+  SIDEWALL_ATTENUATED > WEDGE_BLOCKED.
+* `simulation_world.gd` -- два реальных места вызова в живом тик-цикле:
+  `fire_weapon()` (единая точка, через которую идут и прямые вызовы, и
+  `_resolve_weapons_ai`) считает покрытие цели и прокидывает в
+  `WeaponResolution.fire()`; `_update_missiles()` считает то же самое
+  для реально детонирующей ракеты и прокидывает в
+  `MissileResolution.resolve_detonation()`.
+* AGENTS.md §22.1/CLOUD.md §2.11 -- статус обновлён с "ничего не
+  реализовано" на "wedge-половина реализована (2026-09-22), PD-половина
+  и AI-сторона честно остаются открытыми" (PD по-прежнему полностью
+  omnidirectional, никакой firing-arc модели не появилось; AI/
+  целеуказание не читает новую функцию вообще).
+* Тесты: `test_wedge_sidewall.gd` -- 2 новых юнит-теста на
+  `ShipDefenseState.resolve_attack()` напрямую (покрытие ослабляет
+  ранее-полностью-незащищённый нос; покрытие НЕ влияет на случай обхода
+  поднятого sidewall). `test_formation.gd` -- 3 новых теста: чистая
+  геометрия `_formation_bow_stern_coverage()` (сосед на оси близко ->
+  покрытие; сосед слишком далеко -> нет; сосед вне конуса (abeam) ->
+  нет), покрытие отключается при потерянном guide, и один СКВОЗНОЙ тест
+  через реальный `SimulationWorld.tick_simulation()` +
+  `SimulationWorld.fire_weapon()` (два отдельных мира -- с прикрывающим
+  соседом по формации и без -- один и тот же выстрел по нос-баку:
+  FORMATION_COVERED против HIT_UNPROTECTED, урон 50 против 100). Все 30
+  headless-тестовых файлов проекта прогнаны заново (Godot v4.3-stable,
+  эта сессия) -- 0 провалов, включая существующие 123 (было 109)
+  ассерта в test_formation.gd и все существующие ассерты в
+  test_wedge_sidewall.gd/test_weapon_resolution.gd/
+  test_missile_resolution.gd (сигнатуры расширены только опциональными
+  параметрами со значениями по умолчанию -- обратная совместимость
+  подтверждена прогоном, а не только чтением кода).
+
+Честно НЕ сделано (следующие кандидаты по списку пользователя, по
+возрастанию): PD firing-arc/facing модель с нуля; AI/целеуказание,
+предпочитающее непокрытые бреши (§26/§34); формационное прикрытие для
+случая обхода поднятого sidewall под острым углом; data-driven база
+классов кораблей/оружия (§8/§48); intercept-vector solver (общий для
+§34.2/§41.1).

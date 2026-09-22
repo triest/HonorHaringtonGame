@@ -12,6 +12,8 @@ const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const HullState = preload("res://simulation/hull_state.gd")
 const WeaponData = preload("res://simulation/weapon_data.gd")
 const WeaponMount = preload("res://simulation/weapon_mount.gd")
+const AttackGeometry = preload("res://simulation/attack_geometry.gd")
+const WeaponResolution = preload("res://simulation/weapon_resolution.gd")
 
 var _failures: int = 0
 var _passed: int = 0
@@ -872,6 +874,110 @@ func _test_formation_target_assignment_avoids_overcommitting_to_one_target() -> 
 ## this tick -- members fall back to independent selection, exactly like
 ## before this pass existed (honest scope: no phantom coordinator for a
 ## headless formation).
+
+## §22.1 Formation mutual defensive coverage -- geometry-only checks on
+## SimulationWorld._formation_bow_stern_coverage, isolated from weapon
+## resolution. Guide at the origin, identity orientation (local -Z bow).
+func _test_formation_bow_stern_coverage_geometry() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	var on_axis_wing := _make_ship(Vector3(0, 0, -500))    # dead ahead, close: should cover the bow
+	var far_wing := _make_ship(Vector3(0, 0, -50_000))     # dead ahead, too far: should NOT cover
+	var off_cone_wing := _make_ship(Vector3(500, 0, 0))    # abeam (starboard), close: should NOT cover bow or stern
+	world.add_ship("guide", guide)
+	world.add_ship("on_axis_wing", on_axis_wing)
+	world.add_ship("far_wing", far_wing)
+	world.add_ship("off_cone_wing", off_cone_wing)
+	world.hulls["guide"] = HullState.new()
+
+	var formation := world.add_formation("wall", "guide")
+	formation.set_station("on_axis_wing", Vector3(0, 0, -500))
+	formation.set_station("far_wing", Vector3(0, 0, -50_000))
+	formation.set_station("off_cone_wing", Vector3(500, 0, 0))
+
+	var coverage: Dictionary = world._formation_bow_stern_coverage("guide")
+	_assert(coverage.bow, "a formation-mate close on the bow axis should cover the guide's bow gap")
+	_assert(not coverage.stern, "a bow-side neighbor should not also register as stern coverage")
+
+	# Isolate the far/off-cone neighbors: remove the on-axis one and retest.
+	formation.remove_member("on_axis_wing")
+	world.ships.erase("on_axis_wing")
+	var coverage_far_only: Dictionary = world._formation_bow_stern_coverage("guide")
+	_assert(not coverage_far_only.bow, "a formation-mate beyond FORMATION_COVERAGE_MAX_DISTANCE_M should not count as coverage")
+
+	formation.remove_member("far_wing")
+	world.ships.erase("far_wing")
+	var coverage_off_cone_only: Dictionary = world._formation_bow_stern_coverage("guide")
+	_assert(not coverage_off_cone_only.bow and not coverage_off_cone_only.stern, "a formation-mate abeam (outside the bow/stern cone) should not count as coverage")
+
+## §22.1: a formation with no valid guide provides NO mutual coverage at
+## all, same cohesion gate `_is_station_kept_formation_member` already
+## uses elsewhere in this file.
+func _test_formation_bow_stern_coverage_skipped_when_guide_lost() -> void:
+	var world := SimulationWorld.new()
+	var member := _make_ship(Vector3.ZERO)
+	var wing := _make_ship(Vector3(0, 0, -500))
+	world.add_ship("member", member)
+	world.add_ship("wing", wing)
+
+	var formation := world.add_formation("wall", "guide_gone")  # guide never added -> lost
+	formation.set_station("member", Vector3(1000, 0, 0))
+	formation.set_station("wing", Vector3(0, 0, -500))
+
+	var coverage: Dictionary = world._formation_bow_stern_coverage("member")
+	_assert(not coverage.bow and not coverage.stern, "a formation with no valid guide should provide no bow/stern coverage to any member")
+
+## §22.1, end-to-end through the real tick loop + SimulationWorld.fire_weapon:
+## an otherwise-unprotected bow shot against a ship with a covering
+## formation neighbor resolves FORMATION_COVERED and deals strictly less
+## damage than the identical shot against a ship with no formation at all.
+func _test_formation_covered_bow_gap_reduces_damage_through_tick_pipeline() -> void:
+	var all_arcs: Array = [AttackGeometry.Sector.BOW, AttackGeometry.Sector.STERN, AttackGeometry.Sector.PORT, AttackGeometry.Sector.STARBOARD, AttackGeometry.Sector.TOP, AttackGeometry.Sector.BOTTOM]
+
+	var covered_world := SimulationWorld.new()
+	var covered_guide := _make_ship(Vector3.ZERO)
+	covered_guide.defense.bow_sidewall_raised = false
+	var covering_wing := _make_ship(Vector3(0, 0, -500))
+	covered_world.add_ship("guide", covered_guide)
+	covered_world.add_ship("wing", covering_wing)
+	covered_world.hulls["guide"] = HullState.new()
+	var covered_formation := covered_world.add_formation("wall", "guide")
+	covered_formation.set_station("wing", Vector3(0, 0, -500))
+	var attacker_a := _make_ship(Vector3(0, 0, -5000))
+	covered_world.add_ship("hostile", attacker_a)
+	var weapon_a := WeaponData.new()
+	weapon_a.damage_per_hit = 100.0
+	weapon_a.max_range_m = 500_000.0
+	weapon_a.recharge_time_s = 0.0
+	var mount_a := WeaponMount.new(weapon_a, all_arcs)
+	covered_world.add_weapon_mount("hostile", mount_a)
+
+	covered_world.tick_simulation(1.0 / 60.0)  # full pipeline, no opposing teams set -> no AI auto-fire yet
+	var covered_result = covered_world.fire_weapon("hostile", mount_a, "guide")
+
+	var uncovered_world := SimulationWorld.new()
+	var uncovered_guide := _make_ship(Vector3.ZERO)
+	uncovered_guide.defense.bow_sidewall_raised = false
+	uncovered_world.add_ship("guide", uncovered_guide)
+	uncovered_world.hulls["guide"] = HullState.new()
+	var attacker_b := _make_ship(Vector3(0, 0, -5000))
+	uncovered_world.add_ship("hostile", attacker_b)
+	var weapon_b := WeaponData.new()
+	weapon_b.damage_per_hit = 100.0
+	weapon_b.max_range_m = 500_000.0
+	weapon_b.recharge_time_s = 0.0
+	var mount_b := WeaponMount.new(weapon_b, all_arcs)
+	uncovered_world.add_weapon_mount("hostile", mount_b)
+
+	uncovered_world.tick_simulation(1.0 / 60.0)
+	var uncovered_result = uncovered_world.fire_weapon("hostile", mount_b, "guide")
+
+	_assert(covered_result.outcome == WeaponResolution.Outcome.FORMATION_COVERED, "a guide with a covering wing on its bow axis should resolve FORMATION_COVERED")
+	_assert(uncovered_result.outcome == WeaponResolution.Outcome.HIT_UNPROTECTED, "a guide with no formation at all should keep the old HIT_UNPROTECTED bow-gap outcome")
+	_assert(covered_result.damage_dealt < uncovered_result.damage_dealt, "formation-covered bow gap should take strictly less damage than the same shot with no covering neighbor")
+	_assert(is_equal_approx(covered_result.damage_dealt, 50.0), "covered damage should match the documented 0.5 transmitted-fraction multiplier (100 base damage * 1.0 mount condition * 0.5)")
+	_assert(is_equal_approx(uncovered_result.damage_dealt, 100.0), "uncovered damage should be the full base damage, unchanged from pre-§22.1 behavior")
+
 func _test_formation_target_assignment_skipped_when_guide_lost() -> void:
 	var world := SimulationWorld.new()
 
@@ -932,6 +1038,10 @@ func _init() -> void:
 
 	_test_formation_target_assignment_avoids_overcommitting_to_one_target()
 	_test_formation_target_assignment_skipped_when_guide_lost()
+
+	_test_formation_bow_stern_coverage_geometry()
+	_test_formation_bow_stern_coverage_skipped_when_guide_lost()
+	_test_formation_covered_bow_gap_reduces_damage_through_tick_pipeline()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

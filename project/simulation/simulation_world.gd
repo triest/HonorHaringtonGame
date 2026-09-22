@@ -97,6 +97,23 @@ var _tick_index: int = 0
 const CRITICAL_HULL_FRACTION: float = 0.3
 const MAX_USEFUL_ATTACKERS_PER_TARGET: int = 2  # §34.1 Doubling -- ASSUMPTION, see TacticalAI.select_formation_target_for_member doc comment
 
+## §22.1 Formation mutual defensive coverage -- ASSUMPTION (no canonical
+## figures for either; see _formation_bow_stern_coverage doc comment and
+## ASSUMPTIONS.md for the full reasoning). A formation neighbor further
+## than this from the ship being screened is not considered close enough
+## to plausibly interpose its own defensive envelope -- station spacing
+## used elsewhere in this codebase's own tests/scenarios is on the order
+## of hundreds of meters (a tight "wall of battle"), so a multi-kilometer
+## cap is deliberately generous rather than tuned tight. The cone half-
+## width is independent of, and wider than,
+## ShipDefenseState.BOW_STERN_ACUTE_ANGLE_HALF_WIDTH_RAD (15 deg) -- that
+## constant is about how narrow an attack angle bypasses ONE ship's own
+## raised sidewall; this one is about how far off-axis a COVERING
+## NEIGHBOR can sit and still plausibly screen the gap, a geometrically
+## distinct and looser question.
+const FORMATION_COVERAGE_MAX_DISTANCE_M: float = 5000.0
+const FORMATION_COVERAGE_CONE_HALF_WIDTH_RAD: float = deg_to_rad(30.0)
+
 ## ASSUMPTION (§33 Formation Leader, step 4 "account for communication
 ## limitations" -- see FormationState.guide_lost_since for why this is
 ## deliberately NOT a light-speed command-lag figure per CANON_RULES.md
@@ -446,7 +463,8 @@ func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 	var target = ships.get(target_ship_id)
 	if attacker == null or target == null:
 		return null
-	var result = WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems)
+	var formation_coverage: Dictionary = _formation_bow_stern_coverage(target_ship_id)
+	var result = WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems, formation_coverage)
 	if result != null and result.outcome == WeaponResolution.Outcome.HIT_UNPROTECTED and result.damage_dealt > 0.0:
 		_record_event("weapon_hit", {"attacker_ship_id": attacker_ship_id, "target_ship_id": target_ship_id, "damage_dealt": result.damage_dealt})
 	return result
@@ -582,12 +600,14 @@ func _update_missiles(dt: float) -> void:
 			var target = missile.target
 			var target_hull = null
 			var target_subsystems = null
+			var target_formation_coverage: Dictionary = {}
 			for ship_id in ships.keys():
 				if ships[ship_id] == target:
 					target_hull = hulls.get(ship_id)
 					target_subsystems = ships[ship_id].subsystems
+					target_formation_coverage = _formation_bow_stern_coverage(ship_id)
 					break
-			MissileResolution.resolve_detonation(missile, target_hull, target_subsystems)
+			MissileResolution.resolve_detonation(missile, target_hull, target_subsystems, target_formation_coverage.get("bow", false), target_formation_coverage.get("stern", false))
 
 ## ТЗ §20: any missile whose target is itself another (incoming) missile
 ## is a counter-missile -- check whether it has closed to kill radius.
@@ -1487,6 +1507,89 @@ func _is_station_kept_formation_member(ship_id: String) -> bool:
 			continue
 		return not TacticalAI.is_guide_lost(formation.guide_ship_id, ships, hulls, CRITICAL_HULL_FRACTION)
 	return false
+
+## §22.1 Formation mutual defensive coverage -- first slice. Returns
+## {"bow": bool, "stern": bool}: whether `ship_id` currently has a living,
+## non-wreck formation neighbor (any OTHER member of the same formation,
+## guide included) positioned within FORMATION_COVERAGE_MAX_DISTANCE_M
+## and within FORMATION_COVERAGE_CONE_HALF_WIDTH_RAD of its own bow
+## (resp. stern) axis -- close enough and nearly enough in line to
+## plausibly interpose that neighbor's own wedge/sidewall geometry
+## between an attacker and this ship's otherwise-undefended bow/stern
+## gap (AGENTS.md §22.1: "keeping close formation station lets a
+## neighboring ship's ... wedge/sidewall aspect cover an arc that the
+## first ship's own systems cannot reach").
+##
+## Reuses the SAME "classify the direction to another position in MY
+## local frame" idea AttackGeometry.classify already provides for attack
+## geometry, rather than inventing a second angle formula -- a neighbor
+## is "on my bow" in exactly the sense an attacker would be.
+##
+## Cohesion gate, same as `_is_station_kept_formation_member` and every
+## other §33/§33.1-aware pass in this file: a formation whose guide is
+## currently lost (TacticalAI.is_guide_lost) provides NO coverage at all,
+## for EITHER its guide or its members -- a broken formation's mutual
+## defense is genuinely gone, not just cosmetically (AGENTS.md §22.1:
+## "when formation integrity breaks ... the mutual coverage those
+## neighbors were providing ... is genuinely lost"). Unlike
+## `_is_station_kept_formation_member`, the ship being screened MAY be
+## the guide itself here -- coverage is symmetric between guide and
+## members (the guide benefits from a covering member exactly as a
+## member benefits from a covering guide or another member); only the
+## MOVEMENT authority `_is_station_kept_formation_member` answers is
+## guide-vs-member-asymmetric, not defensive coverage.
+##
+## HONEST SCOPE LIMITS (see ASSUMPTIONS.md for the full write-up): only
+## mitigates the "no functioning sidewall of this ship's own" bow/stern
+## case (ShipDefenseState's FORMATION_COVERED path), not the separate
+## raised-sidewall acute-angle-bypass case; no PD firing-arc model exists
+## yet (AGENTS.md §22.1's own honest-gap paragraph), so PD engagement
+## itself is entirely unaffected by this function -- only wedge/sidewall
+## resolution reads it, via `_formation_bow_stern_coverage`'s two callers
+## below (`fire_weapon` and `_update_missiles`).
+func _formation_bow_stern_coverage(ship_id: String) -> Dictionary:
+	var result: Dictionary = {"bow": false, "stern": false}
+	var ship: ShipPhysicsState = ships.get(ship_id)
+	if ship == null or ship.is_wreck:
+		return result
+
+	var formation: FormationState = null
+	for formation_id in formations.keys():
+		var f: FormationState = formations[formation_id]
+		if f.guide_ship_id == ship_id or f.member_ids().has(ship_id):
+			formation = f
+			break
+	if formation == null:
+		return result
+	if TacticalAI.is_guide_lost(formation.guide_ship_id, ships, hulls, CRITICAL_HULL_FRACTION):
+		return result
+
+	var neighbor_ids: Array = formation.member_ids().duplicate()
+	if not neighbor_ids.has(formation.guide_ship_id):
+		neighbor_ids.append(formation.guide_ship_id)
+	neighbor_ids.erase(ship_id)
+
+	for neighbor_id in neighbor_ids:
+		if result.bow and result.stern:
+			break
+		var neighbor: ShipPhysicsState = ships.get(neighbor_id)
+		if neighbor == null or neighbor.is_wreck:
+			continue
+		if ship.position.distance_to(neighbor.position) > FORMATION_COVERAGE_MAX_DISTANCE_M:
+			continue
+
+		var world_dir: Vector3 = neighbor.position - ship.position
+		if world_dir.length_squared() <= 0.0:
+			continue
+		world_dir = world_dir.normalized()
+		var local_dir: Vector3 = ship.orientation.inverse() * world_dir
+
+		if not result.bow and local_dir.angle_to(Vector3(0, 0, -1)) <= FORMATION_COVERAGE_CONE_HALF_WIDTH_RAD:
+			result.bow = true
+		if not result.stern and local_dir.angle_to(Vector3(0, 0, 1)) <= FORMATION_COVERAGE_CONE_HALF_WIDTH_RAD:
+			result.stern = true
+
+	return result
 
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting

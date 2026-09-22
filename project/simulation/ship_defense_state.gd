@@ -70,10 +70,28 @@ const BOW_STERN_ACUTE_ANGLE_HALF_WIDTH_RAD: float = deg_to_rad(15.0)
 ## kinetic-specific canon figure exists either -- see ASSUMPTIONS.md.
 const LASERHEAD_SIDEWALL_PENETRATION_MULTIPLIER: float = 1.5
 
+## ТЗ §22.1 Formation mutual defensive coverage -- first slice. ASSUMPTION
+## (no canonical numeric factor found, same honest-placeholder status as
+## every other bare number in this file): when a formation neighbor is
+## positioned to plausibly interpose its own wedge/sidewall envelope
+## along this ship's otherwise-undefended bow or stern axis (computed by
+## SimulationWorld._formation_bow_stern_coverage -- this class itself
+## knows nothing about formations, only receives the two resulting
+## booleans, same separation of concerns as everywhere else in this
+## file), the transmitted fraction of an attack that would otherwise be
+## fully UNPROTECTED (no sidewall raised, or sidewall burned out) is cut
+## by half rather than passing through untouched. Deliberately narrower
+## than the acute-angle sidewall-bypass case below: this first slice only
+## mitigates the "no functioning bow/stern wall at all" gap §22.1's own
+## honest-gap paragraph names, not the separate raised-sidewall bypass
+## mechanic, which stays exactly as it was pre-§22.1.
+const FORMATION_COVERAGE_TRANSMITTED_FRACTION_WHEN_UNPROTECTED: float = 0.5
+
 enum ResolutionKind {
 	WEDGE_BLOCKED,       ## TOP/BOTTOM, wedge up: effectively impenetrable.
 	SIDEWALL_ATTENUATED, ## PORT/STARBOARD (or raised bow/stern): reduced by sidewall condition.
 	UNPROTECTED,         ## BOW/STERN with no sidewall raised, or wedge down on TOP/BOTTOM.
+	FORMATION_COVERED,   ## §22.1: BOW/STERN gap with no functioning sidewall of its own, but a covering formation neighbor reduces (does not eliminate) the transmitted fraction.
 }
 
 class AttackResolution:
@@ -90,7 +108,13 @@ class AttackResolution:
 ## caller passes attacker/target positions and target orientation, matching
 ## AttackGeometry.classify's signature, plus the local-space attack vector
 ## angle-to-axis for the bow/stern acute-angle check.
-func resolve_attack(attacker_position: Vector3, target_position: Vector3, target_orientation: Quaternion, damage_type: int = DamageType.Type.ENERGY) -> AttackResolution:
+## formation_bow_covered / formation_stern_covered (ТЗ §22.1, both
+## default false so every pre-existing caller/test is byte-for-byte
+## unaffected): whether a formation neighbor is currently positioned to
+## cover this ship's bow (resp. stern) gap this tick -- see the class doc
+## on FORMATION_COVERAGE_TRANSMITTED_FRACTION_WHEN_UNPROTECTED above.
+## Irrelevant to every sector other than BOW/STERN.
+func resolve_attack(attacker_position: Vector3, target_position: Vector3, target_orientation: Quaternion, damage_type: int = DamageType.Type.ENERGY, formation_bow_covered: bool = false, formation_stern_covered: bool = false) -> AttackResolution:
 	var sector := AttackGeometry.classify(attacker_position, target_position, target_orientation)
 
 	match sector:
@@ -105,9 +129,9 @@ func resolve_attack(attacker_position: Vector3, target_position: Vector3, target
 			return _resolve_broadside(sector, starboard_sidewall_condition, damage_type)
 
 		AttackGeometry.Sector.BOW:
-			return _resolve_bow_stern(sector, attacker_position, target_position, target_orientation, bow_sidewall_raised, bow_sidewall_condition, true, damage_type)
+			return _resolve_bow_stern(sector, attacker_position, target_position, target_orientation, bow_sidewall_raised, bow_sidewall_condition, true, damage_type, formation_bow_covered)
 		AttackGeometry.Sector.STERN:
-			return _resolve_bow_stern(sector, attacker_position, target_position, target_orientation, stern_sidewall_raised, stern_sidewall_condition, false, damage_type)
+			return _resolve_bow_stern(sector, attacker_position, target_position, target_orientation, stern_sidewall_raised, stern_sidewall_condition, false, damage_type, formation_stern_covered)
 
 	return AttackResolution.new(sector, ResolutionKind.UNPROTECTED, 1.0)
 
@@ -129,10 +153,15 @@ func _resolve_broadside(sector: AttackGeometry.Sector, condition: float, damage_
 	var transmitted: float = clampf((1.0 - condition) * _penetration_multiplier(damage_type), 0.0, 1.0)
 	return AttackResolution.new(sector, ResolutionKind.SIDEWALL_ATTENUATED, transmitted)
 
-func _resolve_bow_stern(sector: AttackGeometry.Sector, attacker_position: Vector3, target_position: Vector3, target_orientation: Quaternion, raised: bool, condition: float, is_bow: bool, damage_type: int) -> AttackResolution:
-	if not raised:
-		return AttackResolution.new(sector, ResolutionKind.UNPROTECTED, 1.0)
-	if condition <= SIDEWALL_BURNOUT_THRESHOLD:
+func _resolve_bow_stern(sector: AttackGeometry.Sector, attacker_position: Vector3, target_position: Vector3, target_orientation: Quaternion, raised: bool, condition: float, is_bow: bool, damage_type: int, formation_covered: bool = false) -> AttackResolution:
+	if not raised or condition <= SIDEWALL_BURNOUT_THRESHOLD:
+		# §22.1: no functioning sidewall of this ship's own on this axis at
+		# all -- if a formation neighbor is covering the gap, mitigate it
+		# (still worse than a raised sidewall would be); otherwise unchanged
+		# pre-§22.1 behavior.
+		if formation_covered:
+			var covered_fraction: float = clampf(FORMATION_COVERAGE_TRANSMITTED_FRACTION_WHEN_UNPROTECTED * _penetration_multiplier(damage_type), 0.0, 1.0)
+			return AttackResolution.new(sector, ResolutionKind.FORMATION_COVERED, covered_fraction)
 		return AttackResolution.new(sector, ResolutionKind.UNPROTECTED, 1.0)
 
 	# CANON: first-stage bow/stern wall is vulnerable to acute-angle beams

@@ -1893,3 +1893,97 @@ uses for CHANGE_COURSE/CHANGE_SPEED (clamp accel magnitude to
 `min(max_accel, error_mag / dt)`, then transform into the ship's own
 frame) -- reused rather than reinvented, for the same reason the turn
 logic was extracted rather than duplicated.
+
+## Formation mutual defensive coverage, first slice (§22.1, 2026-09-22)
+
+Scoped deliberately narrow, same pattern as every other first-slice
+entry in this file: implements the WEDGE half of §22.1's honest gap
+(AGENTS.md §22.1's own paragraph named two prerequisites -- a PD/wedge
+firing-arc model, and a formation-level coverage check -- this pass
+builds the second one and wires it only into the wedge/sidewall path
+that already had directional geometry (§41.1's bow/stern gap), not into
+PD, which still has no firing-arc concept of its own at all).
+
+`SimulationWorld._formation_bow_stern_coverage(ship_id)` is the new
+formation-level check. It deliberately reuses `AttackGeometry`'s own
+"classify a direction relative to my local frame" idea rather than
+inventing a second angle formula: a neighbor is "on my bow" in exactly
+the geometric sense an attacker would be, computed via the same
+`orientation.inverse() * world_dir` + `angle_to` pattern `ShipDefenseState.
+_resolve_bow_stern` already uses for its own acute-angle check, just
+against a formation-mate's position instead of an attacker's. Two
+ASSUMPTION constants gate it, both documented in place rather than bare
+numbers: `FORMATION_COVERAGE_MAX_DISTANCE_M` (5000 m -- generous
+relative to the ~500 m station spacing this codebase's own formation
+tests already use, so it does not need re-tuning as formations get
+denser) and `FORMATION_COVERAGE_CONE_HALF_WIDTH_RAD` (30 deg -- wider
+than, and independent of, `ShipDefenseState.
+BOW_STERN_ACUTE_ANGLE_HALF_WIDTH_RAD`'s 15 deg, because that constant
+answers a different question: how narrow an attack angle bypasses ONE
+ship's own raised sidewall, not how far off-axis a covering NEIGHBOR can
+sit and still plausibly screen the gap).
+
+Cohesion gate: identical cohesion test to `_is_station_kept_formation_
+member` (`TacticalAI.is_guide_lost`) -- a formation with no currently
+valid guide provides NO coverage to ANYONE in it, guide or member, for
+the same reason `_resolve_formation_keeping` itself stops station-
+keeping during that window: AGENTS.md §22.1 is explicit that "when
+formation integrity breaks ... the mutual coverage those neighbors were
+providing for each other's gaps is genuinely lost, not just
+cosmetically." Unlike `_is_station_kept_formation_member`, though,
+coverage here is symmetric between guide and members -- the guide
+benefits from a covering member's wedge/sidewall exactly as a member
+benefits from the guide's (or another member's); only MOVEMENT authority
+is guide-vs-member-asymmetric in this codebase, not mutual defense.
+
+`ShipDefenseState.resolve_attack()` takes the result as two new,
+default-false optional bool params (`formation_bow_covered`/
+`formation_stern_covered`), so every pre-existing caller/test that never
+passes them is byte-for-byte unaffected -- the same backward-
+compatible-optional-parameter pattern this file already uses repeatedly
+(sensor_contact on `PointDefenseResolution.engage`, target_subsystems on
+`WeaponResolution.fire`/`MissileResolution.resolve_detonation`).
+`_resolve_bow_stern` merges the two pre-existing "no functioning
+sidewall" checks (`not raised` OR `condition <= 
+SIDEWALL_BURNOUT_THRESHOLD`) into one branch, since both represent the
+same physical situation -- no wall up on this axis right now -- and
+formation coverage treats them identically: with a covering neighbor,
+that branch now returns `ResolutionKind.FORMATION_COVERED` at a fixed
+0.5 transmitted-fraction multiplier (further reduced by the existing
+LASERHEAD penetration multiplier, same clamp-to-[0,1] as every other
+transmitted-fraction calculation in this file) instead of the old flat
+1.0 UNPROTECTED. Deliberately does NOT touch the separate raised-
+sidewall acute-angle-bypass branch a few lines below -- that mechanic
+already has its own (different) mitigation, a raised sidewall, and
+extending formation coverage to stack on top of it was judged
+out-of-scope for this first slice (see ASSUMPTIONS.md for the boundary
+list).
+
+Wiring into the live tick loop is two call sites, both computing the
+coverage dict fresh each time they need it (formation membership/
+positions can change tick to tick, and the ship counts this simulator
+targets make a fresh O(formation size) scan a non-issue -- no caching
+layer was worth adding): `SimulationWorld.fire_weapon()` (the single
+choke point both direct calls and `_resolve_weapons_ai` already funnel
+through) computes `_formation_bow_stern_coverage(target_ship_id)` and
+forwards it into `WeaponResolution.fire()`'s new `target_formation_
+coverage: Dictionary` param; `_update_missiles()` computes the same for
+a detonating missile's actual target ship and forwards the two booleans
+into `MissileResolution.resolve_detonation()`'s new params. Both
+`WeaponResolution.Outcome` and `MissileResolution.Outcome` gained a
+`FORMATION_COVERED` value (missile's multi-rod `overall_outcome`
+prioritizes it above plain `SIDEWALL_ATTENUATED` but below true
+`HIT_UNPROTECTED`, matching the actual severity ordering: a covered gap
+is worse for the defender than a working sidewall, better than no
+coverage at all) so callers/tests/future UI can tell "hit because no one
+was covering me" apart from "hit despite a working sidewall" apart from
+"hit despite a covering neighbor" -- three genuinely different tactical
+situations, not one bucket.
+
+Honest scope boundary carried forward from AGENTS.md §22.1's own text:
+PD (`PointDefenseMount`/`PointDefenseResolution`) is completely
+unaffected by this pass -- it remains omnidirectional, with no arc
+concept to extend at all yet. AI/targeting (§26/§34) also does not read
+`_formation_bow_stern_coverage` -- an attacking AI has no way yet to
+prefer an enemy's currently-uncovered gap over a covered one. Both are
+real, named, un-implemented next steps, not silently skipped.

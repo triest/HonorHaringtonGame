@@ -19,7 +19,7 @@ const AttackGeometry = preload("res://simulation/attack_geometry.gd")
 const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const SubsystemDamageResolution = preload("res://simulation/subsystem_damage_resolution.gd")
 
-enum Outcome { OUT_OF_RANGE, NOT_READY, NO_ARC, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, HIT_UNPROTECTED }
+enum Outcome { OUT_OF_RANGE, NOT_READY, NO_ARC, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, FORMATION_COVERED, HIT_UNPROTECTED }
 
 class ShotResult:
 	var outcome: int
@@ -39,7 +39,12 @@ class ShotResult:
 ## target_subsystems: optional ShipSubsystems (ТЗ §25) belonging to
 ## target_ship; when provided, a penetrating hit also degrades a
 ## sector-appropriate subsystem (see SubsystemDamageResolution).
-static func fire(attacker_ship, mount, target_ship, target_hull, target_subsystems = null) -> ShotResult:
+## target_formation_coverage: optional Dictionary (ТЗ §22.1, computed by
+## SimulationWorld._formation_bow_stern_coverage) with "bow"/"stern" bool
+## keys -- whether a formation neighbor currently covers target_ship's
+## bow/stern gap this tick. Missing keys default to false, so every
+## pre-existing caller/test (which never passes this) is unaffected.
+static func fire(attacker_ship, mount, target_ship, target_hull, target_subsystems = null, target_formation_coverage: Dictionary = {}) -> ShotResult:
 	if mount == null or mount.weapon == null:
 		return ShotResult.new(Outcome.NOT_READY)
 
@@ -70,7 +75,7 @@ static func fire(attacker_ship, mount, target_ship, target_hull, target_subsyste
 		var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, full_damage, null)
 		return ShotResult.new(Outcome.HIT_UNPROTECTED, full_damage, null, sub_damage)
 
-	var resolution = defense.resolve_attack(attacker_ship.position, target_ship.position, target_ship.orientation, ShipDefenseState.DamageType.Type.ENERGY)
+	var resolution = defense.resolve_attack(attacker_ship.position, target_ship.position, target_ship.orientation, ShipDefenseState.DamageType.Type.ENERGY, target_formation_coverage.get("bow", false), target_formation_coverage.get("stern", false))
 	var damage: float = mount.weapon.damage_per_hit * mount.condition * resolution.transmitted_fraction
 
 	if damage > 0.0 and target_hull != null:
@@ -81,6 +86,8 @@ static func fire(attacker_ship, mount, target_ship, target_hull, target_subsyste
 		outcome = Outcome.WEDGE_BLOCKED
 	elif resolution.kind == ShipDefenseState.ResolutionKind.SIDEWALL_ATTENUATED:
 		outcome = Outcome.SIDEWALL_ATTENUATED
+	elif resolution.kind == ShipDefenseState.ResolutionKind.FORMATION_COVERED:
+		outcome = Outcome.FORMATION_COVERED
 
 	var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, damage, resolution.sector)
 	return ShotResult.new(outcome, damage, resolution.sector, sub_damage)

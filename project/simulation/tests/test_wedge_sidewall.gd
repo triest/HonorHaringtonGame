@@ -16,6 +16,8 @@ func _init() -> void:
 	failures += _test_bow_unprotected_when_not_raised()
 	failures += _test_bow_sidewall_blocks_thrust()
 	failures += _test_laserhead_penetrates_sidewall_more_than_energy()
+	failures += _test_formation_coverage_mitigates_unprotected_bow_gap()
+	failures += _test_formation_coverage_does_not_help_a_raised_sidewall_bypass()
 
 	if failures == 0:
 		print("ALL TESTS PASSED")
@@ -100,6 +102,45 @@ func _test_bow_unprotected_when_not_raised() -> int:
 	var ok: bool = res.kind == ShipDefenseState.ResolutionKind.UNPROTECTED
 	if not ok:
 		printerr("FAIL bow_unprotected_when_not_raised")
+		return 1
+	return 0
+
+## ТЗ §22.1 first slice: with a covering formation neighbor, the same
+## otherwise-unprotected bow shot is attenuated instead of transmitting
+## in full, and is labeled FORMATION_COVERED (not plain UNPROTECTED) so
+## callers/tests can tell the two apart.
+func _test_formation_coverage_mitigates_unprotected_bow_gap() -> int:
+	var defense := ShipDefenseState.new()
+	defense.bow_sidewall_raised = false
+	var uncovered := defense.resolve_attack(Vector3(0, 0, -1000), Vector3.ZERO, Quaternion.IDENTITY)
+	var covered := defense.resolve_attack(Vector3(0, 0, -1000), Vector3.ZERO, Quaternion.IDENTITY, ShipDefenseState.DamageType.Type.ENERGY, true, false)
+	var ok: bool = uncovered.kind == ShipDefenseState.ResolutionKind.UNPROTECTED
+	ok = ok and is_equal_approx(uncovered.transmitted_fraction, 1.0)
+	ok = ok and covered.kind == ShipDefenseState.ResolutionKind.FORMATION_COVERED
+	ok = ok and is_equal_approx(covered.transmitted_fraction, 0.5)
+	ok = ok and covered.transmitted_fraction < uncovered.transmitted_fraction
+	if not ok:
+		printerr("FAIL formation_coverage_mitigates_unprotected_bow_gap")
+		return 1
+	return 0
+
+## Deliberate first-slice scope limit (see ASSUMPTIONS.md/AGENTS.md §22.1):
+## formation coverage only helps the "no functioning sidewall at all"
+## case above. A RAISED sidewall's own acute-angle bypass mechanic is
+## untouched by the formation_bow_covered flag -- passing it makes no
+## difference to that path's own numbers.
+func _test_formation_coverage_does_not_help_a_raised_sidewall_bypass() -> int:
+	var defense := ShipDefenseState.new()
+	defense.bow_sidewall_raised = true
+	defense.bow_sidewall_condition = 1.0
+	# Dead-ahead attack: inside the acute-angle bypass cone.
+	var without_coverage := defense.resolve_attack(Vector3(0, 0, -1000), Vector3.ZERO, Quaternion.IDENTITY)
+	var with_coverage := defense.resolve_attack(Vector3(0, 0, -1000), Vector3.ZERO, Quaternion.IDENTITY, ShipDefenseState.DamageType.Type.ENERGY, true, false)
+	var ok: bool = without_coverage.kind == ShipDefenseState.ResolutionKind.SIDEWALL_ATTENUATED
+	ok = ok and with_coverage.kind == ShipDefenseState.ResolutionKind.SIDEWALL_ATTENUATED
+	ok = ok and is_equal_approx(without_coverage.transmitted_fraction, with_coverage.transmitted_fraction)
+	if not ok:
+		printerr("FAIL formation_coverage_does_not_help_a_raised_sidewall_bypass")
 		return 1
 	return 0
 

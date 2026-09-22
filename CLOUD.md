@@ -87,6 +87,27 @@ Physics and damage run through the exact same code/formulas for every ship regar
 * Every extrapolated value records its anchor + step used, not just
   the number. Disagreeing independent estimates -> UNKNOWN, not an
   average or arbitrary pick.
+## 1.8. TOP PRIORITY: FASTEST PATH TO PLAYABLE (AGENTS.md §56.1)
+* User priority (2026-09-22): a playable vertical slice now outranks
+  Milestones 12-17 and further simulation-layer polish. Simulation
+  core (Milestones 1-11) is strong and well-tested but there is ZERO
+  visual/input/UI layer -- no camera, ship meshes, controls, or HUD.
+* Minimum scope: camera + placeholder ship geometry (correct wedge/
+  sidewall geometry, NOT canon-accurate hull art yet -- §7's
+  documented-interpretation allowance, logged as a placeholder to
+  replace later); simple weapon-fire visuals (rendering only, per
+  §42); minimal §25.1-compliant HUD (subsystem condition readout,
+  target, sensor contacts) pulled straight from existing state; input
+  wired directly to existing `FormationOrder`/`IndividualOrder`/
+  `ShipCombatDirective` APIs; ONE hardcoded starting scenario (not
+  Milestone 13's general loader); simple win/lose using existing §63
+  destruction state; a rough Windows export.
+* Explicitly deferred until the slice works: hull art, sound, menu
+  polish, the general Scenario system/editor, Replay (already
+  deprioritized), large-fleet performance, further command-echelon UI,
+  and any NEW simulation mechanic -- this is about surfacing what
+  already exists, not adding backend features.
+
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

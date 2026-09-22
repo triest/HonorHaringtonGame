@@ -2030,6 +2030,82 @@ returning to Milestone 12. The existing first-slice Replay code
 stays as-is; it is paused, not reverted. Revisit Milestone 12 once
 13-17 are underway or done, or if the user says otherwise.
 
+## 56.1 Fastest path to a playable version (vertical slice) -- OVERRIDES the numeric order below until done
+
+User priority (2026-09-22): get to something a person can actually
+open and play as soon as possible, not just a well-tested headless
+simulation core. As of this pass the project has a strong, well-tested
+simulation layer (Milestones 1-11 largely done, 32 headless test
+files) but ZERO visual/input/UI layer -- no camera, no ship meshes, no
+player controls, nothing a human can see or click. That gap, not
+missing combat mechanics, is what stands between "well-implemented
+simulator" and "playable game" -- closing it is now the TOP priority,
+ahead of Milestones 12-17 and ahead of any further simulation-layer
+polish, EXCEPT for fixing an already-logged correctness bug if one
+blocks this slice.
+
+**Scope of the vertical slice -- the minimum that counts as
+"playable":**
+
+1. One Godot scene with a camera the player can see the battle
+   through (free/orbit camera is enough -- no cinematic camera work).
+2. Ship representation as SIMPLE PLACEHOLDER geometry (primitive
+   meshes -- capsule/box hull, flat/translucent panels for wedge
+   top/bottom and port/starboard sidewalls) that correctly reflects
+   §9/§10's geometry (orientation-linked wedge/sidewall planes, real
+   bow/stern/broadside directions) WITHOUT canon-accurate hull
+   modeling yet. This is an explicitly TEMPORARY placeholder under
+   §7's own "unknown visual details may be interpreted, but the
+   interpretation must be documented" allowance -- log it in
+   ASSUMPTIONS.md as a placeholder to replace before Milestone 17
+   polish, not as a finished art pass.
+3. Simple, non-polished visualization of weapon fire (a line/beam for
+   energy weapons, a simple moving mesh for missiles) purely so a
+   player can SEE combat happening. Per §42, rendering only displays
+   already-resolved simulation state -- it must not invent its own
+   hit/damage logic.
+4. A minimal HUD, §25.1-compliant (no health bars): a plain readout of
+   per-ship subsystem condition (e.g. text list "SENSORS 40%"), current
+   target designation, and the sensor contact list -- pull this
+   directly from existing `ShipSubsystems`/`SensorContact`/
+   `SimulationWorld` state, invent no new game-design mechanic to
+   support it.
+5. Minimal player input wired DIRECTLY to the already-implemented
+   backend order APIs (`FormationOrder`, `IndividualOrder`,
+   `ShipCombatDirective`) -- a handful of buttons/hotkeys (select ship,
+   set course/speed, designate target, weapons free/hold), not a
+   polished command UI and not the general Scenario/editor system.
+6. ONE hardcoded starting scenario baked directly into the Godot scene
+   (e.g. a small 1v1 or 2v2 with the existing `TacticalAI` controlling
+   the opposing side) -- explicitly NOT Milestone 13's general
+   scenario-loading system; a fixed starting point only, documented as
+   such so it is not mistaken for that later system.
+7. A simple win/lose end state using already-implemented destruction/
+   mission-kill state (§63) -- a text message is enough, no polish.
+8. A rough Windows export of the above (`godot --headless --export-*`
+   or the editor GUI equivalent) -- does not need to be pretty, needs
+   to run and be playable end to end on the user's machine.
+
+**Explicitly OUT OF SCOPE for this slice -- do not let these delay
+it:** canon-accurate hull art/materials; sound/music; a polished
+menu/settings system; the general Scenario system and Scenario Editor
+(Milestone 13/16); Replay (Milestone 12, already deprioritized);
+large-fleet performance work (Milestone 15); further multi-level
+command-echelon UI (§28 debt already logged); any NEW simulation
+mechanic not already implemented -- this slice is about SURFACING
+what already exists, not adding more backend features. If implementing
+this slice surfaces a genuine bug in existing simulation code, fix it
+(that is correctness, not scope creep); do not use it as an excuse to
+build out unrelated new mechanics.
+
+**After the slice works:** resume the normal priority already
+established in §56 above (13-17, with 12 still deprioritized) for
+scale, polish, scenario tooling, and replay -- but from that point on
+there is an actual playable build to test and improve against, instead
+of only headless test output.
+
+---
+
 ### Milestone 1
 
 Engine skeleton + 3D world + simulation loop.

@@ -2021,7 +2021,14 @@ The initial product is a local single-player tactical simulator.
 
 # 56. Development Milestones
 
-Recommended order:
+Recommended order. PRIORITY NOTE (user decision, 2026-09-22): Milestone
+12 (Replay) is DEPRIORITIZED for now -- do not pick it up next just
+because it is next in numeric order. Work Milestones 13-17 (and any
+honestly-logged debt from 1-11, per ASSUMPTIONS.md/CHANGELOG.md) before
+returning to Milestone 12. The existing first-slice Replay code
+(`replay_log.gd` -- command/event recording only, no snapshots/seek/UI)
+stays as-is; it is paused, not reverted. Revisit Milestone 12 once
+13-17 are underway or done, or if the user says otherwise.
 
 ### Milestone 1
 
@@ -2069,7 +2076,9 @@ Individual ship command + overrides.
 
 ### Milestone 12
 
-Replay.
+Replay. DEPRIORITIZED -- see priority note above. First slice already
+exists (`replay_log.gd`: command/event recording, no snapshots/seek/
+UI); do not extend it until 13-17 are addressed first.
 
 ### Milestone 13
 

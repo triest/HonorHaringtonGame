@@ -187,6 +187,12 @@ Wiki 2026-09-18 -- see AGENTS.md §18.1 for full detail/citations):
 
 ### 2.6. REPLAY & SCENARIO ENGINE
 * **State Snapshotting:** The system records initial constraints, periodic state vector deltas, and timestamped player/AI orders to reconstruct the entire 3D map accurately during playback.
+* **PRIORITY NOTE (user decision, 2026-09-22): Replay is DEPRIORITIZED
+  for now.** Milestone 12 is paused -- current code
+  (`replay_log.gd`) is command/event recording only, no snapshots/
+  seek/UI, and stays that way until Milestones 13-17 (scenarios, 2v2/
+  squadron, large-fleet, scenario editor, final build) are addressed.
+  See AGENTS.md §56 priority note.
 
 ### 2.7. COMBAT PHILOSOPHY — "NELSON IN A SKIRT" (AGENTS.md §61)
 * **Design mandate, not a mechanic in itself:** Honor Harrington is a deliberate spiritual successor to Horatio Nelson; the simulator should feel like Nelsonian naval warfare translated into space, not arcade dogfighting or perfect-information RTS.

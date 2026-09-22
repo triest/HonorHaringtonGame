@@ -7,22 +7,33 @@ extends Node3D
 ## ship_defense_state.gd -- the first actually-visible prototype of the
 ## simulation, not just headless unit tests (ТЗ §56 Milestone 1-3 bring-up).
 ##
-## Still explicitly NOT done here: weapons firing automatically (no team
-## is assigned to either demo ship, so SimulationWorld's weapons/missile
-## AI never selects a target -- see AGENTS.md §56.1 item 6, "Hardcoded
-## 1v1/2v2 scenario vs TacticalAI", which is where that gets wired up),
-## AI, tactical UI, camera controls beyond a fixed framing shot. See
-## CHANGELOG.md for the authoritative "done vs not done" list.
+## ТЗ §56.1 item 6 ("Hardcoded 1v1/2v2 scenario vs TacticalAI"): both demo
+## ships now have a team assigned (world.set_team, mutually hostile) and
+## their weapon mounts are registered directly on `world` via
+## world.add_weapon_mount() -- NOT in a separate main.gd-only dict like
+## before. That is what makes SimulationWorld._resolve_weapons_ai actually
+## select a target and fire each tick: it only ever looks at
+## `world.weapon_mounts`/`world.teams`, and target SELECTION for both
+## sides already goes through TacticalAI.select_weapon_target (see
+## SimulationWorld._resolve_weapon_target) with no separate "AI class" to
+## instantiate here -- there is no player-controlled side yet (that is
+## item 5, order input wiring, still pending), so this hardcoded scenario
+## is effectively TacticalAI vs TacticalAI, exactly as the checklist
+## title says. Still explicitly NOT done here: player order input, a
+## win/lose screen, missile tubes for the demo ships (energy weapons
+## alone are enough to exercise weapon_fx's beam path live; missile
+## markers stay verified only by unit test until a scenario actually
+## needs missiles). See CHANGELOG.md for the authoritative "done vs not
+## done" list.
 ##
-## WeaponFx (scripts/weapon_fx.gd, ТЗ §56.1 item 3) IS wired into the
-## per-tick loop below, purely so item 6 has nothing left to connect
-## later -- with no team assigned yet, SimulationWorld.last_tick_weapon_
-## shots/missiles are always empty here, so nothing visibly fires until
-## item 6 sets teams and gives ships something to shoot at.
+## WeaponFx (scripts/weapon_fx.gd, ТЗ §56.1 item 3) is wired into the
+## per-tick loop below and now has something to actually draw: with teams
+## assigned and mounts registered on `world`, SimulationWorld.
+## last_tick_weapon_shots is populated live once both ships are in range
+## and a mount comes off cooldown.
 
 var world: SimulationWorld
-var hulls: Dictionary = {}  # String ship_id -> HullState
-var mounts: Dictionary = {}  # String ship_id -> Array[WeaponMount]
+var hulls: Dictionary = {}  # String ship_id -> HullState (local, illustrative only -- NOT passed to world.hulls; see world.add_ship's optional hull param, unused here)
 var weapon_fx: WeaponFx
 
 func _ready() -> void:
@@ -34,6 +45,7 @@ func _ready() -> void:
 	alpha.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
 	alpha.defense = ShipDefenseState.new()
 	world.add_ship("alpha", alpha)
+	world.set_team("alpha", "red")
 
 	var beta := ShipPhysicsState.new()
 	beta.position = Vector3(5000.0, 0.0, 0.0)
@@ -41,6 +53,7 @@ func _ready() -> void:
 	beta.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
 	beta.defense = ShipDefenseState.new()
 	world.add_ship("beta", beta)
+	world.set_team("beta", "blue")
 
 	for ship_id in world.ships.keys():
 		var view := ShipView.new()
@@ -53,7 +66,14 @@ func _ready() -> void:
 		laser.max_range_m = 500_000.0
 		laser.damage_per_hit = 100.0
 		laser.recharge_time_s = 4.0
-		mounts[ship_id] = [WeaponMount.new(laser, WeaponMount.bow_chaser_arc())]
+		# broadside_arc(), not bow_chaser_arc(): alpha/beta start abeam of
+		# each other (both on the X axis, facing along +/-Z), so the enemy
+		# is on each ship's STARBOARD per AttackGeometry.classify() from
+		# tick 1, never in its BOW arc -- neither ship turns to face the
+		# other (that would need real steering AI, out of scope for this
+		# hardcoded slice). A bow chaser here would never find arc and
+		# never fire; broadside is what actually matches this geometry.
+		world.add_weapon_mount(ship_id, WeaponMount.new(laser, WeaponMount.broadside_arc()))
 
 	weapon_fx = WeaponFx.new()
 	add_child(weapon_fx)
@@ -66,12 +86,23 @@ func _ready() -> void:
 ## synchronously during `add_child(world)` above -- BEFORE this method's
 ## own connect() call a few lines later in this file's _ready(). Godot
 ## calls a signal's listeners in connection order, so world.tick_
-## simulation() (which rebuilds last_tick_weapon_shots for this tick) has
-## already run by the time this handler fires, and weapon_fx.update()
-## below is reading this tick's fresh data, not last tick's.
+## simulation() (which rebuilds last_tick_weapon_shots for this tick, AND
+## advances world.weapon_mounts' condition sync) has already run by the
+## time this handler fires, and weapon_fx.update() below is reading this
+## tick's fresh data, not last tick's.
+##
+## Cooldown advance for `world.weapon_mounts` (WeaponMount.tick(dt)) is
+## deliberately still done HERE, not inside SimulationWorld.
+## tick_simulation() -- see weapon_mount.gd: "Call once per fixed
+## simulation tick to advance cooldown" is the mount's own contract, and
+## SimulationWorld never calls it itself (missile tubes are the odd one
+## out: _resolve_missile_launch_ai already advances those). Skipping this
+## loop would leave every mount's cooldown stuck at whatever
+## trigger_cooldown() last set it to, so a mount would fire once and then
+## never again.
 func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
-	for ship_id in mounts.keys():
-		for mount in mounts[ship_id]:
+	for ship_id in world.weapon_mounts.keys():
+		for mount in world.weapon_mounts[ship_id]:
 			mount.tick(dt)
 	weapon_fx.update(world)
 

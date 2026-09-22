@@ -2039,3 +2039,68 @@ for §34.2/§41.1; APPROACH orders against a moving target; echelon-level
 leader/succession; per-subordinate order translation (e.g. differentiated
 target distribution) instead of identical fan-out; reparenting/detaching
 an echelon at runtime.
+
+
+## §22.1 PD mount firing-arc/facing model -- assumptions of this pass (2026-09-22)
+
+* **Empty `PointDefenseMount.arc_sectors` means OMNIDIRECTIONAL, not
+  "can bear on nothing".** This is the opposite convention from
+  `WeaponMount.arc_sectors` (empty there means no arc at all). Not a
+  canon question -- a deliberate backward-compatibility ENGINEERING
+  CHOICE: `WeaponMount` has never had an implicit mount in this
+  codebase (every construction site already assigns an explicit arc),
+  while `PointDefenseMount` has existed since Milestone 6 as an
+  implicitly omnidirectional mount, and every scenario/test built since
+  then assumes that. Flipping the default would have silently disarmed
+  every already-deployed PD mount. A future pass that wants to enforce
+  "every PD mount must have an explicit arc" would need to migrate
+  every construction site deliberately, not get it for free from this
+  field's default.
+* **PD mounts being positional (broadside vs. chase) at all is CANON-
+  adjacent, not directly sourced.** CLOUD.md §2.2's per-class weapon
+  fit examples list separate broadside-PD and chase-PD counts for the
+  same hull -- strong indirect evidence that PD hardware is built into
+  the hull along the same broadside/chaser zones as energy weapons,
+  not a single ship-wide omnidirectional system. No source found
+  describes the actual FIRING ARC WIDTH of an individual PD mount/
+  cluster (is a "chase" PD battery BOW-sector-only, or does it also
+  cover part of PORT/STARBOARD near the bow?) -- this pass reuses
+  `WeaponMount`'s exact 3-arc vocabulary (`broadside_arc` =
+  PORT+STARBOARD, `bow_chaser_arc` = BOW only, `stern_chaser_arc` =
+  STERN only) purely because it already exists and is already tested,
+  not because any source specifies PD arcs should be identical in
+  shape to energy-weapon arcs. UNKNOWN/ASSUMPTION, flagged for revisit
+  if a future canon check finds PD-specific arc data.
+* **Per-mount count and arc assignment for any real ship class remains
+  entirely unassigned.** This pass adds the MECHANISM (a mount CAN be
+  arc-restricted and the resolution CAN gate on it) but no scenario or
+  ship-loadout construction site in the codebase actually uses
+  `broadside_arc()`/`bow_chaser_arc()`/`stern_chaser_arc()` yet --
+  every live ship/scenario still builds PD mounts with the
+  omnidirectional default. Assigning CLOUD.md's actual per-class PD
+  counts (e.g. "12PD broadside, 6PD chase") to specific mount arrays is
+  future work, and honestly depends on the still-open data-driven
+  ship/weapon class database (§8/§48) to avoid every scenario
+  hand-rolling its own mount list.
+* **`TacticalAI.select_pd_target` target selection is unchanged --
+  still ship-wide, still single-target.** Adding arc-awareness to
+  ENGAGEMENT (can this specific mount bear on this specific target) is
+  orthogonal to and does not by itself fix SELECTION (which target does
+  the ship's PD, collectively, choose to prioritize). A ship under
+  simultaneous attack from two different bearings, once given a real
+  positional loadout, would currently have every mount attempt to
+  engage the SAME single nearest-selected missile -- mounts that can't
+  bear on it simply return `NO_ARC` and do nothing, rather than
+  independently picking a DIFFERENT bearing-appropriate threat. This is
+  a real, named, un-implemented next step (per-mount or per-arc target
+  selection), not silently assumed away.
+
+Честно НЕ сделано (next candidates, continuing the same list this and
+previous passes have worked down, now with PD firing-arc closed):
+AI/targeting предпочтение непокрытых формацией брешей (§26/§34);
+применение §22.1 формационного прикрытия к случаю обхода поднятого
+sidewall под острым углом; data-driven база классов кораблей/оружия
+(§8/§48); intercept-vector solver, общий для §34.2/§41.1; approach-приказ
+на движущуюся цель; эшелон-уровневый leader/succession; reparenting/
+detach эшелона в рантайме; per-mount/per-arc выбор цели для PD (новый
+пункт, открытый именно этим проходом -- см. выше).

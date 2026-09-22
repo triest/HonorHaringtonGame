@@ -2150,3 +2150,85 @@ it"); reparenting/detaching an echelon at runtime; any echelon-specific
 order semantics beyond straight fan-out (e.g. "target distribution" at
 Fleet scale meaningfully differs per subordinate, not just the same
 order repeated).
+
+
+## §22.1 PD mount firing-arc/facing model (first slice, 2026-09-22)
+
+§22.1's own text explicitly names "any future PD mount firing-arc
+restriction" as an anticipated extension of the already-implemented
+bow/stern wedge gap (§41.1). Until this pass, `PointDefenseMount` had no
+concept of facing at all -- `PointDefenseResolution.engage()` gated on
+range and sensor tracking but never on WHERE the mount sits on the hull
+relative to the incoming missile's bearing, i.e. every mount on every
+ship could, in principle, engage a threat approaching from any
+direction simultaneously.
+
+Design choice: reuse `WeaponMount`'s exact arc model rather than
+inventing a parallel one. `PointDefenseMount.arc_sectors` is an
+`Array[AttackGeometry.Sector]` (the same coarse 6-sector granularity
+already established for energy weapons, not a continuous firing cone --
+same documented simplification), with the identical static helper
+shapes (`broadside_arc()`/`bow_chaser_arc()`/`stern_chaser_arc()`).
+`PointDefenseResolution.engage()` gates on it with the identical
+`AttackGeometry.classify()` call shape `WeaponResolution.fire()` already
+uses for its own arc check (attacker = the thing being tracked/fired
+at, target = the mounting ship, whose own `orientation` defines the
+local frame the sector is measured in) -- placed immediately after the
+existing range check and before reaction-time accumulation, and, like
+the range check, resets any in-progress tracking (`_reset_tracking()`)
+on failure so a target that rotates out of arc does not keep banked
+hit progress it can resume later.
+
+The one deliberate DIVERGENCE from `WeaponMount`'s own convention:
+`WeaponMount.arc_sectors` defaults to an empty Array meaning "can bear
+on nothing", because every `WeaponMount` in this codebase has always
+been constructed with an explicit arc from day one. `PointDefenseMount`
+predates the arc concept entirely -- every existing scenario and test
+constructs `PointDefenseMount.new()` with no arc and has always relied
+on omnidirectional engagement. Making empty mean "can bear on nothing"
+here would have silently disarmed every already-deployed PD mount in
+every existing scenario/test the moment this field was added. Instead,
+for `PointDefenseMount` specifically, empty `arc_sectors` means
+OMNIDIRECTIONAL (the historical behavior), and only a non-empty Array
+restricts engagement -- documented directly on the field, not left for
+a reader to infer from behavior.
+
+CANON grounding for PD mounts being positional at all (as opposed to a
+single ship-wide floating battery): CLOUD.md §2.2's per-class examples
+list separate broadside-PD and chase-PD counts for the same hull (e.g.
+"broadside ...12PD, chase ...6PD") -- point defense is built into the
+hull along broadside and chaser zones exactly like energy weapons, not
+a single omnidirectional turret. The EXACT arc width/shape any given PD
+mount type should have (how many mounts, which sectors, is a "chaser"
+really BOW-only or BOW+adjacent) is not specified by any source found
+and remains this project's own INTERPRETATION/ASSUMPTION, same
+epistemic status as `WeaponMount`'s own arc assumption already recorded
+in ASSUMPTIONS.md.
+
+Scope boundary, honestly narrower than the full mechanic: no scenario
+or ship-loadout construction anywhere in the codebase actually assigns
+a positional (broadside+chase) PD battery yet -- every existing
+ship/scenario setup still builds omnidirectional PD mounts, so the new
+arc-gating code, while fully implemented and tested in isolation and
+through a real `SimulationWorld.tick_simulation()` round trip, has no
+live effect on any current scenario until a future pass wires actual
+per-class PD loadouts (which itself depends on the still-open
+data-driven ship/weapon class database, §8/§48). Also not addressed
+this pass: `TacticalAI.select_pd_target` still selects exactly ONE
+target for the entire ship (nearest usable contact), not one target per
+mount/arc -- a ship whose mounts, once positionally loaded, cover
+different bearings still cannot currently split fire across
+simultaneous multi-bearing threats; that per-mount/per-arc target
+selection is the natural next slice once a real positional loadout
+exists to exercise it. ECM still does not degrade PD accuracy/tracking
+(pre-existing, unrelated gap, unchanged by this pass).
+
+Scope boundary, carried forward (unchanged targets from previous
+passes' "Честно НЕ сделано" lists, now with PD firing-arc closed):
+AI/targeting preferring formation-uncovered breaches (§26/§34);
+applying §22.1 formation coverage to the raised-sidewall acute-angle
+bypass case; data-driven ship/weapon class database (§8/§48); a shared
+intercept-vector solver for §34.2/§41.1; APPROACH orders against a
+moving target; echelon-level leader/succession (§33 remains
+formation-level only); reparenting/detaching an echelon at runtime; any
+echelon-specific order semantics beyond straight fan-out.

@@ -23,7 +23,49 @@ extends RefCounted
 class_name PointDefenseMount
 
 const MissileState = preload("res://simulation/missile_state.gd")
+const AttackGeometry = preload("res://simulation/attack_geometry.gd")
 
+## ТЗ §22.1 explicitly names "any future PD mount firing-arc restriction"
+## as an anticipated, not-yet-built gap alongside the already-implemented
+## bow/stern wedge gap (§41.1). This closes it: a mount can be restricted
+## to the subset of AttackGeometry.Sector values it can physically bear
+## on, IN THE MOUNTING SHIP'S OWN LOCAL FRAME -- identical convention to
+## WeaponMount.arc_sectors (see weapon_mount.gd), reusing the same
+## 6-sector coarse granularity rather than a continuous firing cone
+## (same documented simplification, ASSUMPTIONS.md).
+##
+## CANON basis for mounts actually being positional rather than
+## omnidirectional: CLOUD.md §2.2 class examples list separate broadside
+## PD counts and chase PD counts for the same ship (e.g. "broadside
+## ...12PD, chase ...6PD") -- point defense is built into a hull exactly
+## like energy weapons, along the broadside and chaser zones, not a
+## single ship-wide floating turret.
+##
+## Deliberately DIFFERENT DEFAULT from WeaponMount: WeaponMount.arc_sectors
+## defaults to an empty Array, which means "can bear on nothing" until a
+## scenario author explicitly assigns an arc, because every existing
+## weapon mount construction already does so. PointDefenseMount predates
+## this arc concept entirely -- every existing scenario/test constructs
+## PointDefenseMount.new() with no arc assigned and expects it to
+## engage regardless of bearing (the pre-this-change behavior for the
+## whole life of the class). To avoid silently disarming every mount in
+## every existing scenario the moment this field exists, an EMPTY
+## arc_sectors here means OMNIDIRECTIONAL (can bear on every sector) --
+## the historical behavior -- and only a non-empty Array restricts
+## engagement to those sectors specifically. A scenario/ship-loadout
+## author who wants a positional broadside/chaser PD battery (matching
+## the CLOUD.md class data above) sets arc_sectors explicitly via the
+## static helpers below.
+static func broadside_arc() -> Array:
+	return [AttackGeometry.Sector.PORT, AttackGeometry.Sector.STARBOARD]
+
+static func bow_chaser_arc() -> Array:
+	return [AttackGeometry.Sector.BOW]
+
+static func stern_chaser_arc() -> Array:
+	return [AttackGeometry.Sector.STERN]
+
+var arc_sectors: Array = []  # Array[AttackGeometry.Sector]; empty = omnidirectional, see doc comment above.
 var max_engagement_range_m: float = 20_000.0    # ASSUMPTION: shorter-ranged than a counter-missile intercept (which closes actively); PD is a fixed-mount beam weapon.
 var reaction_time_s: float = 1.5                 # ASSUMPTION: time a contact must be tracked before PD can engage it.
 var recharge_time_s: float = 0.75                # ASSUMPTION: rapid-fire compared to a main energy mount.
@@ -70,6 +112,10 @@ func tick_cooldown(dt: float) -> void:
 
 func is_ready() -> bool:
 	return cooldown_remaining_s <= 0.0 and condition > 0.0
+
+## Empty arc_sectors == omnidirectional (see field doc comment above).
+func can_bear_on(sector) -> bool:
+	return arc_sectors.is_empty() or arc_sectors.has(sector)
 
 ## Resets engagement state, e.g. when a missile is destroyed by another
 ## defense layer or leaves range -- PD must reacquire (reaction_time_s

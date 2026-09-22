@@ -41,8 +41,9 @@ class_name PointDefenseResolution
 
 const MissileState = preload("res://simulation/missile_state.gd")
 const ContactState = preload("res://simulation/contact_state.gd")
+const AttackGeometry = preload("res://simulation/attack_geometry.gd")
 
-enum Outcome { NO_TARGET, NOT_DETECTED, OUT_OF_RANGE, ACQUIRING, NOT_READY, SHOT_FIRED, INTERCEPTED }
+enum Outcome { NO_TARGET, NOT_DETECTED, OUT_OF_RANGE, NO_ARC, ACQUIRING, NOT_READY, SHOT_FIRED, INTERCEPTED }
 
 class EngagementResult:
 	var outcome: int
@@ -89,6 +90,19 @@ static func engage(mount: PointDefenseMount, ship, incoming_missile, dt: float, 
 	if distance > mount.effective_engagement_range_m():
 		mount._reset_tracking()
 		return EngagementResult.new(Outcome.OUT_OF_RANGE)
+
+	# ТЗ §22.1 PD mount firing-arc restriction: which sector, in THIS
+	# MOUNT'S OWN SHIP'S frame, does the incoming missile occupy? Mirrors
+	# WeaponResolution.fire()'s identical arc check for energy weapons --
+	# same AttackGeometry.classify() call shape (attacker=the thing being
+	# fired at/tracked, target=the mounting ship, whose own orientation
+	# defines the local frame). An omnidirectional mount (empty
+	# arc_sectors, the default -- see PointDefenseMount doc comment) always
+	# passes this, identical to every pre-this-change mount/test.
+	var firing_sector = AttackGeometry.classify(incoming_missile.position, ship.position, ship.orientation)
+	if not mount.can_bear_on(firing_sector):
+		mount._reset_tracking()
+		return EngagementResult.new(Outcome.NO_ARC)
 
 	mount._tracking_time_s += dt
 	if mount._tracking_time_s < mount.effective_reaction_time_s():

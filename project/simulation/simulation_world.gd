@@ -709,6 +709,18 @@ func _resolve_formation_orders(dt: float) -> void:
 			formation.current_order = null
 			continue
 
+		# §29 "approach" (this pass): unlike CHANGE_COURSE/CHANGE_SPEED,
+		# whose target_velocity_mps is frozen once at issue time, APPROACH
+		# tracks a fixed world-space POINT -- the correct heading to that
+		# point changes every tick as the guide's own position changes, so
+		# target_velocity_mps must be refreshed here BEFORE the generic
+		# is_complete()/thrust-error code below (which is otherwise
+		# unmodified and shared with every other kind). is_complete() for
+		# APPROACH does not depend on target_velocity_mps at all (it checks
+		# arrival distance, not velocity), so recomputing first is safe.
+		if order.kind == FormationOrder.Kind.APPROACH:
+			order.target_velocity_mps = _approach_target_velocity(guide, order)
+
 		if order.is_complete(guide):
 			formation.current_order = null
 			guide.commanded_thrust_local = Vector3.ZERO
@@ -725,6 +737,27 @@ func _resolve_formation_orders(dt: float) -> void:
 		var desired_accel_mag: float = min(max_accel, error_mag / dt)
 		var desired_accel: Vector3 = velocity_error.normalized() * desired_accel_mag
 		guide.commanded_thrust_local = guide.orientation.inverse() * (desired_accel / max_accel)
+
+## §29 "approach" (this pass): the guide's desired velocity for an
+## APPROACH order, recomputed fresh every tick from the guide's CURRENT
+## position -- pure pursuit of a fixed point, at the order's fixed
+## `approach_speed_mps`. Guards against normalizing a zero-length
+## direction (guide sitting exactly on the target point) by returning
+## Vector3.ZERO instead -- harmless even though this can only actually
+## arise well inside is_complete()'s much larger arrival_tolerance_m, at
+## which point the caller dequeues the order right after this call
+## anyway without ever acting on the zero velocity. ENGINEERING CHOICE
+## (ASSUMPTION), not canon: no Honorverse source describes how a
+## formation "approach" order is flown; pure pursuit (aim directly at the
+## current target point, not a lead/intercept solution) matches how
+## CHANGE_COURSE already treats a one-shot heading order, and reuses the
+## same exact-stop thrust law as every other kinematic order kind rather
+## than inventing a bespoke navigation law -- see ASSUMPTIONS.md.
+func _approach_target_velocity(guide: ShipPhysicsState, order: FormationOrder) -> Vector3:
+	var to_target: Vector3 = order.target_point_world - guide.position
+	if to_target.length_squared() <= 0.0001:
+		return Vector3.ZERO
+	return to_target.normalized() * order.approach_speed_mps
 
 ## §29 "change formation" (this pass): applies a CHANGE_FORMATION order's
 ## `new_offsets_local` to `formation.member_offsets` (only the ships

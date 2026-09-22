@@ -291,6 +291,14 @@ func _test_formation_order_to_dict_from_dict_round_trip() -> void:
 	_assert(restored.new_offsets_local["wing1"].is_equal_approx(Vector3(10, 0, -10)), "new_offsets_local entries should survive round-trip")
 	_assert(restored.new_offsets_local["wing2"].is_equal_approx(Vector3(-10, 0, -10)), "new_offsets_local entries should survive round-trip")
 
+func _test_approach_formation_order_to_dict_from_dict_round_trip() -> void:
+	var order := FormationOrder.approach(Vector3(3000, 0, -500), 175.0)
+	var restored := FormationOrder.from_dict(order.to_dict())
+	_assert(restored.kind == FormationOrder.Kind.APPROACH, "kind should survive round-trip")
+	_assert(restored.target_point_world.is_equal_approx(Vector3(3000, 0, -500)), "target_point_world should survive round-trip")
+	_assert(is_equal_approx(restored.approach_speed_mps, 175.0), "approach_speed_mps should survive round-trip")
+	_assert(is_equal_approx(restored.arrival_tolerance_m, order.arrival_tolerance_m), "arrival_tolerance_m should survive round-trip")
+
 # ---------------------------------------------------------------------
 # The actual point of Replay: reproduce a run from its recorded commands
 # ---------------------------------------------------------------------
@@ -388,6 +396,7 @@ func _init() -> void:
 	_test_replay_log_save_and_load_file_round_trip()
 	_test_individual_order_to_dict_from_dict_round_trip()
 	_test_formation_order_to_dict_from_dict_round_trip()
+	_test_approach_formation_order_to_dict_from_dict_round_trip()
 	_test_replay_reproduces_the_original_run()
 
 	print("")

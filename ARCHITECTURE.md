@@ -1987,3 +1987,70 @@ concept to extend at all yet. AI/targeting (§26/§34) also does not read
 `_formation_bow_stern_coverage` -- an attacking AI has no way yet to
 prefer an enemy's currently-uncovered gap over a covered one. Both are
 real, named, un-implemented next steps, not silently skipped.
+
+## 2026-09-22: "approach" as a genuine FormationOrder primitive (Kind.APPROACH)
+
+Closes a gap that had been carried forward, honestly logged, across
+several prior passes: FormationOrder's own class doc previously claimed
+"approach" and "withdraw" were both convenience composites of
+CHANGE_COURSE + CHANGE_SPEED, but only `withdraw_orders()` actually
+existed -- no approach composite, and no way to order a formation guide
+to fly to a specific point at all.
+
+The design choice that matters here: APPROACH is NOT modeled as "compute
+a heading once, then run CHANGE_COURSE + CHANGE_SPEED" (which is what
+`withdraw_orders` does, and what a naive reading of the old doc comment
+implied approach would also be). A single frozen heading, computed once
+at issue time, is only correct if the guide's position at issue time is
+where it stays relative to the target for the whole maneuver -- true
+enough for "turn away and accelerate" (withdraw), where the target is a
+DIRECTION, not a point, so there is nothing to converge on. It is false
+for "fly to that point over there": as the guide's own position changes
+tick by tick, the correct heading to a fixed point keeps changing too.
+So APPROACH instead stores the goal itself (`target_point_world`,
+`approach_speed_mps`) and `SimulationWorld._approach_target_velocity()`
+recomputes a fresh pure-pursuit `target_velocity_mps` from the guide's
+CURRENT position every single tick, in `_resolve_formation_orders`,
+immediately before the shared is_complete()/exact-stop-thrust block that
+every other order kind already uses unmodified. Reusing that existing
+thrust law (rather than inventing a distinct "navigation" force law) is
+a deliberate simplicity choice (§43) -- the only genuinely new mechanism
+is WHERE the target velocity comes from each tick, not how it gets
+executed.
+
+The other deliberate departure from every prior order kind:
+`is_complete()` for APPROACH checks ARRIVAL DISTANCE
+(`guide.position.distance_to(target_point_world) <= arrival_tolerance_m`),
+not velocity convergence. This is not an arbitrary implementation detail
+-- it reflects that "approach" is semantically a navigation goal ("get
+there"), while CHANGE_COURSE/CHANGE_SPEED are maneuver goals ("reach and
+hold this heading/speed"). A velocity-convergence completion rule for
+APPROACH would have been actively wrong: the guide could stabilize at
+the ordered approach speed heading exactly at the target point's
+direction from far away and never "complete" while still thousands of
+km short of arriving, or -- worse -- complete instantly at issue time if
+already moving in roughly the right direction fast enough, regardless of
+distance remaining.
+
+A real bug surfaced (and was fixed) not in the production code but in
+the FIRST draft of the test itself, which is worth recording because the
+same trap could bite a future pass reusing this order kind: after
+`is_complete()` returns true, thrust zeroes but the guide keeps COASTING
+at its arrival velocity exactly like every other order kind does on
+completion (none of them brake to a stop -- see CHANGE_COURSE/
+CHANGE_SPEED's own completion behavior). A test that runs a fixed tick
+count and only checks the guide's FINAL position after the loop ends can
+therefore fail even though the order behaved correctly, because the
+guide flew straight through the target and coasted back out of
+`arrival_tolerance_m` by the time the loop stops. The fix was to capture
+position at the exact tick `formation.current_order` transitions to
+null, not after some further fixed number of ticks -- a pattern worth
+reusing for any future order kind whose completion doesn't imply
+"stopped there forever" (which is all of them, currently).
+
+Scope boundary, honestly carried forward: APPROACH targets a fixed
+world-space point only, not a moving contact/ship. Extending it to chase
+a moving target (re-deriving `target_point_world` from a tracked ship's
+live position each tick, or accepting some kind of target-reference
+instead of a bare Vector3) is a real, named, un-implemented next step,
+not silently out of scope -- see ASSUMPTIONS.md/CHANGELOG.md.

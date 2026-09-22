@@ -1003,6 +1003,73 @@ func _test_formation_target_assignment_skipped_when_guide_lost() -> void:
 	var assigned: Dictionary = world._formation_assigned_targets
 	_assert(not assigned.has("wing1"), "a formation with no valid guide should not get a coordinated assignment entry this tick")
 
+## §29 "approach" (this pass): a genuine primitive, not a change_course
+## composite -- the guide starts with ZERO velocity (so, unlike
+## change_course, there is no "current heading" to freeze at issue time;
+## approach must derive its own heading purely from guide position vs.
+## target point) and should accelerate straight toward the target point,
+## then self-complete once within arrival_tolerance_m of it.
+func _test_approach_order_flies_guide_to_stationary_point_and_completes() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	world.add_ship("guide", guide)
+	var formation := world.add_formation("red_wall", "guide")
+	var target := Vector3(3000.0, 0.0, 0.0)
+
+	formation.issue_order(FormationOrder.approach(target, 100.0))
+
+	# Capture position/velocity at the EXACT tick the order self-completes
+	# (current_order flips non-null -> null), not after running a further
+	# fixed number of ticks -- the guide keeps COASTING at its ordered
+	# velocity once thrust zeroes (completion does not brake it to a stop,
+	# same as CHANGE_COURSE/CHANGE_SPEED), so checking position too long
+	# after completion would assert on an already-overshot position rather
+	# than on the arrival itself.
+	var completed_at_position: Vector3 = Vector3.ZERO
+	var completed: bool = false
+	for i in range(2400):  # 40s -- ~1s to spin up to 100 m/s, ~29s to cover ~2900m, generous margin
+		world.tick_simulation(1.0 / 60.0)
+		if not completed and formation.current_order == null:
+			completed = true
+			completed_at_position = guide.position
+
+	_assert(completed, "the approach order should have completed and cleared itself within 40s")
+	_assert(completed_at_position.distance_to(target) <= 200.0, "the guide should have been within arrival_tolerance_m of the ordered point at the moment the order completed")
+	_assert(completed_at_position.x > 2500.0, "the guide should have actually traveled toward +X, not merely been marked complete by a stale check")
+
+## The behavior that makes APPROACH a genuinely different primitive from
+## CHANGE_COURSE, not just a renamed copy of it: the guide starts with an
+## existing LATERAL velocity component (simulating leftover drift from a
+## previous order) that points nowhere near the target. A one-shot
+## frozen-heading order computed only at issue time would never correct
+## for that drift; APPROACH re-aims at the target point fresh every tick
+## (see SimulationWorld._approach_target_velocity), so the guide must
+## still arrive at the target despite starting off-axis.
+func _test_approach_order_corrects_for_initial_lateral_drift() -> void:
+	var world := SimulationWorld.new()
+	var guide := _make_ship(Vector3.ZERO)
+	guide.velocity = Vector3(0.0, 80.0, 0.0)  # drifting sideways, not toward the target at all
+	world.add_ship("guide", guide)
+	var formation := world.add_formation("red_wall", "guide")
+
+	var target := Vector3(5000.0, 0.0, 0.0)
+	formation.issue_order(FormationOrder.approach(target, 150.0))
+
+	# Same "capture at the moment of completion" approach as the test
+	# above -- coasting past the target after completion would otherwise
+	# drift back outside arrival_tolerance_m by the time a fixed-length
+	# loop ends.
+	var completed_at_position: Vector3 = Vector3.ZERO
+	var completed: bool = false
+	for i in range(3600):  # 60s -- plenty to kill the drift, spin up, and cover ~5000m
+		world.tick_simulation(1.0 / 60.0)
+		if not completed and formation.current_order == null:
+			completed = true
+			completed_at_position = guide.position
+
+	_assert(completed, "the approach order should complete despite the initial lateral drift")
+	_assert(completed_at_position.distance_to(target) <= 200.0, "the guide should have been within tolerance of the target point, at the moment of completion, despite starting with sideways velocity")
+
 func _init() -> void:
 	_test_formation_state_basics()
 	_test_member_thrusts_toward_station()
@@ -1035,6 +1102,8 @@ func _init() -> void:
 	_test_change_formation_can_add_a_new_member()
 	_test_change_formation_member_actually_flies_to_new_station()
 	_test_change_formation_becomes_new_design_for_later_leader_transfer()
+	_test_approach_order_flies_guide_to_stationary_point_and_completes()
+	_test_approach_order_corrects_for_initial_lateral_drift()
 
 	_test_formation_target_assignment_avoids_overcommitting_to_one_target()
 	_test_formation_target_assignment_skipped_when_guide_lost()

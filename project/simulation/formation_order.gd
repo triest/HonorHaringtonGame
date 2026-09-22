@@ -24,9 +24,22 @@ extends RefCounted
 ## target distribution, missile use, counter-missile posture, defensive
 ## posture, evasive maneuver) or the full command hierarchy (§28) are
 ## OUT of scope for this slice -- honestly left open, see
-## ASSUMPTIONS.md/CHANGELOG.md. "approach" and "withdraw"/"disengage" are
-## provided as convenience composites of the two kinematic kinds (see
-## `withdraw_orders` below), not new primitive kinds.
+## ASSUMPTIONS.md/CHANGELOG.md. "withdraw"/"disengage" is provided as a
+## convenience composite of the two kinematic kinds (see
+## `withdraw_orders` below), not a new primitive kind.
+##
+## "approach" (this pass, closing a previously honestly-logged gap): a
+## genuine fourth primitive kind, APPROACH -- unlike CHANGE_COURSE (which
+## freezes a single target heading at issue time), APPROACH tracks a
+## fixed world-space POINT and re-aims the guide's target velocity at it
+## FRESH EVERY TICK (see SimulationWorld._resolve_formation_orders),
+## because the correct heading to a point changes continuously as the
+## guide moves -- a single frozen heading would only be correct at the
+## instant of issue. Completion is by ARRIVAL (position within
+## `arrival_tolerance_m` of the target point), not by velocity match --
+## a materially different completion rule from every other kind, because
+## "approach" is a navigation goal (get there), not a maneuver goal
+## (reach this heading/speed and hold it).
 ##
 ## INTERPRETATION, not canon: "change course" here retargets the guide's
 ## VELOCITY VECTOR (flight path), not necessarily its nose orientation --
@@ -48,6 +61,7 @@ enum Kind {
 	CHANGE_COURSE,
 	CHANGE_SPEED,
 	CHANGE_FORMATION,
+	APPROACH,
 }
 
 var kind: int = Kind.HOLD_FORMATION
@@ -68,6 +82,20 @@ var target_velocity_mps: Vector3 = Vector3.ZERO
 ## "reform" from "take station" -- both are just "this ship's assigned
 ## offset is now X").
 var new_offsets_local: Dictionary = {}
+
+## §29 "approach" (this pass): fixed world-space point the guide is
+## ordered to fly toward, and the speed to fly there at. Unused (left at
+## defaults) for the other four Kinds. `arrival_tolerance_m` is an
+## ASSUMPTION, not canon -- no Honorverse source specifies how close
+## "arrived" is for a formation-level approach order; chosen as an
+## engineering game-feel distance (a couple of ship-lengths at this
+## project's scale) so the order reliably self-completes instead of
+## the guide endlessly circling a point it can never exactly hit due to
+## float/tick granularity, mirroring why heading_tolerance_rad/
+## speed_tolerance_mps exist below for the other kinds.
+var target_point_world: Vector3 = Vector3.ZERO
+var approach_speed_mps: float = 0.0
+var arrival_tolerance_m: float = 200.0
 
 ## ASSUMPTION: no canonical "order achieved" tolerance exists -- these
 ## are small, game-feel thresholds (a few degrees / a slow walking pace)
@@ -140,6 +168,19 @@ static func change_formation(offsets_local: Dictionary) -> FormationOrder:
 	order.new_offsets_local = offsets_local.duplicate()
 	return order
 
+## §29 "approach": fly toward `target_point_world` at `speed_mps`. The
+## heading component is recomputed every tick by
+## SimulationWorld._resolve_formation_orders (NOT frozen at issue time,
+## unlike change_course/change_speed) because the correct heading to a
+## fixed point changes as the guide's own position changes -- this
+## constructor just records the goal, not an initial heading.
+static func approach(target_point_world: Vector3, speed_mps: float) -> FormationOrder:
+	var order := FormationOrder.new()
+	order.kind = Kind.APPROACH
+	order.target_point_world = target_point_world
+	order.approach_speed_mps = speed_mps
+	return order
+
 ## True once `guide`'s actual velocity is within tolerance of this
 ## order's target. HOLD_FORMATION never completes on its own (it is a
 ## standing order, replaced only by issuing something else) -- callers
@@ -165,6 +206,8 @@ func is_complete(guide) -> bool:
 			return angle <= heading_tolerance_rad
 		Kind.CHANGE_SPEED:
 			return abs(guide.velocity.length() - target_velocity_mps.length()) <= speed_tolerance_mps
+		Kind.APPROACH:
+			return guide.position.distance_to(target_point_world) <= arrival_tolerance_m
 		_:
 			return true
 
@@ -184,6 +227,9 @@ func to_dict() -> Dictionary:
 		"new_offsets_local": offsets,
 		"heading_tolerance_rad": heading_tolerance_rad,
 		"speed_tolerance_mps": speed_tolerance_mps,
+		"target_point_world": [target_point_world.x, target_point_world.y, target_point_world.z],
+		"approach_speed_mps": approach_speed_mps,
+		"arrival_tolerance_m": arrival_tolerance_m,
 	}
 
 static func from_dict(d: Dictionary) -> FormationOrder:
@@ -199,4 +245,8 @@ static func from_dict(d: Dictionary) -> FormationOrder:
 	order.new_offsets_local = result
 	order.heading_tolerance_rad = float(d.get("heading_tolerance_rad", 0.02))
 	order.speed_tolerance_mps = float(d.get("speed_tolerance_mps", 0.5))
+	var p: Array = d.get("target_point_world", [0.0, 0.0, 0.0])
+	order.target_point_world = Vector3(p[0], p[1], p[2])
+	order.approach_speed_mps = float(d.get("approach_speed_mps", 0.0))
+	order.arrival_tolerance_m = float(d.get("arrival_tolerance_m", 200.0))
 	return order

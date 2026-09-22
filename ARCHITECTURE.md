@@ -2294,3 +2294,60 @@ no distinct "counter-missile launcher" class exists anywhere in the
 codebase yet (a counter-missile is a `MissileState` whose `target` is
 another `MissileState`, launched through the ordinary missile-launch
 path) — wiring dedicated CM tubes is future work, not silently dropped.
+
+## §16/§56.1 Sidewall visualization + OrbitCamera -- first vertical-slice visuals (2026-09-22)
+
+This is the FIRST actual implementation work against §56.1 (the
+user-priority override that makes "get to something playable" the top
+priority ahead of Milestones 12-17). It closes two of §56.1's eight
+scope items:
+
+Item 2 (partial -- sidewalls): `SidewallMeshBuilder` (`scripts/
+sidewall_mesh_builder.gd`) adds the port/starboard/bow/stern flat panel
+geometry that `ShipView` (`scripts/ship_view.gd`) needed to extend its
+existing wedge-only visualization to match §16's full defensive-envelope
+picture. Deliberately built as flat panels (not the wedge's tented
+V-cross-section) because sidewalls are CANON-described as flanking walls
+bracketing a hull face, not a raised ridge generated at the bow/stern
+extremes -- reusing WedgeMeshBuilder's shape would have been visually
+wrong, not just differently-styled. `ShipView` now derives EACH of the
+four panels' visibility independently from `ShipDefenseState`'s own
+fields (`port_sidewall_condition`/`starboard_sidewall_condition`/
+`bow_sidewall_raised`+`bow_sidewall_condition`/`stern_sidewall_raised`+
+`stern_sidewall_condition`) via two pure static helpers
+(`_broadside_sidewall_visible`/`_bow_stern_sidewall_visible`) -- kept
+pure and static specifically so the visibility LOGIC is unit-testable
+without a scene tree, the same pattern `WedgeMeshBuilder._width_profile`
+already established. `ShipView` still never writes back into simulation
+state (§42): it only reads `sim_state.defense` each frame.
+
+Item 1 (camera): `OrbitCamera` (`scripts/orbit_camera.gd`, `extends
+Camera3D`) replaces the fixed one-shot camera transform `main.gd`
+previously computed once at scene start. It orbits/zooms around a pivot
+point that `main.gd` still computes exactly as before (ship-midpoint +
+spread-derived distance via `frame_on()`) -- `main.gd` was refactored so
+`_frame_camera_on_ships()` delegates to `camera.frame_on(...)` when the
+attached camera exposes that method (duck-typed via `has_method`), with
+the OLD fixed-transform math kept as a literal fallback branch for any
+future dev/test scene that reuses a plain `Camera3D` without the
+OrbitCamera script. The reason for computing the offset via a pure
+static `_spherical_offset(yaw, pitch, distance)` function, rather than
+inlining trig calls in `_update_transform()`, is the same testability
+pattern as above: `OrbitCamera` itself (`extends Camera3D`) is not
+reliably instantiable standalone in a headless script context in this
+Godot version, so the math it depends on is tested in isolation instead
+(`simulation/tests/test_orbit_camera.gd`) rather than skipped.
+
+Control scheme is intentionally raw `Input.is_key_pressed`/
+`Input.is_mouse_button_pressed` checks (right-drag to orbit, wheel to
+zoom, arrow keys + +/- as a keyboard-only fallback), NOT a
+`project.godot` Input Map action -- none exist in this project yet, and
+defining a full input map is explicitly out of scope for a "handful of
+hotkeys" camera per §56.1's own item 1 wording. When §56.1 item 5
+(player order hotkeys) is implemented, that is the natural point to
+introduce one shared Input Map covering both camera and order controls,
+rather than inventing two incompatible input schemes.
+
+`project/scenes/main.tscn` gained a second `ext_resource` (`orbit_
+camera.gd`) attached as the `Camera3D` node's script; no new nodes were
+added to the scene tree.

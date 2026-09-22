@@ -53,12 +53,19 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 		for mount in mounts[ship_id]:
 			mount.tick(dt)
 
-## Points the scene's Camera3D at the midpoint between the two demo ships
-## from a distance proportional to their separation, computed from actual
-## ship positions rather than a hand-tuned fixed transform in the .tscn
-## (which, on inspection, was aimed along -Z without ever pointing at the
-## ships -- a Milestone 1 oversight since headless test runs cannot verify
-## framing visually; fixed now that this is meant to actually be looked at).
+## Points the scene's OrbitCamera at the midpoint between the two demo
+## ships from a distance proportional to their separation, computed from
+## actual ship positions rather than a hand-tuned fixed transform in the
+## .tscn (which, on inspection, was aimed along -Z without ever pointing
+## at the ships -- a Milestone 1 oversight since headless test runs
+## cannot verify framing visually; fixed now that this is meant to
+## actually be looked at).
+##
+## ТЗ §56.1 item 1: the camera used to be fixed after this initial framing
+## shot; OrbitCamera (scripts/orbit_camera.gd) now lets the player orbit/
+## zoom from here. This function only sets the STARTING pivot/framing --
+## all player-driven movement lives in OrbitCamera itself, so main.gd
+## still never touches per-frame camera transforms.
 func _frame_camera_on_ships() -> void:
 	var camera: Camera3D = get_node_or_null("Camera3D")
 	if camera == null:
@@ -79,11 +86,13 @@ func _frame_camera_on_ships() -> void:
 	for p in positions:
 		spread = maxf(spread, midpoint.distance_to(p))
 
-	# Distance derived from the camera's own FOV so the full spread
-	# actually fits in frame (a fixed offset multiplier either left ships
-	# outside the frustum when too close, or too small to read when too
-	# far -- both happened during this pass; deriving it from trig avoids
-	# re-tuning a magic number by hand every time ship separation changes).
+	if camera.has_method("frame_on"):
+		camera.frame_on(midpoint, spread)
+		return
+
+	# Fallback for a plain Camera3D with no OrbitCamera script attached
+	# (e.g. a dev/test scene that reuses this function) -- reproduces the
+	# pre-OrbitCamera fixed-framing behavior exactly.
 	camera.fov = 60.0
 	var half_fov_rad: float = deg_to_rad(camera.fov * 0.5)
 	var required_distance: float = (spread / tan(half_fov_rad)) * 1.6

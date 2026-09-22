@@ -2463,3 +2463,72 @@ CANON-справка, но НЕ порождают отдельный launcher (
 Milestone 13 (Scenarios, §46) как таковой ещё не начат — это
 ФУНДАМЕНТ под него (данные + фабрика), а не сценарный загрузчик/формат
 сценария/UI редактора (§47) — следующий естественный срез.
+
+## Unreleased -- §56.1 vertical slice: sidewall visualization + OrbitCamera (первые реальные шаги по playable-приоритету)
+
+* Новый `SidewallMeshBuilder` (`scripts/sidewall_mesh_builder.gd`) --
+  плоские панельные меши для port/starboard (broadside) и bow/stern
+  sidewall-стен (ТЗ §16), геометрически ОТДЕЛЬНЫЕ от wedge (тот --
+  V-образный тент, эти -- плоские панели, т.к. канон описывает sidewall
+  как боковую "стену", а не приподнятый гребень). Только геометрия --
+  видимость решает `ShipView`, не этот файл.
+* `ShipView` (`scripts/ship_view.gd`) теперь строит и показывает 4
+  sidewall-панели на корабль в дополнение к уже существовавшим hull+
+  wedge -- ПЕРВАЯ визуализация во всём проекте, которая реально отражает
+  §16 sidewall-состояние (`ShipDefenseState.port_sidewall_condition`/
+  `starboard_sidewall_condition`/`bow_sidewall_raised`+`bow_sidewall_
+  condition`/`stern_sidewall_raised`+`stern_sidewall_condition`), а не
+  только wedge. Видимость каждой из 4 панелей решается независимо через
+  два чистых статических метода (`_broadside_sidewall_visible`/
+  `_bow_stern_sidewall_visible`), юнит-тестируемых без сцены.
+* Новый `OrbitCamera` (`scripts/orbit_camera.gd`, `extends Camera3D`) --
+  ТЗ §56.1 item 1 ("camera the player can see the battle through (free/
+  orbit camera is enough)"). ПКМ-драг -- орбита, колесо мыши -- зум,
+  стрелки + +/- -- клавиатурный фоллбэк без мыши. Начальный кадр
+  побитово воспроизводит старую фиксированную камеру (тот же
+  view_dir/дистанция/fov), чтобы не менять уже проверенный дефолтный
+  вид -- всё новое включается только когда игрок реально трогает
+  мышь/клавиши. `main.gd`'s `_frame_camera_on_ships()` теперь вызывает
+  `camera.frame_on(midpoint, spread)` вместо ручной установки
+  transform'а напрямую (с фоллбэком на старое поведение, если камера --
+  простой `Camera3D` без скрипта).
+* `project/scenes/main.tscn`: `Camera3D`-нода получила `orbit_camera.gd`
+  как script (второй `ext_resource`), новых нод в сцену не добавлено.
+* Новые тестовые файлы: `test_sidewall_mesh_builder.gd` (геометрия
+  панелей: broadside плоская по X и покрывает length/height, bow/stern
+  плоская по Z и покрывает width/height), `test_ship_view_sidewalls.gd`
+  (все 6 комбинаций видимости: broadside показан/скрыт на пороге
+  burnout, bow/stern скрыт БЕЗ raised даже при полном condition,
+  показан при raised+condition>0, скрыт при raised+burned-out),
+  `test_orbit_camera.gd` (чистая сферическая математика offset:
+  нулевые yaw/pitch смотрят вдоль +Z, pitch=90° поднимает камеру строго
+  по Y, yaw=90° -- строго по X, длина offset всегда равна distance
+  независимо от угла). Все три новых теста + весь существующий набор
+  (33 тестовых файла, включая до этого прохода незакоммиченный
+  test_ship_class_data.gd, вошедший в предыдущий коммит параллельного
+  прохода) прогнаны ОДИН раз перед этим коммитом -- 0 реальных
+  провалов (один файл, test_crossing_t_maneuver.gd, дал ложное "FAIL" в
+  простом grep-детекторе прогона из-за нестандартного текста
+  собственного PASS-сообщения; проверено отдельно -- exit code 0,
+  "CROSSING-T BEHAVIOR TEST PASSED").
+* Обнаружен и явно задокументирован (НЕ регрессия этого прохода,
+  проверено откатом на предыдущий commit и повторным запуском) уже
+  существовавший headless-артефакт: живой запуск `main.tscn` печатает
+  `ERROR: Parameter "m" is null (mesh_get_surface_count)` один раз на
+  каждый процедурный `MeshInstance3D` (было 6 на 2 корабля, стало 14
+  после добавления sidewall-панелей) -- следствие dummy rendering
+  driver'а Godot в headless-режиме, не признак сломанного меша (геометрия
+  проверена отдельными юнит-тестами, ошибок не даёт). См. ASSUMPTIONS.md.
+
+Честно НЕ сделано (§56.1 item 2 остальное + items 3-8 полностью, следующие кандидаты):
+canon-фигуры/материалы вместо плейсхолдер-геометрии (явно вне рамок
+этого среза); визуализация выстрелов энергетического оружия/ракет
+(item 3); минимальный HUD с состоянием подсистем/целей/контактов
+(item 4); игровой ввод приказов на хоткеях, включая единую Input Map
+(item 5, естественно объединяется с камерой позже); захардкоженный
+стартовый сценарий 1v1/2v2 (item 6); win/lose состояние (item 7);
+Windows-экспорт (item 8). Sidewall-панели сейчас чисто декоративны --
+никакой новый геймплей/приказ их не раздвигает (raise/lower для bow/
+stern уже есть в бэкенде через `ShipDefenseState`, но нет UI/AI-пути,
+который бы это переключал в живой демо-сцене `main.gd` -- обе демо-ноды
+только двигаются тягой, sidewalls остаются в default-состоянии).

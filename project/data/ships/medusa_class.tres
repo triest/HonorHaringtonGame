@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="ShipClassData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://simulation/ship_class_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+canonical_name = "Medusa-class"
+ship_type = "Superdreadnought"
+faction = "Manticore"
+era = "pre-refit (see source_note re: Medusa-B)"
+source_note = "CANON, AGENTS.md §8.1 (Honorverse Wiki class article, verified 2026-09-19): length 1383 m; mass 8,554,750 tons (7,760,738,654.5 kg at 907.18474 kg/ton, US short ton); acceleration 402.3 G sustained / 502.8 G maximum -- rated_acceleration_g below uses the sustained figure per ShipClassData doc comment convention. Broadside 26 missile tubes / 13 large energy mounts / 15 grasers / 54 capital missile launchers / 52 PD; fore 9 missile tubes / 4 large energy mounts / 5 grasers / 18 capital missile launchers / 22 PD; aft 6 missile tubes / 4 large energy mounts / 5 grasers / 14 capital missile launchers / 22 PD. This record maps the CANON 'large energy mount' category onto broadside/fore/aft_laser_mounts (a naming choice, not a canon distinction -- the source does not separately break lasers vs. this 'large energy mount' label apart from the separately-listed graser count) and keeps the CANON graser counts in the *_graser_mounts fields. 'Capital missile launchers' (54/18/14) and PD (52/22/20) counts are CANON but are NOT separately represented -- missile_tubes fields below use only the plain 'missile tubes' figures (26/9/6) per the existing MissileTube model, which has no capital-vs-standard distinction (HONEST GAP, see ASSUMPTIONS.md); *_pd_mounts fields use the plain PD counts (52/22/20). Missile pod capacity 492 (magazine reference, not modeled as pods -- see missile_magazine_total note). Compensator rating, crew, and Medusa-B refit dimensions: UNKNOWN, not given by source."
+length_m = 1383.0
+max_width_m = 200.0
+max_height_m = 160.0
+mass_kg = 7760738654.515
+rated_acceleration_g = 402.3
+max_angular_speed_rad_s = 0.3
+broadside_laser_mounts = 13
+broadside_graser_mounts = 15
+fore_laser_mounts = 4
+fore_graser_mounts = 5
+aft_laser_mounts = 4
+aft_graser_mounts = 5
+broadside_missile_tubes = 26
+fore_missile_tubes = 9
+aft_missile_tubes = 6
+missile_magazine_total = 492
+counter_missile_tubes = 0
+counter_missile_magazine_total = 0
+broadside_pd_mounts = 52
+fore_pd_mounts = 22
+aft_pd_mounts = 20

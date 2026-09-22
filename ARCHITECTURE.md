@@ -2232,3 +2232,65 @@ intercept-vector solver for §34.2/§41.1; APPROACH orders against a
 moving target; echelon-level leader/succession (§33 remains
 formation-level only); reparenting/detaching an echelon at runtime; any
 echelon-specific order semantics beyond straight fan-out.
+
+## §8/§48 Data-Driven Ship Database — ShipClassData + ShipFactory (2026-09-22)
+
+`ShipClassData` (`simulation/ship_class_data.gd`) is a `Resource` subclass
+so ship-class records are real, editor-inspectable `.tres` files under
+`data/ships/` rather than GDScript literals — the first actual
+implementation of §8's field list (identity/dimensions/mass/acceleration/
+armament/canonical references/confidence) and of §48's requirement that
+ships not be hardcoded into combat code. Choosing `Resource` (not a plain
+`RefCounted` data class, the convention every other `simulation/*.gd` file
+uses) is deliberate: it is the one file in this list meant to be authored
+as DATA, loaded by path, and eventually edited by a future Scenario
+Editor (§47) — a `RefCounted` has no serialization format of its own.
+
+`ShipFactory` (`simulation/ship_factory.gd`) is the sole place that turns
+a `ShipClassData` into a live ship registered in a `SimulationWorld`
+(`ShipPhysicsState` + `HullState` + optional `ShipSubsystems` +
+`WeaponMount`/`MissileTube`/`PointDefenseMount` instances, wired through
+the world's existing `add_ship`/`add_weapon_mount`/`add_missile_tube`/
+`add_pd_mount` API — no new SimulationWorld API was needed). Every prior
+test/scenario in this codebase constructs these pieces by hand inline;
+`ShipFactory` does not replace that pattern (existing tests are
+untouched) but is the pattern any FUTURE data-driven scenario (Milestone
+13, §46) or the Scenario Editor (§47) should build on instead of
+reinventing ship assembly.
+
+Design decision: acceleration is stored on `ShipClassData` as
+`rated_acceleration_g` (matching how AGENTS.md §8.1/§8.2 sources the
+number — Honorverse Wiki gives G, not m/s²), converted to `max_thrust_n`
+at spawn time via `rated_acceleration_g * STANDARD_GRAVITY_MPS2 *
+mass_kg`. This keeps `ShipPhysicsState.effective_max_acceleration()`
+(F/m, §62.1) as the single source of truth for a ship's actual
+attainable acceleration — `ShipFactory` never sets an acceleration cap
+directly, only mass and thrust, so subsystem/propulsion-condition damage
+(§25) degrades a data-spawned ship's acceleration exactly like any other
+ship's, with no special-casing.
+
+Firing-zone fields (`broadside_*`/`fore_*`/`aft_*`) map directly onto the
+existing `WeaponMount`/`PointDefenseMount` arc helpers
+(`broadside_arc()`/`bow_chaser_arc()`/`stern_chaser_arc()`) — this is
+intentionally the SAME zone vocabulary CLOUD.md §2.2 already uses, so a
+`.tres` record's field names read the same as the canon source it cites.
+`ShipFactory` is the first ship-assembly code in the project to assign
+non-omnidirectional PD arcs, closing a gap explicitly flagged when the PD
+arc mechanic itself landed (point_defense_mount.gd's own doc comment /
+CHANGELOG.md, §22.1).
+
+Deliberately NOT done in this pass, and why: `HullState.max_integrity`
+is left at its existing flat placeholder rather than scaled per class —
+no canonical hull-point figure exists for ANY class to anchor a scaling
+formula against, and inventing one would violate §8.4 step 7 ("widen to
+UNKNOWN ... rather than manufacturing false precision") more than it
+would help. `MissileTube` still has no arc/zone concept, so the
+broadside/fore/aft missile-tube fields on `ShipClassData` are CANON
+reference data recorded for a future arc-aware tube, not yet consumed
+differently by zone (`ShipFactory` spawns them as identical, arc-less
+tubes regardless of source zone — see ASSUMPTIONS.md). Counter-missile
+tube counts are recorded but not spawned as any distinct object, because
+no distinct "counter-missile launcher" class exists anywhere in the
+codebase yet (a counter-missile is a `MissileState` whose `target` is
+another `MissileState`, launched through the ordinary missile-launch
+path) — wiring dedicated CM tubes is future work, not silently dropped.

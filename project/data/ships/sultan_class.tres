@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="ShipClassData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://simulation/ship_class_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+canonical_name = "Sultan-class"
+ship_type = "Battlecruiser"
+faction = "Haven"
+era = "People's Navy, pre-Republic reform (see AGENTS.md §8.2/§8.3)"
+source_note = "CANON, AGENTS.md §8.2/§8.3 (Honorverse Wiki class article, verified 2026-09-19): mass 859,250 tons (779,498,487.8 kg at 907.18474 kg/ton, US short ton); length 707 m; acceleration 489.2 G. Armament: 46 LMF-5(d) missile tubes (3 in chase armament, 20 per broadside -- mapped below as fore=3, broadside=40 (2x20), aft=3 split evenly since the source gives one combined 'chase' figure without a fore/aft breakdown -- ASSUMPTION for the fore/aft split only, tube COUNT itself is CANON); 4 L/130 capital-ship lasers + 12 L/118 anti-ship lasers = 16 lasers total (source does not break these out by firing zone -- ASSUMPTION: all 16 assigned to broadside_laser_mounts, since Sultan's chase armament is explicitly enumerated as missile tubes only in the source and no chase-laser count is given); 12 G/125 grasers (same zone caveat -- ASSUMPTION: broadside_graser_mounts); 40 LMC-8(g) counter-missile tubes (CANON count, recorded in counter_missile_tubes -- HONEST GAP: not yet spawned as a distinct launcher, see ShipClassData doc comment); 36 P/18x6 anti-missile lasers -- mapped to broadside_pd_mounts (ASSUMPTION zone split, same reasoning as the energy mounts above: source gives one combined PD count, not a broadside/fore/aft breakdown); 1 tractor beam (not modeled, no equivalent mechanic exists). Magazine: 1,528 F17 impeller-drive missiles (-> missile_magazine_total), 3,640 C2 counter-missiles (-> counter_missile_magazine_total), 10 LAD-15 tethered ECM decoys (not modeled). Compensator rating and crew: UNKNOWN, not given by source."
+length_m = 707.0
+max_width_m = 110.0
+max_height_m = 90.0
+mass_kg = 779498487.845
+rated_acceleration_g = 489.2
+max_angular_speed_rad_s = 0.3
+broadside_laser_mounts = 16
+broadside_graser_mounts = 12
+fore_laser_mounts = 0
+fore_graser_mounts = 0
+aft_laser_mounts = 0
+aft_graser_mounts = 0
+broadside_missile_tubes = 40
+fore_missile_tubes = 3
+aft_missile_tubes = 3
+missile_magazine_total = 1528
+counter_missile_tubes = 40
+counter_missile_magazine_total = 3640
+broadside_pd_mounts = 36
+fore_pd_mounts = 0
+aft_pd_mounts = 0

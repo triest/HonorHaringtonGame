@@ -9,3 +9,4 @@ _to_delete/
 # ARCHITECTURE.md). NEVER commit this; restored into ~/.ssh at the start
 # of each scheduled run instead.
 .git-deploy-key/
+.idea/

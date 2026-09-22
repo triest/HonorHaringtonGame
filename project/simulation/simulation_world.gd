@@ -1349,6 +1349,145 @@ func _resolve_individual_orientation_order(ship: ShipPhysicsState, order: Indivi
 	if Vector3.FORWARD.angle_to(remaining) <= order.orientation_tolerance_rad:
 		ship.angular_velocity = Vector3.ZERO
 
+## Shared BODY-frame "turn toward a world-space facing" helper. Extracted
+## from what used to be `_resolve_individual_orientation_order`'s own
+## inline logic (see CHANGELOG.md/git history for that original single-
+## caller version) so `_resolve_crossing_t_maneuver` below can reuse the
+## exact same EXACT-STOP turn-rate clamp for §41.1, instead of a second,
+## possibly-drifting copy of the same math.
+##
+## Turns `ship`'s nose toward `target_facing_world` at up to
+## `ship.max_angular_speed_rad_s`, clamped so this tick's rotation never
+## overshoots the remaining angle (no tuned gains, no oscillation).
+## Always WRITES `ship.angular_velocity` (including the zero-angle-error
+## case, where it writes a zero vector) -- callers that need a tolerance-
+## band "stop turning and hold" behavior (e.g. §30's CHANGE_ORIENTATION)
+## apply that themselves AFTER calling this, exactly as
+## `_resolve_individual_orientation_order` does above. Does nothing if
+## `target_facing_world` is the zero vector (nothing to turn toward).
+func _steer_toward_world_facing(ship: ShipPhysicsState, target_facing_world: Vector3, dt: float) -> void:
+	if target_facing_world == Vector3.ZERO:
+		return
+	if dt <= 0.0:
+		return
+
+	var target_facing_local: Vector3 = ship.orientation.inverse() * target_facing_world
+	var forward_local: Vector3 = Vector3.FORWARD
+	var angle_err: float = forward_local.angle_to(target_facing_local)
+
+	if angle_err <= 0.000001:
+		ship.angular_velocity = Vector3.ZERO
+		return
+
+	var axis_local: Vector3 = forward_local.cross(target_facing_local)
+	if axis_local.length_squared() <= 0.000001:
+		# forward_local and target_facing_local are (anti)parallel --
+		# ASSUMPTION: no canonically "correct" roll-free axis exists for
+		# a pure 180-degree reversal, so an arbitrary perpendicular axis
+		# is picked (this codebase never models roll/bank around the
+		# forward axis at all).
+		axis_local = forward_local.cross(Vector3.UP)
+		if axis_local.length_squared() <= 0.000001:
+			axis_local = forward_local.cross(Vector3.RIGHT)
+	axis_local = axis_local.normalized()
+
+	var max_turn_rate: float = ship.max_angular_speed_rad_s
+	if max_turn_rate <= 0.0:
+		return
+	var turn_rate: float = min(max_turn_rate, angle_err / dt)
+	ship.angular_velocity = axis_local * turn_rate
+
+## §41.1 Crossing the T -- default combat maneuvering AI for a ship with
+## NO more specific command claiming its movement this tick. Deliberately
+## runs LAST among the per-tick AI passes (see `tick_simulation`, right
+## before `_integrate_ships`) so it only fills in movement for ships
+## nothing else already claimed this tick:
+##   * a wreck (§63.1) never maneuvers;
+##   * a ship with an ACTIVE `IndividualCommandState` (§30) is under
+##     explicit single-ship command -- `_resolve_individual_orders`
+##     already drove its thrust/orientation this tick, and this pass
+##     must not fight that order;
+##   * a ship that is a MEMBER (not guide) of a formation with a valid
+##     (not lost, see TacticalAI.is_guide_lost) guide is being driven by
+##     `_resolve_formation_keeping`'s station-keeping controller --
+##     formation-level ("wall") crossing-the-T is explicitly NOT
+##     implemented yet (see TacticalAI.compute_crossing_t_maneuver's own
+##     doc comment), so an individual member is honestly left under
+##     station-keeping rather than having this pass fight it every tick.
+##     The formation GUIDE itself is not station-kept by anything, so it
+##     IS eligible here -- members simply follow its offset as always;
+##   * a critically damaged/disengaging ship (§26) is already retreating
+##     via `_resolve_damage_response`, which runs earlier this same
+##     tick -- this pass must not override that with an "engage" thrust.
+## Every remaining ship with a team and at least one usable hostile
+## sensor contact gets `TacticalAI.compute_crossing_t_maneuver`'s result
+## applied: thrust toward `desired_velocity_world` using the exact same
+## velocity-error-to-thrust conversion `_resolve_individual_orders` uses
+## for CHANGE_COURSE/CHANGE_SPEED (kept consistent rather than inventing
+## a second formula), and a turn toward `desired_facing_world` via the
+## shared `_steer_toward_world_facing` helper above. A ship with no
+## usable hostile contact is left completely untouched -- nothing
+## sensor-honest to maneuver against yet, same philosophy already used
+## by `_resolve_damage_response` for the no-contact retreat case.
+func _resolve_crossing_t_maneuver(dt: float) -> void:
+	for ship_id in ships.keys():
+		var ship: ShipPhysicsState = ships[ship_id]
+		if ship.is_wreck:
+			continue
+		if not teams.has(ship_id):
+			continue
+
+		var order_state: IndividualCommandState = individual_orders.get(ship_id)
+		if order_state != null and order_state.is_active():
+			continue
+
+		if _is_station_kept_formation_member(ship_id):
+			continue
+
+		var hull = hulls.get(ship_id)
+		if TacticalAI.is_critically_damaged(hull, CRITICAL_HULL_FRACTION):
+			continue
+
+		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+		var hostile_ids: Array = _hostile_ship_ids(ship_id)
+		var maneuver: Dictionary = TacticalAI.compute_crossing_t_maneuver(ship, contacts, hostile_ids)
+		var desired_velocity_world: Vector3 = maneuver["desired_velocity_world"]
+		var desired_facing_world: Vector3 = maneuver["desired_facing_world"]
+		if desired_velocity_world == Vector3.ZERO and desired_facing_world == Vector3.ZERO:
+			continue  # no usable hostile contact -- nothing sensor-honest to maneuver against
+
+		var max_accel: float = ship.effective_max_acceleration()
+		if max_accel > 0.0:
+			var velocity_error: Vector3 = desired_velocity_world - ship.velocity
+			var error_mag: float = velocity_error.length()
+			if error_mag > 0.0001:
+				var desired_accel_mag: float = min(max_accel, error_mag / dt)
+				var desired_accel: Vector3 = velocity_error.normalized() * desired_accel_mag
+				ship.commanded_thrust_local = ship.orientation.inverse() * (desired_accel / max_accel)
+
+		_steer_toward_world_facing(ship, desired_facing_world, dt)
+
+## Helper for `_resolve_crossing_t_maneuver`: true iff `ship_id` is a
+## non-guide member of some formation whose guide is currently valid
+## (not lost per TacticalAI.is_guide_lost) -- i.e. a ship whose movement
+## `_resolve_formation_keeping` is actively driving this tick, which
+## `_resolve_crossing_t_maneuver` must not fight. During a guide-lost
+## succession window `_resolve_formation_keeping` itself skips station-
+## keeping (see that function's §33.1 doc comment) and instead holds the
+## member's LAST commanded thrust -- this helper returns false in that
+## window so crossing-the-T is free to take over a member abandoned by
+## its lost guide, rather than leaving it frozen on stale thrust forever
+## if the succession window never resolves cleanly.
+func _is_station_kept_formation_member(ship_id: String) -> bool:
+	for formation_id in formations.keys():
+		var formation: FormationState = formations[formation_id]
+		if formation.guide_ship_id == ship_id:
+			continue
+		if not formation.member_ids().has(ship_id):
+			continue
+		return not TacticalAI.is_guide_lost(formation.guide_ship_id, ships, hulls, CRITICAL_HULL_FRACTION)
+	return false
+
 ## §26 "respond to damage" / "retreat" / "disengage" -- first slice. A
 ## critically damaged ship (see CRITICAL_HULL_FRACTION) stops thrusting
 ## toward the fight and instead thrusts directly away from its own known

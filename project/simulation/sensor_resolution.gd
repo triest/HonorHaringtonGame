@@ -156,6 +156,17 @@ static func update_contact(contact: SensorContact, observer_position: Vector3, d
 		var apparent: Array = _resolve_apparent_return(true_position, true_velocity, observer_position, target_ecm)
 		contact.estimated_position = apparent[0]
 		contact.estimated_velocity = apparent[1]
+		# ТЗ §23 estimated orientation/angular velocity: same "perfect
+		# within range, nothing outside" honesty level as position/
+		# velocity above (this codebase has no sensor NOISE model at
+		# all yet, for any estimated field) -- read straight from the
+		# target's own real state when it has one (a MissileState has
+		# `orientation` but no `angular_velocity`; the fallback keeps
+		# this contact's existing estimate rather than inventing a
+		# fake zero/identity that would silently overwrite a real
+		# previous reading).
+		contact.estimated_orientation = target.orientation if "orientation" in target else contact.estimated_orientation
+		contact.estimated_angular_velocity = target.angular_velocity if "angular_velocity" in target else contact.estimated_angular_velocity
 		contact.last_detection_sim_time = contact.continuous_detection_s
 		contact.time_since_lost_s = 0.0
 		contact.continuous_detection_s += dt

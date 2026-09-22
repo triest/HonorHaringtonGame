@@ -145,7 +145,21 @@ func _test_healthy_ship_still_fires_and_does_not_retreat() -> void:
 		world.tick_simulation(1.0 / 60.0)
 
 	_assert(beta_hull.integrity < beta_starting_integrity, "a healthy ship's AI should still fire on a hostile as before")
-	_assert(alpha.commanded_thrust_local == Vector3.ZERO, "a healthy ship's commanded thrust should not be touched by the damage-response rule")
+	# §41.1 Crossing the T (added after this test was first written) now
+	# gives every healthy engaging ship with no more specific order a
+	# default combat-maneuvering thrust (see
+	# SimulationWorld._resolve_crossing_t_maneuver) -- so "thrust stays
+	# exactly ZERO" is no longer the right invariant to assert here.
+	# What this test's own name/intent actually needs is narrower and is
+	# UNCHANGED by that addition: the §26 damage-response/disengage rule
+	# must not fire for a healthy ship. A wrongly-firing disengage would
+	# thrust alpha AWAY from its known hostile beta (beta sits at -X
+	# relative to alpha, so retreat is +X -- exactly the direction the
+	# sibling `_test_critically_damaged_ship_disengages_and_retreats`
+	# test above checks FOR on a genuinely damaged ship). Crossing the T
+	# instead CLOSES on/flanks the hostile, so its thrust's X component
+	# is <= 0 here, never the retreat's positive X.
+	_assert(alpha.commanded_thrust_local.dot(Vector3(1, 0, 0)) <= 0.0, "a healthy ship must not retreat (+X) from its hostile -- that would mean the disengage rule wrongly fired")
 
 func _init() -> void:
 	_test_is_critically_damaged_thresholds()

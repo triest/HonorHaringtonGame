@@ -30,10 +30,6 @@ var recharge_time_s: float = 0.75                # ASSUMPTION: rapid-fire compar
 var hits_required_to_kill: int = 2               # ASSUMPTION: a single laser hit is not automatically a kill (missile body is small/tough/maneuvering).
 var condition: float = 1.0                       # 1.0 = fully functional; synced each tick from POINT_DEFENSE subsystem condition (§25, see SimulationWorld._sync_subsystem_driven_conditions()).
 
-## §22.1 Sector Coverage: the mount is restricted to a specific firing arc.
-## If sector is null, it is treated as omnidirectional (legacy/placeholder).
-var sector: AttackGeometry.Sector = null
-var arc_half_width_rad: float = 0.5               # ASSUMPTION: default coverage width for a PD mount.
 
 var cooldown_remaining_s: float = 0.0
 var _tracking_target = null       # the MissileState currently being engaged, if any

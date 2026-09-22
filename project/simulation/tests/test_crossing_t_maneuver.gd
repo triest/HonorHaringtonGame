@@ -55,8 +55,8 @@ func _test_crossing_t_maneuver_produces_perpendicular_thrust() -> int:
 	var los := (ship_b.position - ship_a.position).normalized()
 
 	# The thrust should NOT be purely along the LOS (no simple charging)
-	var dot_with_los := abs(thrust.normalized().dot(los))
-	var is_perpendicular := dot_with_los < 0.5 # Significant deviation from straight line
+	var dot_with_los: float = absf(thrust.normalized().dot(los))
+	var is_perpendicular: bool = dot_with_los < 0.5 # Significant deviation from straight line
 
 	if not is_perpendicular:
 		printerr("FAIL: Ship A is charging straight at target or not moving. Thrust: %s, LOS: %s" % [thrust, los])

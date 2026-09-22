@@ -1845,3 +1845,51 @@ independently targeted the same hostile are not coordinated with each
 other -- both real, narrower-than-AGENTS.md-§34.2's-literal-wording
 ("one or more launching ships") limits of this first slice, honestly
 recorded in ASSUMPTIONS.md rather than silently scoped down.
+
+## Crossing the T (§41.1) -- pipeline placement and precedence (2026-09-22)
+
+`_resolve_crossing_t_maneuver(dt)` runs LAST among `tick_simulation`'s
+per-tick AI passes, immediately before `_integrate_ships(dt)`, on
+purpose: every earlier pass that can claim a ship's movement this tick
+(`_resolve_formation_keeping`, `_resolve_individual_orders`,
+`_resolve_damage_response`) already ran, so this pass only needs to ask
+"did anything already claim this ship?" once, cheaply, rather than
+duplicating each of those passes' own eligibility logic.
+
+Precedence, in the order actually checked: a wreck never maneuvers; a
+ship with no team is not a combatant; an ACTIVE `IndividualCommandState`
+(§30 explicit order) always wins -- checked via `.is_active()` on
+`individual_orders`, the exact same source of truth `_resolve_individual_orders`
+itself reads; a non-guide formation member under a currently-valid guide
+is left to `_resolve_formation_keeping`'s station-keeping controller
+(`_is_station_kept_formation_member`, new helper -- explicitly returns
+`false`, i.e. "not station-kept, free for crossing-the-T", during a
+guide-lost succession window, since `_resolve_formation_keeping` itself
+already stops touching that member's thrust in that window, per its own
+§33.1 doc comment -- leaving the member frozen forever would be worse
+than letting it maneuver on its own judgement); a critically damaged
+ship is left to `_resolve_damage_response`'s retreat thrust, checked via
+the same `TacticalAI.is_critically_damaged` call that function uses.
+
+`_steer_toward_world_facing(ship, target_facing_world, dt)` is a new
+shared helper, not a new formula: it is the exact turn-rate-clamped
+rotation logic that used to live only inside
+`_resolve_individual_orientation_order` (EXACT-STOP clamp against
+`max_angular_speed_rad_s`, body-frame axis via
+`orientation.inverse() * target_facing_world`, antiparallel fallback
+axis). Extracting it lets `_resolve_crossing_t_maneuver` reuse the same
+turn behavior for its `desired_facing_world` without a second,
+potentially-drifting copy of the rotation math. The caller-side
+tolerance check in `_resolve_individual_orientation_order` (zero
+`angular_velocity` once within `order.orientation_tolerance_rad`) stays
+in that caller, not the shared helper, because `_resolve_crossing_t_maneuver`
+has no equivalent "close enough, stop turning" order field -- it always
+turns toward the live geometric objective every tick instead.
+
+Thrust from `TacticalAI.compute_crossing_t_maneuver`'s
+`desired_velocity_world` is converted to `commanded_thrust_local` with
+the SAME velocity-error EXACT-STOP formula `_resolve_individual_orders`
+uses for CHANGE_COURSE/CHANGE_SPEED (clamp accel magnitude to
+`min(max_accel, error_mag / dt)`, then transform into the ship's own
+frame) -- reused rather than reinvented, for the same reason the turn
+logic was extracted rather than duplicated.

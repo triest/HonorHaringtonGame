@@ -2293,3 +2293,39 @@ from Honorverse canon. §56.3's own MVP acceptance test (15 numbered
 steps) is the concrete, checkable definition of "done" for this scope
 -- reference that list directly rather than re-deriving what "full
 command UI" means from prose.
+
+## §56.3 item A -- multi-select interaction model (INTERPRETATION, design decision, not canon)
+
+§1.10.4 (AGENTS.md §56.3 / CLOUD.md §1.10) is explicit about LMB
+(select), CTRL+LMB ("add to selection") and LMB drag-box (rectangle
+select multiple), but only says SHIFT+LMB should "expand/change the
+existing group according to the interface's context"
+("расширить/изменить существующую группу согласно контексту
+интерфейса") without pinning down exact semantics. Chosen this pass
+(scripts/selection_state.gd, SelectionState):
+* CTRL+LMB (and CTRL+drag-box) = **toggle** -- adds the id/each hit id
+  if not already selected, REMOVES it if it is. Matches "add to
+  selection" for the common case (clicking something new) while also
+  giving the player an obvious, discoverable way to drop one member of
+  a group without starting the selection over.
+* SHIFT+LMB (and SHIFT+drag-box) = **add-only** -- adds any ids not
+  already selected, never removes anything. Kept deliberately distinct
+  from CTRL's toggle so SHIFT reliably GROWS a selection (closer to the
+  literal word "extend" in the spec) rather than behaving identically
+  to CTRL.
+* Plain LMB click/drag-box with no modifier = replace-the-whole-
+  selection (select_only), including clearing the selection entirely
+  on a plain click that hits nothing -- standard RTS-style convention,
+  not spelled out verbatim in §1.10.4 but implied by treating selection
+  as something the player actively builds up; CTRL/SHIFT+click on empty
+  plot space intentionally does nothing (nothing to add/toggle), so a
+  stray modifier-click can't accidentally wipe a group.
+* Hit-testing (scripts/tactical_plot_selection.gd) picks the CLOSEST
+  icon within its own hit radius when multiple icons' hit-circles
+  overlap, not the first one drawn -- avoids a selection depending on
+  Dictionary/Array iteration order on a crowded plot.
+
+If the user's later live testing shows a different expectation for
+SHIFT specifically (the one truly ambiguous case above), revisit this
+entry and SelectionState's own doc comment together -- do not silently
+diverge code and documented rationale.

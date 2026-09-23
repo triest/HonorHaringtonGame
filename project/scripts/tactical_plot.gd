@@ -34,11 +34,28 @@ extends Control
 ## that. Ship vs missile contacts are told apart the exact same way
 ## SimulationWorld._update_missiles already does for counter-missiles:
 ## `contact.target is MissileState`.
+##
+## ТЗ §56.3 item A ("Multi-select"): this is also now the plot's mouse
+## INPUT surface -- LMB click/CTRL+LMB/SHIFT+LMB/drag-box against a
+## shared SelectionState (see that file's own doc comment for the
+## selection semantics chosen for each modifier). Hit-testing is pure
+## geometry (scripts/tactical_plot_selection.gd, unit-tested headlessly
+## the same way TacticalPlotProjector is) against `_last_icons`, a flat
+## list of {id, pos, radius} rebuilt every _draw() call -- the single
+## source of truth for "where is each icon actually drawn right now",
+## per the leftover note this file's own §56.2 planning left in
+## state.md ("keep each contact's last-drawn icon_pos/radius for
+## hit-testing, not recompute a parallel copy"). §56.3 items B-D (named
+## command groups, move/attack orders, weapon panel) build on top of
+## `selection` but are NOT this file's job -- this file only tracks
+## "what is currently selected" and draws a highlight around it.
 class_name TacticalPlot
 
 const MissileState = preload("res://simulation/missile_state.gd")
 const ContactState = preload("res://simulation/contact_state.gd")
 const TacticalPlotProjector = preload("res://scripts/tactical_plot_projector.gd")
+const TacticalPlotSelection = preload("res://scripts/tactical_plot_selection.gd")
+const SelectionState = preload("res://scripts/selection_state.gd")
 
 ## Plot auto-scales each update() to comfortably fit the farthest
 ## currently-live contact -- keeps every known contact on-plot without a
@@ -74,22 +91,54 @@ const RING_LABEL_COLOR := Color(0.4, 0.65, 0.6, 0.7)
 ## plot would otherwise flatten away.
 const STALE_ALPHA: float = 0.45
 
+## §56.3 item A: selection visuals + hit-testing geometry.
+const SELECTION_COLOR := Color(1.0, 1.0, 1.0, 0.9)
+const SHIP_HIT_RADIUS_PX: float = 10.0
+const MISSILE_HIT_RADIUS_PX: float = 8.0
+const OWN_SHIP_HIT_RADIUS_PX: float = 10.0
+## Minimum pointer travel (px) before a held LMB counts as a drag rather
+## than a click -- ASSUMPTION, purely a game-feel debounce so a slightly
+## shaky click does not get misread as an empty drag-box that clears the
+## selection.
+const DRAG_THRESHOLD_PX: float = 4.0
+const DRAG_BOX_FILL_COLOR := Color(0.6, 0.9, 1.0, 0.12)
+const DRAG_BOX_BORDER_COLOR := Color(0.6, 0.9, 1.0, 0.8)
+
 var pov_ship_id: String = ""
 var plot_range_m: float = MIN_PLOT_RANGE_M
+
+## Shared with other §56.3 UI (squadron-list panel, order menu) via
+## main.gd -- see class doc comment above. Assigned by main.gd right
+## after instantiation; guarded against null everywhere it's read since
+## a plot with no selection assigned should just behave as a
+## read-only display (matches every other optional collaborator in this
+## codebase, e.g. Hud/WeaponFx never assume a fully-wired scene either).
+var selection: SelectionState = null
 
 var _contacts: Array = []  # Array[Dictionary], rebuilt each update()
 var _origin_present: bool = false
 var _pov_position: Vector3 = Vector3.ZERO
 var _pov_velocity: Vector3 = Vector3.ZERO
 
+## Rebuilt every _draw() call: Array[{"id": String, "pos": Vector2,
+## "radius": float}] in the exact screen positions just drawn --
+## hit-testing (mouse input) always reads THIS, never a parallel
+## recomputation, so "what you see is what you can click" by
+## construction.
+var _last_icons: Array = []
+
+var _drag_active: bool = false
+var _drag_start_px: Vector2 = Vector2.ZERO
+var _drag_current_px: Vector2 = Vector2.ZERO
+
 func _ready() -> void:
 	custom_minimum_size = Vector2(PLOT_SIZE_PX, PLOT_SIZE_PX)
 	size = Vector2(PLOT_SIZE_PX, PLOT_SIZE_PX)
 	set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, int(PLOT_MARGIN_PX))
-	# §56.2 item C (mouse-first control) is not implemented yet -- do not
-	# swallow clicks meant for other nodes until it is; flip this to
-	# MOUSE_FILTER_STOP (or PASS + real hit-testing) when that item lands.
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# §56.3 item A: the plot is now a real input surface (click/drag
+	# select) -- STOP so it actually receives mouse events instead of
+	# passing them through to whatever's behind it.
+	mouse_filter = Control.MOUSE_FILTER_STOP
 
 ## Call once per simulation tick (same call site/order as Hud.update /
 ## WeaponFx.update, see main.gd._on_tick) with the world and which ship
@@ -132,6 +181,8 @@ func update(world: SimulationWorld, ship_id: String) -> void:
 	queue_redraw()
 
 func _draw() -> void:
+	_last_icons.clear()
+
 	var radius: float = minf(size.x, size.y) * 0.5 - PLOT_MARGIN_PX
 	if radius <= 4.0:
 		return
@@ -148,6 +199,7 @@ func _draw() -> void:
 
 	if not _origin_present:
 		draw_string(ThemeDB.fallback_font, center - Vector2(70, 0), "NO PLOT (own ship unknown)", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, HOSTILE_COLOR)
+		_draw_drag_box()
 		return
 
 	# Own ship: small square at the plot's centre (it is, by definition,
@@ -156,6 +208,9 @@ func _draw() -> void:
 	draw_rect(Rect2(center - Vector2(5, 5), Vector2(10, 10)), OWN_SHIP_COLOR, false, 2.0)
 	_draw_velocity_leader(center, _pov_velocity, radius, OWN_SHIP_COLOR)
 	draw_string(ThemeDB.fallback_font, center + Vector2(8, 18), pov_ship_id, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, OWN_SHIP_COLOR)
+	_register_icon(pov_ship_id, center, OWN_SHIP_HIT_RADIUS_PX)
+	if selection != null and selection.is_selected(pov_ship_id):
+		_draw_selection_ring(center, OWN_SHIP_HIT_RADIUS_PX + 4.0)
 
 	for contact in _contacts:
 		var projection: Dictionary = TacticalPlotProjector.project(contact["estimated_position"], _pov_position, plot_range_m, radius)
@@ -166,14 +221,21 @@ func _draw() -> void:
 
 		if contact["is_missile"]:
 			_draw_missile_icon(icon_pos, color)
+			_register_icon(contact["id"], icon_pos, MISSILE_HIT_RADIUS_PX)
 		else:
 			_draw_ship_icon(icon_pos, color, projection["clamped"])
 			var lead_target: Vector3 = contact["estimated_position"] + contact["estimated_velocity"] * VELOCITY_LEADER_SECONDS
 			var lead_projection: Dictionary = TacticalPlotProjector.project(lead_target, _pov_position, plot_range_m, radius)
 			draw_line(icon_pos, center + lead_projection["plot_offset_px"], color, 1.5)
+			_register_icon(contact["id"], icon_pos, SHIP_HIT_RADIUS_PX)
+
+		if selection != null and selection.is_selected(contact["id"]):
+			_draw_selection_ring(icon_pos, (MISSILE_HIT_RADIUS_PX if contact["is_missile"] else SHIP_HIT_RADIUS_PX) + 4.0)
 
 		var label: String = "%s  %s  %s" % [contact["id"], _format_range(projection["range_m"]), _format_bearing(projection["bearing_rad"])]
 		draw_string(ThemeDB.fallback_font, icon_pos + Vector2(8, 4), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, color)
+
+	_draw_drag_box()
 
 func _draw_ship_icon(pos: Vector2, color: Color, clamped: bool) -> void:
 	var s: float = 6.0
@@ -201,6 +263,23 @@ func _draw_velocity_leader(from_px: Vector2, velocity: Vector3, radius: float, c
 		lead_px = lead_px.normalized() * radius * 0.9
 	draw_line(from_px, from_px + lead_px, color, 1.5)
 
+## §56.3 item A: a plain ring around a selected icon's already-drawn
+## position -- deliberately not a re-draw of the icon itself (own shape/
+## colour stay exactly as drawn above; selection is an ADDITIONAL cue,
+## per §1.10.4 "После выбора объект получает визуальное выделение").
+func _draw_selection_ring(pos: Vector2, ring_radius: float) -> void:
+	draw_arc(pos, ring_radius, 0.0, TAU, 16, SELECTION_COLOR, 1.5)
+
+func _draw_drag_box() -> void:
+	if not _drag_active:
+		return
+	var rect := Rect2(_drag_start_px, _drag_current_px - _drag_start_px).abs()
+	draw_rect(rect, DRAG_BOX_FILL_COLOR, true)
+	draw_rect(rect, DRAG_BOX_BORDER_COLOR, false, 1.0)
+
+func _register_icon(id: String, pos: Vector2, hit_radius: float) -> void:
+	_last_icons.append({"id": id, "pos": pos, "radius": hit_radius})
+
 func _contact_color(contact: Dictionary) -> Color:
 	if contact["is_missile"]:
 		return MISSILE_COLOR
@@ -217,3 +296,65 @@ static func _format_range(range_m: float) -> String:
 
 static func _format_bearing(bearing_rad: float) -> String:
 	return "%03d°" % [int(round(rad_to_deg(bearing_rad))) % 360]
+
+## §56.3 item A: LMB click / CTRL+LMB / SHIFT+LMB / LMB drag-box, per
+## §1.10.4 and SelectionState's own doc comment for the exact semantics
+## chosen for each modifier. A no-op entirely if `selection` was never
+## assigned (see that var's own doc comment).
+func _gui_input(event: InputEvent) -> void:
+	if selection == null:
+		return
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_drag_active = false
+			_drag_start_px = event.position
+			_drag_current_px = event.position
+			accept_event()
+		else:
+			_on_left_release(event)
+			accept_event()
+		return
+
+	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		_drag_current_px = event.position
+		if not _drag_active and _drag_start_px.distance_to(_drag_current_px) >= DRAG_THRESHOLD_PX:
+			_drag_active = true
+		if _drag_active:
+			queue_redraw()
+		accept_event()
+
+func _on_left_release(event: InputEventMouseButton) -> void:
+	var ctrl: bool = event.ctrl_pressed
+	var shift: bool = event.shift_pressed
+
+	if _drag_active:
+		var rect := Rect2(_drag_start_px, event.position - _drag_start_px).abs()
+		var hits: Array = TacticalPlotSelection.box_test(rect, _last_icons)
+		if ctrl:
+			for id in hits:
+				selection.toggle(id)
+		elif shift:
+			selection.add_only(hits)
+		else:
+			selection.select_only(hits)
+	else:
+		var hit_id: String = TacticalPlotSelection.hit_test(event.position, _last_icons)
+		if hit_id != "":
+			if ctrl:
+				selection.toggle(hit_id)
+			elif shift:
+				selection.add_only([hit_id])
+			else:
+				selection.select_only([hit_id])
+		elif not ctrl and not shift:
+			# Plain click on empty plot space clears the selection --
+			# standard RTS-style convention, not spelled out verbatim in
+			# §1.10.4 but implied by it always describing selection as
+			# something the player actively builds up; CTRL/SHIFT click
+			# on empty space intentionally does nothing (nothing to
+			# add/toggle).
+			selection.clear()
+
+	_drag_active = false
+	queue_redraw()

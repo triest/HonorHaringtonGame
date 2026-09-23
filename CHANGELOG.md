@@ -3123,3 +3123,77 @@ CANON_RULES.md ("Двадцать вторая сверка", не канон-с
 фиксация источника). §56.3's MVP acceptance test (15 шагов, почти всё
 мышью) теперь официальный критерий готовности command-UI части
 вертикального среза.
+
+## §56.3 item A: multi-select mechanics on the tactical plot (2026-09-23, scheduled dev pass, manually fired)
+
+Первый пункт нового чек-листа §56.3 (полный tactical command UI, см.
+AGENTS.md §56.3 / CLOUD.md §1.10 / .tools/state.md). Реализована
+механика мультивыбора на существующем tactical plot (§56.2 items A/B):
+
+* `scripts/selection_state.gd` (новый, `class_name SelectionState`) --
+  единое, разделяемое между видами хранилище текущего выбора (id-шники
+  кораблей/контактов), без какой-либо orders-логики внутри (по тому же
+  принципу separation of concerns, что и весь остальной проект --
+  §42). CTRL+LMB = toggle, SHIFT+LMB = add-only (никогда не убирает),
+  plain click/drag = replace. Точное обоснование выбора семантики для
+  неоднозначного текста ТЗ (SHIFT конкретно) -- ASSUMPTIONS.md "§56.3
+  item A".
+* `scripts/tactical_plot_selection.gd` (новый, `class_name
+  TacticalPlotSelection`) -- чистая геометрия hit-testing (точка/
+  прямоугольник против списка уже отрисованных иконок), без Control/
+  Viewport, unit-тестируемая headless тем же способом, что и
+  `tactical_plot_projector.gd`.
+* `scripts/tactical_plot.gd`: `mouse_filter` переключён с IGNORE на
+  STOP (плот теперь реально получает клики); `_gui_input()` обрабатывает
+  LMB press/release + drag-порог (4px) для различения клика и
+  drag-box; хранит `_last_icons` (id/pos/radius) как единственный
+  источник правды для hit-testing, перестраивается каждый `_draw()` --
+  тот самый leftover-комментарий из state.md времён §56.2 ("keep each
+  contact's last-drawn icon_pos/radius for hit-testing") наконец
+  реализован. Выбранные иконки получают визуальное кольцо-выделение
+  (`_draw_selection_ring`); во время активного drag рисуется
+  полупрозрачный прямоугольник резинки. Собственный корабль (POV)
+  теперь тоже входит в hit-test список (можно выбрать себя же).
+* `scripts/main.gd`: создаёт один `SelectionState` в `_ready()` и
+  передаёт его в `tactical_plot.selection` -- эта же переменная
+  `main.selection` будет переиспользована будущими §56.3 item B/D
+  панелями (список эскадр, контекстное меню приказов), не
+  изобретается параллельная копия выбора для каждой панели.
+* Тесты (новые, оба ALL TESTS PASSED): `simulation/tests/
+  test_selection_state.gd` (9 проверок -- select_only/toggle/add_only/
+  clear/is_selected/сигнал selection_changed, включая отсутствие
+  лишнего emit на no-op clear), `simulation/tests/
+  test_tactical_plot_selection.gd` (8 проверок -- hit_test точное
+  попадание/промах/пустой список/выбор ближайшей иконки при
+  перекрытии, box_test попадание/промах/пустой список/устойчивость к
+  перевёрнутому прямоугольнику drag).
+* `ASSUMPTIONS.md`: новая запись "§56.3 item A" фиксирует
+  интерпретацию неоднозначного текста ТЗ про SHIFT+LMB.
+
+НЕ входит в этот пасс (следующие пункты того же чек-листа, ещё НЕ
+реализованы): B (именованная командная группа / squadron-list панель),
+C (RMB move order с визуализацией курса), D (контекстное меню
+приказов), E-I. Сценарий по-прежнему 1v1 (item H ещё не сделан), так
+что живой мультивыбор больше чем одного своего корабля пока
+некого выбирать -- проверено юнит-тестами (синтетические иконки) и
+headless smoke, НЕ живым запуском с несколькими кораблями.
+
+Проверено (режим "fast visible-result" §56.3 всё ещё в силе, полный
+симуляционный набор не гонялся):
+1. `godot --headless --import` -- чисто.
+2. `test_selection_state.gd` -- ALL TESTS PASSED (9/9).
+3. `test_tactical_plot_selection.gd` -- ALL TESTS PASSED (8/8).
+4. `test_tactical_plot_projector.gd` (регресс, не менялся) -- ALL
+   TESTS PASSED (8/8, без изменений).
+5. `godot --headless res://scenes/main.tscn --quit-after 120` -- exit
+   0, те же самые 16x baseline `mesh_get_surface_count`/"Parameter m is
+   null" (dummy-рендерер), ноль новых типов ошибок -- смена
+   `mouse_filter`/добавление `_gui_input` на TacticalPlot ничего не
+   сломала в headless-режиме (там нет реальных mouse-событий, но
+   компиляция и `_ready()`/`_draw()` пути выполнились чисто).
+
+**НЕ заявляется "§56.3 закрыт"** -- это только пункт A из 9+1. Мышь
+реально не тестировалась живым пользователем (headless-окружение не
+может сгенерировать настоящие InputEventMouseButton/Motion события с
+модификаторами) -- см. .tools/state.md, тот же урок §56.1/§56.2 ещё
+раз: не объявлять готовым без живого подтверждения.

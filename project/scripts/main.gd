@@ -39,6 +39,11 @@ var hulls: Dictionary = {}  # String ship_id -> HullState (local, illustrative o
 var weapon_fx: WeaponFx
 var hud: Hud
 var tactical_plot: TacticalPlot
+## §56.3 item A: single shared selection, injected into TacticalPlot (and
+## future §56.3 UI -- squadron list, order menu) below -- see
+## selection_state.gd's own doc comment for why this lives here rather
+## than inside any one view.
+var selection: SelectionState
 var player_input: PlayerInput
 var win_lose_screen: WinLoseScreen
 
@@ -111,7 +116,10 @@ func _ready() -> void:
 	# ТЗ §56.2 items A/B (tactical plot): same POV ship as Hud below --
 	# see tactical_plot.gd's own doc comment for why it reads
 	# world.sensor_contacts (not world.ships/world.missiles directly).
+	selection = SelectionState.new()
+
 	tactical_plot = TacticalPlot.new()
+	tactical_plot.selection = selection
 	add_child(tactical_plot)
 
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.

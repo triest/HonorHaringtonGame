@@ -162,3 +162,20 @@ HonorHarington.exe and explicitly confirm live whether HUD text now shows
 and whether keys/mouse now do anything, for BOTH this items-4/5 report and
 the separate §56.2 UX work above -- do not mark either resolved without
 that direct confirmation.
+
+---
+Follow-up (same day, live chat with user): user reported still seeing NO
+tactical plot after supposedly re-testing. Root cause found: the
+build/HonorHarington.exe the user was running was a STALE build from
+2026-09-23 10:18 UTC -- BEFORE all three same-day commits (docs §56.2
+correction 10:45, §56.2 items A+B tactical plot 11:01, and this session's
+§56.1 items-4/5 grab_focus fix 11:08). Nobody had re-run the Windows export
+after those commits landed. Re-exported now (12:54 UTC) via `godot
+--headless --export-release "Windows Desktop" project/build/HonorHarington.exe`
+-- exit 0, .pck now includes tactical_plot.gd/tactical_plot_projector.gd
+and main.gd's grab_focus fix. Told the user to close the running instance
+and relaunch the SAME exe path (no redownload needed, it's on their
+machine already). LESSON for future passes: after ANY commit that touches
+scenes/scripts actually reachable from main.tscn, re-export before telling
+the user to retest -- do not assume a previously-built .exe reflects the
+current commit.

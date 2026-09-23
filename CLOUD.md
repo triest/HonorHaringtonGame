@@ -137,6 +137,34 @@ Physics and damage run through the exact same code/formulas for every ship regar
   tests alone -- §56.1 was reported closed on headless evidence only
   and failed the user's actual first run.
 
+## 1.10. FULL TACTICAL COMMAND UI TARGET (AGENTS.md §56.3, adopted 2026-09-24)
+* Supersedes/extends §1.9 (§56.2). User supplied a detailed UI spec
+  (project file CHATGPT.md, now AGENTS.md §56.3 verbatim) plus a
+  two-panel reference image (`docs/reference/tactical_command_ui_reference.png`)
+  -- READ BOTH before touching UI code.
+* Core shift: full hierarchical fleet command (Fleet -> Task Force ->
+  Squadron -> Division/Formation -> Ship), not single-ship control.
+  Multi-select (LMB, Ctrl+LMB add, Shift+LMB extend, drag-box), RMB
+  move orders, contextual order menu (ATTACK/FOCUS FIRE/HOLD FIRE/
+  WEAPONS FREE/DEFEND/COVER/FOLLOW/INTERCEPT/APPROACH/WITHDRAW/
+  MAINTAIN FORMATION), per-weapon-type fire control (missiles w/
+  type+salvo+target, counter-missiles auto/manual/hold, energy
+  weapons, PD auto/hold/priority), zoom levels (Fleet/Formation/Ship/
+  Weapon view), combined free 3D command camera + tactical plot (not
+  either/or). Must reuse existing `CommandEchelon`/`FormationState`/
+  `IndividualOrder`/`ShipCombatDirective` backend -- no parallel UI-only
+  order model.
+* Explicitly NOT an RTS (no resource gathering/base building/unit
+  production) -- an operational/tactical command sim. No HP bars
+  (still §25.1).
+* MVP acceptance test (AGENTS.md §56.3 / §1.10.14) is now the actual
+  bar for "playable": open field top-down, zoom, select single ship,
+  drag-select multiple, select enemy target, mouse move order, mouse
+  attack order, pick weapon type, fire missile salvo, see missile
+  tracks, change a group order, pick one ship out of a group, give it
+  an individual override, keep observing from command camera -- nearly
+  all with the mouse. Do not report closed without this passing live.
+
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

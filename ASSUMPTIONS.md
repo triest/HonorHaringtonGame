@@ -2277,3 +2277,19 @@ This is the RENDERING convention only -- it does not touch simulation
 distances/positions themselves (§56.2 item D, repositioning the
 hardcoded alpha/beta scenario to a canon-plausible separation, is a
 separate, not-yet-done checklist item; see .tools/state.md).
+
+## §56.3 -- full tactical command UI adopted from user-supplied spec (design decision, not canon)
+
+Not a canon-verification entry: AGENTS.md §56.3 (and CLOUD.md §1.10)
+adopt a detailed UI/UX specification the user wrote (with ChatGPT's
+help, saved as this project's CHATGPT.md) plus a reference image at
+docs/reference/tactical_command_ui_reference.png, as this project's own
+design choice for how a Honorverse-style tactical plot/command UI
+should work -- the books describe the CONCEPT of a tactical plot but
+not a specific software UI, so the concrete mechanics here (drag-box
+multi-select, contextual order menus, per-weapon-type fire panels,
+named zoom levels) are INTERPRETATION/original design, not sourced
+from Honorverse canon. §56.3's own MVP acceptance test (15 numbered
+steps) is the concrete, checkable definition of "done" for this scope
+-- reference that list directly rather than re-deriving what "full
+command UI" means from prose.

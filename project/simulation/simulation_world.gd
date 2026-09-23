@@ -441,6 +441,29 @@ func _hostile_ship_ids(ship_id: String) -> Array:
 			result.append(other_id)
 	return result
 
+## ТЗ §56.1 item 4 (Minimal HUD): read-only accessor for "current target
+## designation", so the HUD can show a ship's actual live weapon target
+## without duplicating (or drifting from) the exact selection rule
+## weapons AI already applies each tick. Deliberately calls the SAME
+## private helper the AI itself uses (_resolve_weapon_target, plus its
+## _hostile_ship_ids dependency) instead of re-deriving a second copy of
+## "which target does this ship prefer" -- manual directive target wins
+## if set on ship_combat_directives, else this returns the AI's live
+## nearest-usable-hostile-contact pick, exactly matching what will
+## actually fire next. Pure query: every function it calls only reads
+## state, so this is safe to call from the HUD every frame with no
+## simulation side effects. Returns "" when there is no valid target
+## right now (no usable hostile sensor contact yet, ship unknown, etc).
+func get_weapon_target_designation(ship_id: String) -> String:
+	var ship = ships.get(ship_id)
+	if ship == null:
+		return ""
+	var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+	var hostile_ids: Array = _hostile_ship_ids(ship_id)
+	var selection: Dictionary = _resolve_weapon_target(ship_id, ship, contacts, hostile_ids)
+	var target_id = selection.get("ship_id")
+	return target_id if target_id != null else ""
+
 func add_missile(missile_id: String, missile, owner_ship_id: String = "") -> void:
 	missiles[missile_id] = missile
 	missile_owners[missile_id] = owner_ship_id

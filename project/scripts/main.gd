@@ -35,6 +35,15 @@ extends Node3D
 var world: SimulationWorld
 var hulls: Dictionary = {}  # String ship_id -> HullState (local, illustrative only -- NOT passed to world.hulls; see world.add_ship's optional hull param, unused here)
 var weapon_fx: WeaponFx
+var hud: Hud
+
+## ТЗ §56.1 item 4 (Minimal HUD): which ship the single HUD panel is a
+## point of view for. Alpha, arbitrarily -- no player-controlled side
+## exists yet (that is item 5), so there is no principled reason to
+## prefer one demo ship over the other; picking one is what the
+## checklist item itself allows ("pick ONE ship... unless showing both
+## is trivial").
+const HUD_POV_SHIP_ID: String = "alpha"
 
 func _ready() -> void:
 	world = SimulationWorld.new()
@@ -44,6 +53,15 @@ func _ready() -> void:
 	alpha.position = Vector3(-5000.0, 0.0, 0.0)
 	alpha.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
 	alpha.defense = ShipDefenseState.new()
+	# ТЗ §56.1 item 4: assigned here (previously null) so the HUD's
+	# per-subsystem readout has real, non-null state to show -- "per-ship
+	# subsystem condition" is meaningless with subsystems always null.
+	# Every subsystem starts fully healthy (ShipSubsystems._init default);
+	# nothing else about the demo scenario changes, the already-wired
+	# consumers (WEAPONS/POINT_DEFENSE/MISSILE_SYSTEMS/SENSORS/
+	# PROPULSION/MANEUVERING/COMMUNICATIONS, see ship_subsystems.gd) simply
+	# now have live data to act on as combat damages these ships.
+	alpha.subsystems = ShipSubsystems.new()
 	world.add_ship("alpha", alpha)
 	world.set_team("alpha", "red")
 
@@ -52,6 +70,7 @@ func _ready() -> void:
 	beta.orientation = Quaternion(Vector3.UP, PI)
 	beta.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
 	beta.defense = ShipDefenseState.new()
+	beta.subsystems = ShipSubsystems.new()  # see alpha.subsystems assignment above for rationale
 	world.add_ship("beta", beta)
 	world.set_team("beta", "blue")
 
@@ -77,6 +96,9 @@ func _ready() -> void:
 
 	weapon_fx = WeaponFx.new()
 	add_child(weapon_fx)
+
+	hud = Hud.new()
+	add_child(hud)
 
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()
@@ -105,6 +127,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 		for mount in world.weapon_mounts[ship_id]:
 			mount.tick(dt)
 	weapon_fx.update(world)
+	hud.update(world, HUD_POV_SHIP_ID)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo
 ## ships from a distance proportional to their separation, computed from

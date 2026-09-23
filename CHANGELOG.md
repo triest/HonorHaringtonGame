@@ -1,5 +1,47 @@
 # CHANGELOG.md
 
+## 2026-09-23 (проход: §56.1 item 4 -- минимальный HUD)
+
+Реализован минимальный HUD (`scripts/hud.gd`) -- по §25.1 без health-баров,
+чисто текстовый `Label` внутри `CanvasLayer`: список состояния всех
+подсистем корабля (`ShipSubsystems.get_condition()` в процентах),
+текущая designated-цель оружия и список сенсорных контактов
+(`world.sensor_contacts`). Точка обзора HUD на этот срез -- один корабль
+(`alpha`, константа `HUD_POV_SHIP_ID` в `main.gd`), по собственной
+оговорке чеклиста ("pick ONE ship... unless showing both is trivial").
+
+Добавлен новый read-only метод `SimulationWorld.
+get_weapon_target_designation(ship_id)`: сознательно переиспользует
+ТЕ ЖЕ приватные хелперы, что и сама AI (`_resolve_weapon_target` +
+`_hostile_ship_ids`), а не отдельную копию логики выбора цели -- так
+HUD физически не может показать цель, расходящуюся с той, по которой
+реально выстрелит оружие в следующий тик.
+
+`main.gd`: обоим демо-кораблям (alpha/beta) теперь присваивается
+`ShipSubsystems.new()` (раньше `.subsystems` оставался `null`) -- без
+этого "per-ship subsystem condition" в HUD было бы показывать нечего.
+Больше в демо-сценарии ничего не меняется.
+
+Проверено (полный набор симуляционных тестов по правилу §56.1
+"fast visible-result" не гонялся):
+1. Одноразовый (не закоммиченный) headless-скрипт на `SceneTree`,
+   воспроизводящий wiring `main.gd._ready()` и гоняющий
+   `world.tick_simulation()` вручную 300 тиков (~5с) -- HUD-текст после
+   прогона показал все 11 подсистем по 100%, `TARGET: beta`,
+   `CONTACTS: beta: DETECTED`, что совпало с независимым вызовом
+   `world.get_weapon_target_designation("alpha") == "beta"`.
+2. Headless `--import` (чисто, без ошибок) + headless прогон
+   `res://scenes/main.tscn --quit-after 120` -- по-прежнему ровно 16
+   повторений уже задокументированного dummy-renderer артефакта
+   `mesh_get_surface_count`/"Parameter m is null" (та же база, что и
+   в конце прохода item 6) -- HUD (чистый `CanvasLayer`/`Label`, без
+   мешей) не добавил ни одного нового типа ошибки/предупреждения в
+   живом прогоне сцены.
+
+Честно НЕ сделано (items 5, 7, 8): ввод приказов на хоткеях (item 5,
+следующий пункт); win/lose (item 7); Windows-экспорт (item 8).
+
+
 ## 2026-09-22 (проход: обнаружен и исправлен параллельный внешний коммит `5cd067c "test commit@"` -- §41.1 Crossing the T доведён до рабочего состояния)
 
 В начале прохода `git log` показал коммит `5cd067c` поверх `origin/main`

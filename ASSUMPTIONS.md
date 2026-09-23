@@ -2225,3 +2225,22 @@ detach эшелона в рантайме; per-mount/per-arc выбор цели
 * Zoom/orbit пределы (`MIN_DISTANCE_SCALE=0.05`, `MAX_DISTANCE_SCALE=20`,
   pitch clamp ±80°) — инженерные ASSUMPTION-константы для "разумного"
   диапазона, не выведены из какого-либо источника (чисто UX-выбор).
+
+## §56.2 -- distance-compression convention for the tactical plot (INTERPRETATION)
+
+Gap: canon engagement ranges (hundreds of thousands to millions of km,
+per §8.1) cannot be rendered 1:1 in a literal 3D scene -- ships would
+be sub-pixel dots at any practical camera/z-far distance, or off-screen
+entirely. AGENTS.md §56.2 (user decision, 2026-09-23) requires the
+displayed range NUMBERS and missile flight-time PACING to be
+canon-scale, while ship/contact icons are drawn at a fixed readable
+size regardless of true separation. The exact compression formula/
+convention (e.g. logarithmic radial plot, fixed icon size with a
+numeric range readout, or a separate zoomable 2D plot alongside the
+3D view) is left to implementation to choose and must be logged here
+with its reasoning once picked -- this entry only records that SOME
+documented symbolic convention is required, not which one. Flag as
+INTERPRETATION, not CANON: the books describe tactical plots
+conceptually but this project's specific rendering convention for one
+is our own design choice under §7's documented-interpretation
+allowance.

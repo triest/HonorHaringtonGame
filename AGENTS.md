@@ -2106,6 +2106,93 @@ of only headless test output.
 
 ---
 
+## 56.2 UI/control paradigm correction -- tactical plot, mouse-first, canon-scale ranges (user decision, 2026-09-23) -- REOPENS and PARTIALLY SUPERSEDES 56.1 items 1/4/5
+
+**Why:** the first §56.1 pass shipped a free-orbit camera flying close
+around two ship models a few dozen meters apart, controlled mostly by
+hotkeys, with a plain corner-text HUD. The user tested the exported
+build and rejected this directly: ships nearly touching, no sense of
+scale, and mouse control barely used -- described as looking like "a
+cheap Star Wars knockoff", not the Honorverse. The user's own words:
+control should be mouse-first, engagement distance should match the
+books, contacts (including missiles) must be clearly visible on
+whatever display represents the battle, and this is explicitly a
+STRATEGY/tactical-command game, not a flight-stick space-dogfight sim. Explicit genre statement (user, 2026-09-23): this is a TACTICAL STRATEGY game (тактическая стратегия) -- command-and-control from a tactical plot, not a piloted dogfight -- every UI decision in this section should be checked against that genre, not against space-combat-game conventions in general.
+This section is CANON-motivated, not just a UI-polish request: §8.1
+already documents real canon numbers that make a close-dogfight
+camera physically wrong for this setting -- energy-weapon effective
+range around 3,600,000 km, missile powered envelopes of
+15,000,000-63,000,000 km (line 317-318/326-329 of this file). At those
+distances literal to-scale 3D rendering makes every ship an invisible
+sub-pixel dot; the books' own answer to this is that Honorverse
+tactical officers fight from a "plot" -- a symbolic tactical display
+(icons, vector leaders, range rings), not a cockpit window. This
+project's UI must follow that same logic, not fight it.
+
+**1. Mouse-first control (revises 56.1 item 5).** Primary interaction
+is the mouse, not hotkeys-as-primary: click a ship/contact icon on the
+tactical plot to select it; click-and/or-drag on the plot to set a
+course/vector or designate a target; a context menu or click-hold on a
+selected contact for weapons-free/hold and other `ShipCombatDirective`
+orders. Keyboard shortcuts may exist as accelerators for the same
+actions (this does not delete 56.1 item 5's hotkey wiring -- it adds
+the mouse path as PRIMARY and keeps hotkeys as secondary/accelerators,
+consistent with a strategy-game control scheme, e.g. RTS conventions).
+Camera control (orbit/zoom) may stay on mouse too (drag/wheel, already
+implemented) -- that part of 56.1 item 1 is NOT rejected, only its
+role as a close-up "flight" camera is.
+
+**2. Canon-scale engagement distances (revises 56.1 items 1 and 2's
+implicit assumption).** The hardcoded scenario (56.1 item 6) and any
+default scenario after it must place opposing forces at a
+canon-plausible tactical distance -- hundreds of thousands to low
+millions of km apart, not tens of meters -- consistent with the
+ranges already logged in §8.1. Do not literally scale the 3D scene 1:1
+to those distances (that makes ship meshes physically unrenderable at
+any practical camera distance/z-far); instead the 3D/plot view must
+use a documented, INTERPRETATION-tagged distance-compression or
+symbolic-icon convention (e.g. ships rendered as an icon/sprite at a
+readable size regardless of true separation, real range shown as a
+number/ring rather than as literal mesh distance) so that "distance
+feels like the book" means the DISPLAYED range numbers and tactical
+pacing (missile flight times of real minutes, not seconds) are canon-
+scale, not that the camera literally travels millions of km. Log the
+chosen convention in ASSUMPTIONS.md as INTERPRETATION with the
+reasoning above.
+
+**3. Tactical plot / contacts display, including missiles (revises
+56.1 item 4).** The corner-text-only HUD from the first pass is not
+sufficient on its own. Add a genuine tactical plot: a top-down or
+God's-eye display (2D is acceptable for this slice; do not build a
+full 3D holo-tank) showing every `SensorContact` as an icon with
+IFF/hostility color, a velocity vector leader, and range/bearing from
+the player's ship; every live `MissileState` shown as its own
+distinctly-marked icon/track (not merged with ship contacts) so
+missile threats are immediately readable, matching the missile-centric
+nature of Honorverse combat already reflected in this project's
+simulation layer. The existing per-subsystem text readout (56.1 item
+4's original scope) stays too, as a secondary panel -- this section
+adds the plot, it does not remove the subsystem text.
+
+**Still explicitly OUT OF SCOPE, same as 56.1:** canon-accurate hull
+art, sound/music, the general Scenario system/Editor, Replay, further
+command-echelon UI, any new simulation mechanic. This section changes
+HOW the existing vertical slice presents itself and is controlled, not
+WHAT simulation features exist.
+
+**Definition of done for 56.2:** the user can open the build, see a
+tactical plot with both ships and any missiles in flight as distinct,
+clearly visible icons at a canon-plausible logged range, select
+ships/issue at least course+target+weapons-free-or-hold orders
+primarily by mouse on that plot, and confirms live that it now reads
+as a tactical command display rather than a close-range dogfight. Do
+not report this closed on headless verification alone -- 56.1 was
+already reported "closed" once on headless-only evidence and the
+user's live test found it unplayable; this time get an explicit live
+"yes" from the user before marking 56.2 closed.
+
+---
+
 ### Milestone 1
 
 Engine skeleton + 3D world + simulation loop.

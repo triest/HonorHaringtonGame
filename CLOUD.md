@@ -108,6 +108,35 @@ Physics and damage run through the exact same code/formulas for every ship regar
   and any NEW simulation mechanic -- this is about surfacing what
   already exists, not adding backend features.
 
+## 1.9. UI/CONTROL CORRECTION -- TACTICAL PLOT, MOUSE-FIRST, CANON SCALE (AGENTS.md §56.2, user decision 2026-09-23)
+* REOPENS/PARTIALLY SUPERSEDES §56.1 items 1/4/5 after the user live-
+  tested the first exported build: ships nearly touching, hotkey-heavy
+  control, plain corner-text HUD -- rejected as looking like a generic
+  space dogfight, not the Honorverse. Explicit genre statement: this
+  is a TACTICAL STRATEGY game, command-and-control from a plot, not a
+  piloted dogfight.
+* Mouse-first control: click contacts on the plot to select, click/
+  drag to set course or designate targets, mouse for weapons-free/hold
+  and other `ShipCombatDirective` orders. Hotkeys stay as secondary
+  accelerators, not the primary path. Existing orbit-camera mouse
+  control (drag/wheel) is kept.
+* Canon-scale distances: engagement ranges must read as hundreds of
+  thousands to low millions of km, matching §8.1's already-logged
+  numbers (energy weapons ~3,600,000 km effective range; missile
+  powered envelopes 15,000,000-63,000,000 km) -- NOT a literal 1:1
+  scaled scene (unrenderable), but a documented INTERPRETATION-tagged
+  symbolic/icon convention where displayed range numbers and missile
+  flight-time pacing are canon-scale even though ship icons are drawn
+  at a fixed readable size.
+* Tactical plot required: a top-down/God's-eye display (2D is fine)
+  showing every sensor contact as an IFF-colored icon with a velocity
+  vector, plus every live missile as its own distinctly-marked track
+  -- separate from and in addition to the existing subsystem-condition
+  text HUD, not a replacement for it.
+* Definition of done requires a LIVE user confirmation, not headless
+  tests alone -- §56.1 was reported closed on headless evidence only
+  and failed the user's actual first run.
+
 ## 2. EXTENDED MECHANICS SPECIFICATION
 
 ### 2.1. IMPELLER WEDGE & SIDEWALLS

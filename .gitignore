@@ -22,3 +22,9 @@ _to_delete/
 # `godot --headless --export-release "Windows Desktop" project/build/HonorHarington.exe`
 # once export templates are cached -- see .tools/godot_templates_cache/).
 project/build/
+
+# Scratch files from ad-hoc headless/Xvfb diagnostic probes (throwaway,
+# not part of the game or the test suite -- see simulation/tests/ for the
+# committed regression tests these probes led to).
+project/dev_probe_tmp/
+project/probe.log

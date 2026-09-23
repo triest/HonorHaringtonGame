@@ -109,3 +109,56 @@ headless-verified §56.2 items A+B -- tactical_plot.gd/
 tactical_plot_projector.gd, wired into main.gd, new unit test, ASSUMPTIONS.md
 distance-compression convention logged, CHANGELOG.md updated; C/D/E not
 started; pushed this pass -- see CHANGELOG.md for full detail).
+
+---
+Side note (ad-hoc urgent pass, manually fired outside the normal 3h cron,
+2026-09-23, does NOT change the Phase/Checklist/Next-concrete-step above --
+those still point at §56.2 item C for the next regular pass): this pass
+investigated a SEPARATE, earlier live bug report from the user about §56.1
+items 4/5 specifically -- exported HonorHarington.exe opened with the 3D
+scene rendering and ships firing on each other, but ZERO HUD text on screen
+and ZERO response to any key. That is a stronger claim than "needs better
+UX" (this pass's own §56.2 narrative above, which implies hotkeys/HUD do
+something, just not ideally) -- treat these as two distinct reports from
+possibly two different live sessions, not the same complaint reworded.
+
+Findings: Hud/PlayerInput's own scripting logic is correct. Reproduced and
+locked in with two new headless regression tests (simulation/tests/
+test_hud.gd, simulation/tests/test_player_input.gd, both ALL TESTS PASSED)
+PLUS, going further than pure --headless, an actual Xvfb-rendered run of
+res://scenes/main.tscn on a real (virtual) OpenGL display: HudLabel came up
+with visible=true and real, correct multi-line text, and an injected
+order_turn_left keypress DID reach PlayerInput._unhandled_input, updated
+_desired_heading_by_ship, and produced a measurable change in the ship's
+commanded_thrust_local within a few ticks. project.godot's [input] action
+names match player_input.gd's is_action_pressed(...) calls exactly (no
+typo). So this environment cannot reproduce "blank HUD / dead input" in any
+form available to it (no real Windows machine, no Vulkan/Forward+ renderer
+available here at all -- this project uses rendering_method="forward_plus",
+and the Xvfb check above could only exercise the OpenGL/Compatibility
+fallback path, not the actual Vulkan path a real Windows GPU driver would
+use).
+
+Given the logic checks out, applied one defensive, low-risk fix in
+main.gd._ready() (end of the function): `get_window().grab_focus()` +
+`DisplayServer.window_move_to_foreground()`, targeting the leading
+remaining hypothesis for "nothing responds" on a fresh Windows launch --
+the OS not giving the game window input focus on open (a known class of
+Windows/Godot export quirk, e.g. a SmartScreen prompt or console-wizard
+window stealing focus). Verified safe under headless (no error, matches
+the existing 16x baseline dummy-renderer artifact exactly, zero new
+warnings) -- does NOT by itself explain a genuinely invisible HUD, since
+rendering an overlay text doesn't require input focus, so if the HUD is
+STILL blank after this on a live rebuild, the cause is downstream of
+GDScript (very likely a Forward+/Vulkan-driver-specific compositing issue
+on that specific machine) and the next diagnostic step would be trying
+Project Settings -> Rendering -> Compatibility for a re-export, NOT another
+headless pass -- this needs the user's live eyes, not more code changes
+from here.
+
+Per the honorverse-dev-pass skill's own rule: NOT claiming closed/fixed.
+Asked the user (see chat reply) to rebuild+relaunch project/build/
+HonorHarington.exe and explicitly confirm live whether HUD text now shows
+and whether keys/mouse now do anything, for BOTH this items-4/5 report and
+the separate §56.2 UX work above -- do not mark either resolved without
+that direct confirmation.

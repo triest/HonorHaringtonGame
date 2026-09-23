@@ -3010,3 +3010,97 @@ HUD остаётся) выполнен как побочный эффект wiri
 верифицированный проход, ровно то, от чего явно предостерегает
 state.md/AGENTS.md §56.2 definition of done: собранный .exe с новым
 плотом ещё не запускался и не подтверждён человеком.
+
+## 2026-09-23 (внеплановый проход по срочному баг-репорту: §56.1 items 4/5 -- "нет HUD, не реагируют клавиши")
+
+Ручной внеочередной запуск (fire_trigger, не по расписанию) по срочному
+репорту пользователя: реальный запуск `project/build/HonorHarington.exe`
+на его Windows-машине (первая живая проверка §56.1 вне headless) показал
+рабочую 3D-сцену с кораблями, реально стреляющими друг в друга, но
+**вообще без HUD-текста на экране** и **вообще без реакции на любые
+клавиши**. Явно другой по формулировке отчёт, чем последующий §56.2
+разговор про UI/UX ("не мышь, мелкий масштаб") -- здесь речь про полностью
+нерабочие item 4 и item 5, а не про их недостаточное качество.
+
+Расследование (без доступа к реальной Windows-машине или Vulkan в этом
+окружении):
+* `scripts/main.gd._ready()` безусловно доходит до `add_child(hud)` и
+  `add_child(player_input)` -- прочитано построчно, никаких ранних
+  return/exception-путей между ними нет.
+* `project.godot` [input]-имена действий (`order_select_ship`,
+  `order_target_next`, `order_target_clear`, `order_weapons_toggle`,
+  `order_turn_left`, `order_turn_right`, `order_speed_up`,
+  `order_speed_down`) побайтово совпадают с тем, что читает
+  `player_input.gd` через `event.is_action_pressed(...)` -- опечаток нет.
+* Написан и прогнан временный диагностический скрипт (SceneTree,
+  `--script`, не закоммичен) под `xvfb-run` + кэшированный линуксовый
+  `Godot_v4.3-stable_linux.x86_64` (Vulkan в этом окружении вообще
+  недоступен -- ни `vulkaninfo`, ни lavapipe/swiftshader, ни ICD-файлов;
+  проверено явно) с `--rendering-driver opengl3` (реальный, не dummy,
+  рендер-бэкенд): `Hud`/`HudLabel` создаётся, `visible == true`, текст
+  после первого тика -- настоящие 286 символов с корректным содержимым
+  (`ALPHA`/`SUBSYSTEMS`/`TARGET`/`CONTACTS`), позиция (12,12), CanvasLayer
+  `layer=1`/`visible=true`. Инжектированное нажатие `order_turn_left` дошло
+  до `PlayerInput._unhandled_input`, записалось в
+  `_desired_heading_by_ship["alpha"]` и реально сдвинуло
+  `ship.commanded_thrust_local` за несколько тиков (передача приказа с
+  задержкой связи, как и задокументировано в самом player_input.gd).
+  Скриншот (`dev_probe_tmp/hud_probe.png`, не закоммичен) визуально
+  подтвердил то же самое.
+* То же самое (текст/visible, без реального рендера) воспроизведено и в
+  чистом `--headless` (dummy-рендерер) -- значит для регресс-тестов
+  Xvfb не обязателен, реальный `get_texture()`/скриншот там не работает
+  (`Parameter "t"/"m" is null`), но `Label.text`/`.visible` -- это просто
+  данные, не зависящие от рендер-бэкенда.
+
+Итог: логика Hud/PlayerInput корректна везде, где её можно проверить из
+этого окружения (headless И реальный OpenGL-рендер под Xvfb). Гипотеза
+"item 4/5 сломаны в самом GDScript" НЕ подтвердилась. Осталось два вероятных
+объяснения, ни одно из которых нельзя проверить без живой Windows-машины:
+(a) окно не получает OS-фокус ввода при запуске (известный класс проблем
+Godot/Windows-экспорта -- например, окно SmartScreen или debug console
+wizard перехватывает фокус) -- правдоподобно объясняет item 5, но НЕ item 4
+(рендер HUD-текста не требует фокуса ввода); (b) что-то специфичное для
+Vulkan/Forward+ (`project.godot` `rendering_method="forward_plus"`) на
+конкретном GPU/драйвере пользователя -- проверить в этом окружении
+невозможно (Vulkan отсутствует вообще).
+
+Сделано в коде (минимально, без расширения scope на §56.2):
+* `scripts/main.gd._ready()`: в самом конце добавлены
+  `get_window().grab_focus()` и `DisplayServer.window_move_to_foreground()`
+  -- защитная, малорисковая попытка исправить именно item 5 (гипотеза (a)).
+  Безопасно под `--headless` (проверено, ни одной новой ошибки/варнинга),
+  само по себе НЕ объясняет и не может "случайно тоже починиться" item 4.
+* `simulation/tests/test_hud.gd` (11 проверок) -- фиксирует регрессом, что
+  `Hud._ready()` создаёт видимый `HudLabel`, и `update()` после одного тика
+  даёт непустой текст с ожидаемыми секциями (в том числе для неизвестного
+  ship_id -- не должно быть пустого HUD).
+* `simulation/tests/test_player_input.gd` (15 проверок) -- фиксирует, что
+  все action-имена из project.godot реально читаются PlayerInput, и что
+  order_turn_left/order_speed_up/order_weapons_toggle реально доходят до
+  world (первые два -- напрямую в `_desired_heading_by_ship`/
+  `_desired_speed_by_ship`, третий -- через
+  `world._pending_command_transmissions`, т.к. `transmit_ship_weapons_free`
+  комм-задержан и не применяется мгновенно).
+* `.gitignore`: добавлены `project/dev_probe_tmp/`/`project/probe.log`
+  (черновые файлы диагностики, не коммитятся).
+
+Проверено (правило §56.1/§56.2 "fast visible-result" всё ещё в силе,
+полный симуляционный набор не гонялся):
+1. `godot --headless --import` -- чисто.
+2. `test_hud.gd` -- ALL TESTS PASSED (11/11).
+3. `test_player_input.gd` -- ALL TESTS PASSED (15/15).
+4. `godot --headless res://scenes/main.tscn --quit-after 120` -- exit 0,
+   те же самые 16x baseline `mesh_get_surface_count`/"Parameter m is null"
+   (dummy-рендерер), ноль новых типов ошибок -- `grab_focus()`/
+   `window_move_to_foreground()` ничего не сломали в headless-режиме.
+5. Отдельный Xvfb-прогон реальной сцены (см. выше) -- не регресс-тест,
+   разовая живая диагностика, скриншот и логи оставлены в
+   гитигнорнутом `project/dev_probe_tmp/`.
+
+**НЕ заявляется "§56.1 items 4/5 исправлены"** -- честно неизвестно,
+помог ли фокус-фикс на реальной машине, и HUD может всё ещё быть невидим
+по причине (b), которую отсюда никак не проверить. Пользователю отправлен
+явный запрос пересобрать и перезапустить `HonorHarington.exe` и подтвердить
+живьём: виден ли теперь HUD-текст, реагируют ли клавиши -- см. .tools/state.md
+"Side note" за эту дату.

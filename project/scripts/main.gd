@@ -132,6 +132,30 @@ func _ready() -> void:
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()
 
+	# 2026-09-23 live bug report (§56.1 items 4/5, see .tools/state.md/
+	# CHANGELOG.md for that date): user ran the exported Windows .exe and
+	# got a rendered 3D scene with ships firing on each other, but NO HUD
+	# text and NO keys/mouse doing anything at all. Investigation that
+	# pass found Hud/PlayerInput's own scripting logic correct -- reproduced
+	# both in pure --headless (simulation/tests/test_hud.gd,
+	# simulation/tests/test_player_input.gd) and in an actual Xvfb-rendered
+	# run (real OpenGL display: HudLabel came up visible with real text,
+	# and an injected keypress DID reach PlayerInput and change ship
+	# state) -- so nothing in this file or Hud/PlayerInput was actually
+	# broken. The leading remaining hypothesis for what a live user would
+	# see as "nothing responds" is the OS-level game window simply not
+	# having input focus when it first opens (a known category of
+	# Godot/Windows export quirk -- e.g. a SmartScreen prompt or the
+	# console wizard window stealing focus at launch); that can only be
+	# observed live, never from this headless-only environment, so this
+	# call is a defensive best-effort fix, not a confirmed root-cause fix.
+	# Harmless everywhere else (a no-op if the window already has focus,
+	# and both calls are silently safe under --headless/dummy display --
+	# see simulation/tests -- so this does not risk breaking the existing
+	# headless smoke checks).
+	get_window().grab_focus()
+	DisplayServer.window_move_to_foreground()
+
 ## NOTE on ordering: SimulationWorld itself connects to `world.clock.
 ## simulation_tick` in ITS OWN _ready() (simulation_world.gd), which runs
 ## synchronously during `add_child(world)` above -- BEFORE this method's

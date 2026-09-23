@@ -1,14 +1,111 @@
 # Honorverse dev state (updated every pass)
-Phase: §56.1 vertical slice (fast visible-result mode) -- CLOSED, all 8 items done
-Checklist:
-  [x] 1. Camera (OrbitCamera, scripts/orbit_camera.gd)
-  [~] 2. Placeholder ship geometry (hull+wedge done; sidewall panels done; canon shapes/materials explicitly OUT of scope for this slice)
-  [~] 3. Weapon-fire visualization (energy/missile) -- rendering capability DONE and VERIFIED LIVE for energy beams (demo ships actually fire on each other in a headless run of main.tscn). Missile markers only verified by unit test, NOT live, because the demo scenario carries no missile tubes (energy-only weapon mounts, kept simplest per item 6). Scenario-configuration gap, not a WeaponFx capability gap; not reopening.
-  [x] 4. Minimal HUD (subsystems/target/contacts state) -- scripts/hud.gd, wired to alpha, live-verified via headless run (see CHANGELOG.md for detail).
-  [x] 5. Order input wiring (hotkeys + Input Map -> FormationOrder/IndividualOrder/ShipCombatDirective) -- scripts/player_input.gd (PlayerInput), see prior pass entries for full detail.
-  [x] 6. Hardcoded 1v1 scenario vs TacticalAI (world.set_team + world.add_weapon_mount; broadside_arc bugfix; live-verified)
-  [x] 7. Win/lose screen (existing §63 destruction state) -- scripts/win_lose_screen.gd (WinLoseScreen), see prior pass entries for full detail.
-  [x] 8. Draft Windows export -- DONE this pass. project/export_presets.cfg created (Windows Desktop preset, id 0, x86_64, embed_pck=false, application/modify_resources=false to avoid a harmless rcedit-not-on-Linux warning, custom_template/debug and /release left empty so Godot resolves them from the installed 4.3.stable export templates). Windows export templates were NOT present anywhere on this machine before this pass (only the Linux editor/export binary itself had been cached, per prior passes) and the official Godot 4.3-stable export_templates.tpz is a full 1.07GB multi-platform bundle -- way too slow to fetch whole over this VM's ~300-400KB/s egress (a single-stream curl test pulled only 48MB in 169s). Wrote a small standalone Python script (.tools/godot_templates_cache/remote_extract.py, gitignored cache dir) that parses the .tpz's ZIP central directory via HTTP Range requests (no full download) and range-fetches + inflates ONLY the needed entries by exact name -- avoided depending on any zip-over-http library since none were available and pip installs on this VM were not attempted/needed. Pulled exactly: templates/version.txt, windows_debug_x86_64.exe (+_console), windows_release_x86_64.exe (+_console) -- ~59MB total instead of 1.07GB. Each extracted file's CRC-32 is checked against the ZIP central directory's stored CRC before being written (script raises on mismatch) -- all four binaries + version.txt verified clean. Installed into the standard Godot user template path $HOME/.local/share/godot/export_templates/4.3.stable/ on this VM (version string "4.3.stable" read directly from the tpz's own version.txt, not guessed). A copy of the same 4 extracted files + version.txt is also kept in the gitignored project cache at .tools/godot_templates_cache/extracted2/ in case $HOME outside the mounted project folder does not persist to a future scheduled pass's VM (untested across a real pass boundary; if a future pass finds the standard template path empty, copy from that cache dir instead of re-downloading -- confirmed the two dirs have identical file sizes/CRCs before relying on this). Ran `godot --headless --export-release "Windows Desktop" project/build/HonorHarington.exe`: exit 0, ZERO warnings/errors (a first attempt with the default modify_resources=true logged two now-suppressed warnings: missing project/icon.svg -- the project has never had an icon file, config/icon in project.godot points at a file that doesn't exist, cosmetic and explicitly out of scope per this item's "does not need to be pretty" -- and "could not start rcedit", expected when cross-exporting to Windows from a Linux host and now avoided by turning modify_resources off). Verified the OUTPUT ARTIFACT directly, not just exit code: project/build/HonorHarington.exe is 84,214,784 bytes, `file` reports "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows" -- a genuine Windows binary, not a stub or error page; project/build/HonorHarington.pck (347KB) sits alongside it (embed_pck=false, so both files must ship together, standard Godot layout). project/build/ added to .gitignore (large re-buildable binary; export_presets.cfg itself IS committed so the preset survives). LIMITATION (matches this item's own text, not overclaimed): this environment cannot itself launch a Windows .exe, so "playable end to end" here means "a real, correctly-formed Windows executable + its data file were produced by a clean, warning-free export" -- actually clicking through it on Windows is unverified and is the one thing only the user (on their real Windows machine, where this project already lives) can confirm. To try it: open a terminal in the project's project/ folder... actually just double-click project\build\HonorHarington.exe in Windows Explorer (project.godot's run/main_scene is res://scenes/main.tscn, so it should boot straight into the vertical slice). If it doesn't launch or errors, that's the one remaining thing to report back, since it can't be checked from here.
-Next concrete step: §56.1 is fully closed (all 8 items done or explicitly descoped-and-accepted). Per the skill/trigger instructions, Milestone 13-17 and other work beyond §56.1 were paused until this closed -- that pause is now lifted. Next pass should: (1) read AGENTS.md fresh (not just this file) to find the actual next milestone/priority now that §56.1 no longer gates everything else, since this file's job was specifically to avoid re-deriving status *during* §56.1 and that phase is over; (2) resume normal per-change targeted tests plus the full-suite-every-Nth-pass cadence (gated by .tools/pass_counter.txt) instead of headless-import-only, per this skill's standard operational rules; (3) rewrite this Phase/Checklist block for whatever the new current phase turns out to be -- do not leave it describing a closed phase.
-Blockers: none. Open note (not a blocker): Windows .exe launch itself is unverified beyond "well-formed PE32+ binary produced by a clean export" -- if the user tries project/build/HonorHarington.exe and it fails to launch, that's new information for the next pass, not something this environment could have caught.
-Last pass finished: 2026-09-23T10:20Z (item 8 done: Windows Desktop export preset created, x86_64 export templates fetched via a bandwidth-frugal partial-zip-over-HTTP-Range extraction script instead of the full 1GB template bundle, clean warning-free export produced a verified genuine PE32+ .exe + .pck; §56.1 CLOSED; pushed this pass)
+Phase: §56.2 UI/control correction -- tactical plot, mouse-first, canon-scale (REPLACES §56.1's closed status as top priority)
+Context: §56.1 (camera/geometry/weapon-fx/HUD-text/hotkeys/1v1-scenario/win-lose/Windows-export)
+was implemented and its Windows .exe was confirmed launching. The user
+live-tested it and explicitly rejected the RESULT as a UI/design
+problem, not a bug: ships nearly touching (wrong scale vs canon),
+control not mouse-first, no tactical plot, no distinct missile display.
+Explicit genre confirmation from the user: tactical strategy, command
+from a plot, not a piloted dogfight.
+Read AGENTS.md §56.2 in full (right after §56.1, before "### Milestone 1")
+and CLOUD.md §1.9 before starting a new item -- do not re-derive from
+CHANGELOG alone, the actual requirements are spelled out there in detail.
+Checklist (§56.2):
+  [x] A. Tactical plot: top-down/God's-eye 2D display, every SensorContact as
+      an IFF-colored icon + velocity vector leader, range/bearing from player ship.
+      DONE this pass: scripts/tactical_plot.gd (Control, class_name TacticalPlot),
+      wired into main.gd alongside Hud (main.gd's HUD_POV_SHIP_ID). Reads
+      world.sensor_contacts[pov_ship_id] (NOT world.ships directly) so it
+      honestly respects §23 sensor detection/fog-of-war -- see that file's
+      own doc comment for the reasoning. Auto-scaling linear-radial plot,
+      range rings with km/Mkm labels, own-ship square + velocity leader,
+      per-contact triangle icon colored by hostility (red=hostile,
+      green=friendly, yellow=neutral) + its own velocity leader + a
+      "id  range  bearing" text label. Pure world->screen mapping factored
+      into scripts/tactical_plot_projector.gd (class_name
+      TacticalPlotProjector, static project() function) so it is
+      headless-unit-testable without a live Control/Viewport.
+  [x] B. Missiles shown as their own distinctly-marked icon/track on the plot,
+      separate from ship contacts. DONE this pass, same TacticalPlot/update()
+      pass as A: missile sensor contacts (told apart from ship contacts via
+      `contact.target is MissileState`, same duck-type check
+      SimulationWorld._update_missiles already uses for counter-missiles)
+      are drawn as a yellow X/cross (matches WeaponFx's 3D missile marker
+      colour), NOT the ship triangle -- distinct shape, not just colour.
+  [ ] C. Mouse-first control: click a contact/icon on the plot to select it;
+      click/drag on the plot to set course or designate target; mouse-driven
+      weapons-free/hold and other ShipCombatDirective orders. Existing hotkeys
+      (scripts/player_input.gd) stay as secondary accelerators, do not remove them.
+      NOT STARTED. NOTE: TacticalPlot currently has
+      `mouse_filter = Control.MOUSE_FILTER_IGNORE` (placeholder, see its
+      _ready() comment) -- this item must change that to actually receive
+      clicks, plus do real hit-testing against the same _contacts array
+      already built each update() (icon positions are already computed
+      every frame via TacticalPlotProjector, just not stored per-contact
+      screen-rect yet -- item C will need to keep each contact's last-drawn
+      icon_pos/radius for hit-testing, not recompute a parallel copy).
+  [ ] D. Canon-scale distances: reposition the hardcoded scenario (main.gd's
+      alpha/beta) to a canon-plausible range per §8.1 (hundreds of thousands+
+      km), using a documented symbolic distance-compression convention (NOW
+      CHOSEN AND LOGGED for the PLOT rendering side -- see ASSUMPTIONS.md
+      "§56.2 -- distance-compression convention", "CHOSEN this pass" addendum;
+      linear radial auto-scaling plot, exact range always shown as text).
+      NOT STARTED: this item is about the SIMULATION scenario itself
+      (main.gd's alpha=(-5000,0,0)/beta=(5000,0,0), i.e. ~10km apart today,
+      and demo_laser's max_range_m=500_000 i.e. 500km -- BOTH are far short
+      of §8.1's ~3,600,000km energy-weapon range / 15-63M km missile
+      envelopes). CAUTION for whoever picks this up: repositioning ships to
+      a true canon separation without also reconsidering demo_laser's
+      max_range_m will put them permanently out of weapon range and silently
+      break the already-verified-live "ships actually fire on each other"
+      behavior from §56.1 item 6/3 -- decide and document (ASSUMPTIONS.md)
+      a deliberate compromise distance/range pair (or bump demo_laser's
+      range too) rather than moving ships alone and finding out combat
+      stopped firing only via a live run.
+  [ ] E. Existing subsystem-text HUD (§56.1 item 4) stays as a secondary panel
+      alongside the new plot, not replaced. SATISFIED SO FAR AS A SIDE
+      EFFECT of how A/B were wired: hud.update() call in main.gd._on_tick
+      was left untouched, tactical_plot.update() was added alongside it,
+      not instead of it -- both panels are live in the same scene right
+      now. Left unchecked because this needs the user's live confirmation
+      like the rest of §56.2 (see IMPORTANT note below), not because
+      anything is known to be missing.
+Next concrete step: item C (mouse-first control). Start with click-to-select:
+on TacticalPlot, switch mouse_filter to STOP, handle
+_gui_input()/_unhandled_input() for a left click, hit-test against each
+contact's last-drawn icon position (store icon_pos+a small hit radius per
+contact in _contacts during _draw(), or compute it once in update() via
+TacticalPlotProjector before _draw() so hit-testing does not depend on
+_draw() having already run this frame), and on a hit call
+world.transmit_ship_target(pov_ship_id, contact_id) for a ship contact
+(reuse PlayerInput's existing pattern) -- then click/drag for course-setting
+and a weapons-free/hold interaction, per AGENTS.md §56.2 item 1's full text.
+Keep scripts/player_input.gd's hotkeys working unchanged (secondary
+accelerators, per the checklist item's own text) -- do not remove them.
+Tests: still fast-visible-result mode -- skip full simulation suite, headless
+import/smoke check only, until §56.2 fully closes. This pass ran: headless
+--import (clean), the new simulation/tests/test_tactical_plot_projector.gd
+(8/8 pure-geometry tests pass -- bearing conventions, linear-scale-until-
+clamped, true range_m preserved through clamping, degenerate same-position
+case), and a headless res://scenes/main.tscn --quit-after 120 smoke run
+(exit 0, exactly the same 16x baseline "Parameter m is null" dummy-renderer
+artifact already documented from the §56.1 item 6 pass, zero NEW error/
+warning types -- TacticalPlot's draw_string/ThemeDB.fallback_font/Control
+calls did not introduce anything new in headless mode).
+IMPORTANT -- do not repeat the §56.1 mistake: do NOT report §56.2 "closed" on
+headless verification alone. §56.1 was marked closed on headless evidence and
+failed the user's actual first live run (wrong scale, no plot, hotkey-only).
+Items A/B above are implemented and headless-verified only -- they still need
+the user's live confirmation (does the plot actually show contacts+missiles
+distinctly and legibly on their real screen, is the auto-scaling readable in
+practice) before being treated as truly done, and C/D are not started at all.
+Do not claim §56.2 done until C, D, and E are also implemented AND the user
+has confirmed live.
+Blockers: none currently. Open question for whoever picks up D: see the
+CAUTION paragraph under item D above (ship separation vs weapon range
+coupling).
+Last pass finished: 2026-09-23 (scheduled dev pass: implemented and
+headless-verified §56.2 items A+B -- tactical_plot.gd/
+tactical_plot_projector.gd, wired into main.gd, new unit test, ASSUMPTIONS.md
+distance-compression convention logged, CHANGELOG.md updated; C/D/E not
+started; pushed this pass -- see CHANGELOG.md for full detail).

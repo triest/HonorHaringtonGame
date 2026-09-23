@@ -2244,3 +2244,36 @@ INTERPRETATION, not CANON: the books describe tactical plots
 conceptually but this project's specific rendering convention for one
 is our own design choice under §7's documented-interpretation
 allowance.
+
+**CHOSEN this pass (§56.2 items A/B implementation, 2026-09-23):**
+`scripts/tactical_plot_projector.gd` (`TacticalPlotProjector.project()`)
+implements a LINEAR RADIAL plot, not logarithmic: `plot_pixel_radius`
+screen pixels represent `plot_range_m` metres in every direction from
+the plot's origin (the player ship's live position). `plot_range_m`
+itself auto-scales each tick to `1.15x` the farthest currently-live
+sensor contact (`tactical_plot.gd`'s `AUTO_SCALE_MARGIN`), with a
+`MIN_PLOT_RANGE_M = 50,000` floor so the plot does not zoom to a
+meaningless scale with zero/near contacts. A contact farther than the
+current `plot_range_m` is CLAMPED to the plot's rim along its true
+bearing (drawn with a small ring around its icon to mark "pulled in
+from beyond the rim") rather than disappearing -- its EXACT,
+uncompressed range in km/Mkm is always drawn as a text label next to
+its icon regardless of clamping, which is what actually keeps the
+NUMBERS canon-scale per §56.2 item 2's requirement; the icon's own
+on-plot position is compressed, never the number.
+
+Rejected: logarithmic radial scale (considered, but a fixed-multiplier
+auto-scaling linear plot already keeps near/far contacts readable for
+a 1v1/2v1 scenario at this slice's scope, and a linear scale keeps the
+ring-distance labels evenly spaced and easy to read at a glance, unlike
+log rings bunching near the centre) and literal 1:1 3D rendering
+(explicitly rejected by AGENTS.md §56.2 itself, ships would be
+sub-pixel). Bearing convention: 0 rad = world -Z ("north", matches
+attack_geometry.gd's own "-Z = bow/forward"), clockwise, NOT yet
+heading-relative to the player ship's own facing (a heading-up mode is
+a plausible future refinement, not required by §56.2's text).
+
+This is the RENDERING convention only -- it does not touch simulation
+distances/positions themselves (§56.2 item D, repositioning the
+hardcoded alpha/beta scenario to a canon-plausible separation, is a
+separate, not-yet-done checklist item; see .tools/state.md).

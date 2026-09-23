@@ -38,6 +38,7 @@ var world: SimulationWorld
 var hulls: Dictionary = {}  # String ship_id -> HullState (local, illustrative only -- NOT passed to world.hulls; see world.add_ship's optional hull param, unused here)
 var weapon_fx: WeaponFx
 var hud: Hud
+var tactical_plot: TacticalPlot
 var player_input: PlayerInput
 var win_lose_screen: WinLoseScreen
 
@@ -107,6 +108,12 @@ func _ready() -> void:
 	hud = Hud.new()
 	add_child(hud)
 
+	# ТЗ §56.2 items A/B (tactical plot): same POV ship as Hud below --
+	# see tactical_plot.gd's own doc comment for why it reads
+	# world.sensor_contacts (not world.ships/world.missiles directly).
+	tactical_plot = TacticalPlot.new()
+	add_child(tactical_plot)
+
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
 	# godot [input], see PlayerInput's own doc comment) into calls on
 	# `world`'s existing transmit_*/order APIs. Given `world` directly
@@ -150,6 +157,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 			mount.tick(dt)
 	weapon_fx.update(world)
 	hud.update(world, HUD_POV_SHIP_ID)
+	tactical_plot.update(world, HUD_POV_SHIP_ID)
 	win_lose_screen.update(world)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo

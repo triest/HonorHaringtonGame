@@ -1,5 +1,83 @@
 # CHANGELOG.md
 
+## 2026-09-23 (проход: §56.1 item 5 -- ввод игровых приказов на хоткеях)
+
+Реализован минимальный ввод игровых приказов (`scripts/player_input.gd`,
+класс `PlayerInput`), напрямую вызывающий уже существующий API
+`SimulationWorld` для приказов -- ничего нового не изобретено:
+
+* Добавлена реальная Input Map в `project.godot` ([input]-секция):
+  `order_select_ship` (TAB), `order_target_next` (T), `order_target_clear`
+  (C), `order_weapons_toggle` (F), `order_turn_left`/`order_turn_right`
+  (A/D), `order_speed_up`/`order_speed_down` (W/S). До этого прохода
+  `project.godot` не объявлял НИ ОДНОГО input action (см. собственный
+  комментарий `orbit_camera.gd`, честно откладывавший это на item 5).
+  Секция сгенерирована через одноразовый (не закоммиченный) headless
+  `ProjectSettings`-скрипт, а не написана руками -- формат
+  `InputEventKey`-ресурсов в `project.godot` слишком многословный и
+  легко испортить вручную. ПОБОЧНЫЙ ЭФФЕКТ, исправлен в этом же проходе:
+  `ProjectSettings.save()` тихо выбросил `physics/common/
+  physics_ticks_per_second=60` и `rendering/renderer/
+  rendering_method="forward_plus"`, т.к. оба значения совпадали со
+  встроенными дефолтами движка -- оба возвращены явно обратно (тем же
+  проходом, до коммита), т.к. явное задание `forward_plus` важно для
+  будущего Windows-экспорта (item 8), а неявная зависимость от дефолта
+  движка -- хрупкая.
+* `PlayerInput._unhandled_input` читает эти actions и вызывает ПРЯМО в
+  `transmit_*`-семейство `SimulationWorld` (не instant
+  `issue_*`/`set_*`): `transmit_individual_order_now` +
+  `IndividualOrder.change_course`/`change_speed` для курса/скорости,
+  `transmit_ship_target`/`transmit_clear_ship_target` для designation
+  цели (цикл по ЖИВОМУ `world.sensor_contacts[ship_id]` -- ровно тому же
+  списку, что уже показывает HUD), `transmit_ship_weapons_free` для
+  weapons free/hold. `transmit_*` выбран осознанно, не `issue_*`/`set_*`:
+  собственный комментарий `simulation_world.gd` описывает именно этот
+  набор как представляющий "commander issuing an order through the
+  normal chain of command" -- это ровно то, что представляет нажатие
+  клавиши игроком; как следствие, приказы игрока честно получают ту же
+  §25/§31 задержку связи по состоянию подсистемы COMMUNICATIONS, что и
+  любой другой приказ, без необъяснённого мгновенного спецслучая для
+  игрока.
+* Курс/скорость хранятся ЛОКАЛЬНО в `PlayerInput` как "последнее
+  скомандованное" значение (`_desired_heading_by_ship`/
+  `_desired_speed_by_ship`), а не перечитываются из текущей скорости
+  корабля при каждом нажатии -- только что переданный приказ ещё не
+  подействовал (задержка связи + время на разгон/поворот), так что
+  повторное нажатие сразу после первого дало бы непредсказуемый шаг,
+  если бы отталкивалось от ещё не изменившейся живой скорости.
+* Какой корабль под игроком -- решено этим проходом: "alpha" (то же,
+  что уже показывает HUD с прохода item 4); задокументировано в
+  собственном doc-комментарии `player_input.gd` и в `ASSUMPTIONS.md`.
+  Хоткей "select ship" подключён (по явному требованию чеклиста), но
+  честно является visible no-op при ровно одном управляемом корабле --
+  `PlayerInput._controllable_ship_ids` сейчас содержит только "alpha";
+  расширение до нескольких кораблей -- это только добавление элементов
+  в этот список, остальной код не меняется.
+* Проверено ДВУМЯ способами (полный набор симуляционных тестов по
+  правилу §56.1 "fast visible-result" не гонялся):
+  1. Одноразовый (не закоммиченный) headless-скрипт на `SceneTree`,
+     вызывающий обработчики `PlayerInput` НАПРЯМУЮ (минуя реальную
+     диспетчеризацию `InputEvent`, для которой нужен живой viewport) на
+     фоне реально идущей `SimulationWorld`: поворот/изменение скорости
+     кладут запись в `world._pending_command_transmissions` (задержка
+     связи) и, после достаточного симулированного времени, реально
+     создают/активируют `IndividualCommandState` для alpha; цикл цели
+     -> `world.ship_combat_directives["alpha"].manual_target_ship_id ==
+     "beta"` после задержки; очистка цели -> обратно `""`; тумблер
+     оружия -> `weapons_free` меняется `true` -> `false` после задержки.
+  2. Headless `--import` (чисто, без ошибок) + headless прогон
+     `res://scenes/main.tscn --quit-after 120` -- всё те же 16
+     повторений уже задокументированного dummy-renderer артефакта
+     `mesh_get_surface_count`/"Parameter m is null" (без изменений от
+     базовой линии item 4/6) -- `PlayerInput` (чистый `Node`, без меша и
+     рендера) не добавил ни одного нового типа ошибки/предупреждения.
+
+Честно НЕ сделано (items 7-8, и явно оставленные внутри item 5):
+полноценный выбор корабля при нескольких управляемых кораблях (сейчас
+только "alpha"); polished command UI (это явно вне рамок чеклиста);
+win/lose экран (item 7); Windows-экспорт (item 8).
+
+
 ## 2026-09-23 (проход: §56.1 item 4 -- минимальный HUD)
 
 Реализован минимальный HUD (`scripts/hud.gd`) -- по §25.1 без health-баров,

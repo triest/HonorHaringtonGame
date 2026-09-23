@@ -36,13 +36,17 @@ var world: SimulationWorld
 var hulls: Dictionary = {}  # String ship_id -> HullState (local, illustrative only -- NOT passed to world.hulls; see world.add_ship's optional hull param, unused here)
 var weapon_fx: WeaponFx
 var hud: Hud
+var player_input: PlayerInput
 
 ## ТЗ §56.1 item 4 (Minimal HUD): which ship the single HUD panel is a
 ## point of view for. Alpha, arbitrarily -- no player-controlled side
-## exists yet (that is item 5), so there is no principled reason to
-## prefer one demo ship over the other; picking one is what the
-## checklist item itself allows ("pick ONE ship... unless showing both
-## is trivial").
+## existed yet when item 4 was built; item 5 (PlayerInput,
+## scripts/player_input.gd) has since made "alpha" the actual
+## player-controlled ship (see that script's own doc comment for the
+## decision), so this constant and PlayerInput's default
+## `selected_ship_id` are intentionally the same ship -- the HUD shows
+## exactly the ship the player commands, not an arbitrary/independent
+## choice anymore.
 const HUD_POV_SHIP_ID: String = "alpha"
 
 func _ready() -> void:
@@ -99,6 +103,15 @@ func _ready() -> void:
 
 	hud = Hud.new()
 	add_child(hud)
+
+	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
+	# godot [input], see PlayerInput's own doc comment) into calls on
+	# `world`'s existing transmit_*/order APIs. Given `world` directly
+	# (not looked up) since main.gd already owns the one SimulationWorld
+	# instance for this scene.
+	player_input = PlayerInput.new()
+	player_input.world = world
+	add_child(player_input)
 
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()

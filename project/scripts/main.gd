@@ -16,15 +16,17 @@ extends Node3D
 ## `world.weapon_mounts`/`world.teams`, and target SELECTION for both
 ## sides already goes through TacticalAI.select_weapon_target (see
 ## SimulationWorld._resolve_weapon_target) with no separate "AI class" to
-## instantiate here -- there is no player-controlled side yet (that is
-## item 5, order input wiring, still pending), so this hardcoded scenario
-## is effectively TacticalAI vs TacticalAI, exactly as the checklist
-## title says. Still explicitly NOT done here: player order input, a
-## win/lose screen, missile tubes for the demo ships (energy weapons
-## alone are enough to exercise weapon_fx's beam path live; missile
-## markers stay verified only by unit test until a scenario actually
-## needs missiles). See CHANGELOG.md for the authoritative "done vs not
-## done" list.
+## instantiate here -- at the time item 6 landed there was no
+## player-controlled side yet, so this hardcoded scenario was then
+## effectively TacticalAI vs TacticalAI, exactly as the checklist title
+## says. (Items 5 and 7, added in later passes, now give alpha player
+## control and a win/lose screen -- see PlayerInput/WinLoseScreen below;
+## this paragraph is kept as-is for the historical "why" of the
+## teams/mount setup.) Still explicitly NOT done: missile tubes for the
+## demo ships (energy weapons alone are enough to exercise weapon_fx's
+## beam path live; missile markers stay verified only by unit test until
+## a scenario actually needs missiles) and a Windows export (item 8).
+## See CHANGELOG.md for the authoritative "done vs not done" list.
 ##
 ## WeaponFx (scripts/weapon_fx.gd, ТЗ §56.1 item 3) is wired into the
 ## per-tick loop below and now has something to actually draw: with teams
@@ -37,6 +39,7 @@ var hulls: Dictionary = {}  # String ship_id -> HullState (local, illustrative o
 var weapon_fx: WeaponFx
 var hud: Hud
 var player_input: PlayerInput
+var win_lose_screen: WinLoseScreen
 
 ## ТЗ §56.1 item 4 (Minimal HUD): which ship the single HUD panel is a
 ## point of view for. Alpha, arbitrarily -- no player-controlled side
@@ -113,6 +116,12 @@ func _ready() -> void:
 	player_input.world = world
 	add_child(player_input)
 
+	# ТЗ §56.1 item 7 (Win/lose screen): same per-tick pure-readout
+	# convention as WeaponFx/Hud above (§42, ready before the tick-signal
+	# connect below so it exists before the first _on_tick call).
+	win_lose_screen = WinLoseScreen.new()
+	add_child(win_lose_screen)
+
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()
 
@@ -141,6 +150,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 			mount.tick(dt)
 	weapon_fx.update(world)
 	hud.update(world, HUD_POV_SHIP_ID)
+	win_lose_screen.update(world)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo
 ## ships from a distance proportional to their separation, computed from

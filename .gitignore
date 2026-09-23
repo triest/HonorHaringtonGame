@@ -17,3 +17,8 @@ _to_delete/
 # only the (large, re-downloadable) binary itself should be ignored.
 .tools/*
 !.tools/state.md
+
+# Windows export output (large binary, re-buildable via
+# `godot --headless --export-release "Windows Desktop" project/build/HonorHarington.exe`
+# once export templates are cached -- see .tools/godot_templates_cache/).
+project/build/

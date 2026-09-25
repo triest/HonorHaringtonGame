@@ -44,6 +44,15 @@ var tactical_plot: TacticalPlot
 ## selection_state.gd's own doc comment for why this lives here rather
 ## than inside any one view.
 var selection: SelectionState
+## §56.3 item B: translates the group hotkey (G) into real
+## FormationState/CommandEchelon structure from `selection` -- see that
+## script's own doc comment. Owns no rendering; command_group_panel
+## below is the readout of what it writes.
+var command_group_controller: CommandGroupController
+## §56.3 item B: left-side "squadron list" readout of
+## world.command_echelons/world.formations, see that script's own doc
+## comment for the interim layout choice.
+var command_group_panel: CommandGroupPanel
 var player_input: PlayerInput
 var win_lose_screen: WinLoseScreen
 
@@ -122,6 +131,16 @@ func _ready() -> void:
 	tactical_plot.selection = selection
 	add_child(tactical_plot)
 
+	# §56.3 item B: same shared `selection`/`world` as tactical_plot
+	# above -- no second selection or command-structure mechanism.
+	command_group_controller = CommandGroupController.new()
+	command_group_controller.world = world
+	command_group_controller.selection = selection
+	add_child(command_group_controller)
+
+	command_group_panel = CommandGroupPanel.new()
+	add_child(command_group_panel)
+
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
 	# godot [input], see PlayerInput's own doc comment) into calls on
 	# `world`'s existing transmit_*/order APIs. Given `world` directly
@@ -190,6 +209,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	weapon_fx.update(world)
 	hud.update(world, HUD_POV_SHIP_ID)
 	tactical_plot.update(world, HUD_POV_SHIP_ID)
+	command_group_panel.update(world, selection)
 	win_lose_screen.update(world)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo

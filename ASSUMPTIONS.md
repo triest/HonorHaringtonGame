@@ -2329,3 +2329,52 @@ If the user's later live testing shows a different expectation for
 SHIFT specifically (the one truly ambiguous case above), revisit this
 entry and SelectionState's own doc comment together -- do not silently
 diverge code and documented rationale.
+
+## §56.3 item B -- command group creation/naming/layout (INTERPRETATION, design decision, not canon)
+
+§1.10.4/§1.10.5 (AGENTS.md §56.3 / CLOUD.md §1.10) require selected
+objects to become "a single command group" and hierarchical control to
+reuse the existing CommandEchelon/FormationState architecture, but do
+not specify: what input turns a selection into a group, which selected
+ship becomes the group's leader, what a new group is named, or where
+its visual list sits on screen. Chosen this pass (scripts/
+command_group_controller.gd, scripts/command_group_panel.gd):
+* Hotkey G ("selection_make_group", project.godot [input]) with 2+
+  eligible ships selected creates a NEW FormationState wrapped in a leaf
+  CommandEchelon -- not an automatic/implicit grouping on every
+  multi-select, so the player keeps ordinary multi-select (item A) for
+  transient actions (e.g. selecting several ships just to give them all
+  the same one-off move order later, item C) without it silently
+  becoming a persistent formation every time.
+* Eligibility: real ships only (world.ships.has(id) -- excludes
+  missiles/enemy sensor contacts from the selection), restricted to a
+  single team (the first eligible id's team; a mixed-team selection is
+  reduced to just that team's ships, never merged). Fewer than 2
+  eligible ids is a no-op.
+* Guide/leader = the FIRST eligible id in selection order (not
+  alphabetical, not closest-to-centroid) -- deterministic and simple;
+  CommandEchelon/FormationState themselves have no opinion on this, so
+  it is this controller's own pick, analogous to how §33's
+  succession_order is an explicit, separately-set list layered on top of
+  the same "no built-in leader" FormationState.
+* Member stations are frozen at CURRENT relative position (world
+  position delta, converted into the guide's local/body frame) at the
+  moment of grouping -- "hold formation from here", not a designed
+  wall-of-battle geometry (that is FormationOrder's CHANGE_FORMATION
+  territory, out of scope for item B).
+* Naming: CommandEchelon.kind (deliberately free-form per that class's
+  own doc comment) is set directly to "Squadron N" (N = an incrementing
+  counter local to CommandGroupController, starting at 1) -- there is no
+  separate "group name" field anywhere in the architecture, and adding
+  one would be exactly the "parallel selection-group model" §1.10.5
+  explicitly forbids. Player-chosen custom names are NOT implemented
+  this pass (no text-input UI exists yet) -- open follow-up.
+* Panel layout (scripts/command_group_panel.gd): fixed top-left
+  position offset below Hud's own panel, not the reference image's
+  literal side-by-side geometry -- a real shared multi-panel layout
+  needs a pass across Hud/TacticalPlot/this file together, deferred to
+  land with item F (command camera / view split).
+
+Not yet implemented (open, see .tools/state.md): disbanding a group,
+merging two existing groups, renaming a group after creation, and any
+group interaction beyond hotkey-create + read-only list display.

@@ -1,5 +1,84 @@
 # CHANGELOG.md
 
+## 2026-09-25 (проход: §56.3 item B -- именованная командная группа + squadron-list панель)
+
+Реализован пункт B чек-листа §56.3 (`.tools/state.md`): выбор
+превращается в РЕАЛЬНУЮ командную структуру, а не в UI-only список --
+как и требует §1.10.5 ("должно использовать существующую архитектуру
+CommandEchelon, FormationState и IndividualOrder, а не создавать
+отдельную параллельную систему управления").
+
+* `project/scripts/command_group_controller.gd` (новый, Node, класс
+  `CommandGroupController`): по хоткею G (`selection_make_group`,
+  project.godot [input], physical_keycode 71) берёт текущий
+  multi-select (`SelectionState`, item A) и создаёт
+  `world.add_formation()` + `world.add_command_echelon()` +
+  `world.attach_formation_to_echelon()` -- НЕ параллельную модель
+  группы. Критерии допуска в группу (см. новую запись в
+  ASSUMPTIONS.md "§56.3 item B"): только реальные корабли одной
+  команды; ведущим становится первый выбранный id; станции остальных
+  членов фиксируются как ТЕКУЩЕЕ относительное положение в локальном
+  фрейме ведущего (тем самым реально включается уже существующий
+  `SimulationWorld._resolve_formation_keeping` -- физическое удержание
+  формации, а не просто список имён). Название группы = `CommandEchelon.
+  kind` напрямую ("Squadron N", N -- счётчик) -- отдельного поля "имя
+  группы" нигде не заводилось (это и была бы запрещённая §1.10.5
+  параллельная модель).
+* `project/scripts/command_group_panel.gd` (новый, CanvasLayer, класс
+  `CommandGroupPanel`): текстовая read-only панель (тот же паттерн, что
+  Hud/WeaponFx/TacticalPlot -- чистое чтение уже посчитанного
+  `world.command_echelons`/`world.formations`, ничего не вычисляет
+  сама), список текущих squadron-групп с ростером и отметкой `>` у
+  выбранных сейчас кораблей. Позиция -- фиксированный отступ слева под
+  панелью Hud (не буквальная геометрия референс-картинки, см.
+  ASSUMPTIONS.md: полноценная раскладка панелей отложена до пункта F).
+* `project/scripts/main.gd`: инстанцирует оба новых скрипта, передаёт им
+  тот же `world`/`selection`, что и tactical_plot (никакого второго
+  selection), добавляет `command_group_panel.update()` в тот же
+  per-tick вызов, что Hud/TacticalPlot/WinLoseScreen.
+* `project/project.godot`: новый input action `selection_make_group`
+  (G).
+* Тест (новый, ALL TESTS PASSED, 8/8): `simulation/tests/
+  test_command_group_controller.gd` -- одиночный выбор = no-op, пустой
+  выбор = no-op, создание formation+echelon для 2 своих кораблей,
+  исключение корабля другой команды (mixed-team selection), исключение
+  не-корабельных id (например id ракеты) из членства, инкремент индекса
+  группы между вызовами (Squadron 1, Squadron 2, ...), корректный
+  перевод relative offset в локальный фрейм повёрнутого ведущего
+  (guide.orientation != identity), первый выбранный -- всегда ведущий
+  независимо от алфавитного порядка id.
+* `ASSUMPTIONS.md`: новая запись "§56.3 item B" фиксирует все
+  интерпретационные решения выше (хоткей, критерии допуска, выбор
+  ведущего, заморозка станций, именование, временная раскладка панели).
+
+НЕ входит в этот пасс (следующие пункты того же чек-листа §56.3, ещё НЕ
+реализованы): C (RMB move order с визуализацией курса), D (контекстное
+меню приказов), E-I. Также НЕ реализовано в рамках B: роспуск группы,
+слияние двух групп, переименование группы после создания (открытые
+хвосты, см. ASSUMPTIONS.md/`.tools/state.md`). Сценарий по-прежнему 1v1
+(item H ещё не сделан) -- живая проверка группировки 2+ своих кораблей
+пока невозможна, только юнит-тесты (синтетические корабли) и headless
+smoke.
+
+Проверено (режим "fast visible-result" §56.3 всё ещё в силе, полный
+симуляционный набор не гонялся):
+1. `godot --headless --import` -- чисто.
+2. `test_command_group_controller.gd` -- ALL TESTS PASSED (8/8).
+3. `test_selection_state.gd` (регресс) -- ALL TESTS PASSED (9/9).
+4. `test_tactical_plot_selection.gd` (регресс) -- ALL TESTS PASSED (8/8).
+5. `godot --headless res://scenes/main.tscn --quit-after 120` -- exit 0,
+   те же самые 16x baseline `mesh_get_surface_count`/"Parameter m is
+   null" (dummy-рендерер), ноль новых типов ошибок -- новые
+   CommandGroupController/CommandGroupPanel компилируются и проходят
+   `_ready()`/per-tick `update()` чисто в headless-режиме.
+
+**НЕ заявляется "§56.3 закрыт"** -- это пункт B из 9+1 (A уже был
+сделан ранее). G-хоткей и панель реально НЕ проверялись живым игроком
+(headless не может сгенерировать настоящий keypress с полноценным
+рендером) -- см. .tools/state.md, тот же урок §56.1/§56.2/item A ещё
+раз: не объявлять готовым без живого подтверждения.
+
+
 ## 2026-09-23 (проход: §56.1 item 8 -- черновой Windows-экспорт; §56.1 ЗАКРЫТ)
 
 Добавлен `project/export_presets.cfg` с пресетом "Windows Desktop" (id 0,

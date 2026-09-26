@@ -2583,3 +2583,179 @@ scripts/selection_state.gd, scripts/tactical_plot.gd):
   four are absent from `menu_entries`, so a future pass can't
   accidentally "restore" them as dead buttons without that test
   failing first.
+
+## §56.3 item E -- weapon-selection panel: honest gaps + design decisions (INTERPRETATION, design decision, not canon)
+
+Context: §1.10.8 ("ВЫБОР ОРУЖИЯ") asks for a per-selected-ship weapon
+panel covering four categories -- MISSILES (type, salvo size, target,
+throttle/profile, FIRE), COUNTER-MISSILES (AUTO/MANUAL
+DESIGNATION/HOLD), ENERGY WEAPONS (mounted list), POINT DEFENSE
+(AUTO/HOLD/priority-target) -- with a hard requirement: never show a
+weapon category the selected ship's class doesn't actually have
+mounted. Implemented in `scripts/weapon_panel_controller.gd` +
+`scripts/weapon_panel.gd`, wired in `scripts/main.gd`. Same "check what
+exists first, log the honest gap, don't invent a dead UI button"
+discipline as items C/D.
+
+* **Panel visibility gate: exactly one own ship selected, full stop.**
+  A multi-ship group selection, an empty selection, and a hostile
+  contact selection all hide the panel entirely. §1.10.8's own text is
+  written in terms of "the selected ship" (singular) -- there is no
+  "which ship's loadout" sub-interaction requested, and showing a
+  hostile's loadout would be a ground-truth leak this codebase's own
+  "no cheat vision" convention (§26 TacticalAI's own class doc) has
+  never allowed anywhere else. A future pass adding a real "pick one
+  ship from the group to configure" flow would be a genuine new
+  feature, not a bug fix to this gate.
+
+* **Missile "type" selection: honestly NOT implemented.** Checked
+  first (grep across `simulation/*.gd`): `MissileTube` has no "type"
+  field at all, and no scenario/ship-loadout anywhere in this codebase
+  constructs more than one tube type per ship. There is nothing
+  distinct to let the player choose between yet. Adding a real
+  "type" concept would mean giving `MissileTube`/`MissileState` actual
+  differentiated stats (warhead yield, drive profile, guidance mode)
+  per type -- a data-model change, not a UI/routing change, and
+  explicitly out of scope for "map onto what exists" (§56.3 item E's
+  own checklist text).
+
+* **Missile "salvo size" and "throttle/profile": BOTH real, wired
+  primitives this pass, not UI-only decoration.**
+  - Salvo size caps how many of the selected ship's ready tubes a
+    single FIRE click actually launches from, via a new OPTIONAL
+    `max_launches` parameter on `SimulationWorld.order_missile_launch`
+    (default `-1` = unlimited = the function's exact pre-existing
+    behavior of firing every ready-and-in-range tube -- every existing
+    call site and every existing replay-log entry is unaffected).
+  - Throttle/profile IS an already-existing mechanic
+    (`MissileState.set_throttle()`, itself implementing AGENTS.md
+    §18.1's CANON "drives were frequently adjustable... stepped down...
+    to increase powered lifetime") that, before this pass, no caller in
+    this codebase ever actually invoked -- every missile in every
+    scenario/test was always full-burn by omission, not by an explicit
+    choice anyone made. This pass adds an OPTIONAL `throttle_fraction`
+    parameter to `order_missile_launch`/`_launch_missile_from_tube`
+    (default `1.0` = full burn = `MissileState`'s own default,
+    `set_throttle()` is not even called when the fraction is `1.0`) and
+    wires the panel's two-preset toggle (FULL BURN / EXTENDED RANGE =
+    `1.0`/`0.5`) to it. Two named presets, not a continuous slider --
+    no continuous-value UI widget exists anywhere in this codebase yet
+    (same "plain hand-drawn Control, no slider/popup-menu widget"
+    convention `order_menu.gd` already established), and §1.10.8's own
+    text ("throttle/profile IF AVAILABLE") reads as "expose it if the
+    mechanic exists", not "invent a granular control surface for it".
+  - Both are persisted PER SHIP ID in `WeaponPanelController`'s own
+    Dictionaries (`_salvo_size_by_ship`/`_throttle_by_ship`), not reset
+    on selection changes, so switching away and back to a ship keeps
+    the player's last choice for it -- same principle as
+    `SelectionState` itself persisting across ticks rather than
+    resetting.
+
+* **Missile "target": reuses `SelectionState.designated_target_id`
+  as-is, no second target concept.** §56.3 item D already introduced
+  this field for "the target half" of the contextual order-menu
+  interaction (see that item's own ASSUMPTIONS.md entry). Rather than
+  inventing an independent "weapon panel target" field, this panel
+  reads and displays the SAME shared designation, and FIRE passes it
+  straight through to `order_missile_launch`'s `target_ship_id`
+  argument (empty designation -> that function's own pre-existing
+  standing-target fallback, i.e. "fire at whoever I'd normally be
+  engaging" -- see that function's own doc comment). This does mean the
+  weapon panel's "target" line is read-only from this panel's own
+  perspective -- setting it is still done the item-D way (plain-click
+  designate a hostile contact while an own ship is selected). Adding a
+  SEPARATE target-picker directly on the weapon panel would duplicate
+  an interaction §1.10.7/§1.10.9 already specify happens via contextual
+  selection, not a second always-visible control.
+
+* **COUNTER-MISSILES: not shown at all, not even a disabled/greyed
+  row.** Checked first (grep across `simulation/*.gd`, repeated
+  specifically for this item beyond what item D's own gap-check
+  already covered): there is NO automatic counter-missile LAUNCH
+  decision anywhere in this codebase. `CounterMissileResolution`
+  (`simulation/counter_missile_resolution.gd`) only ever RESOLVES an
+  already-flying counter-missile's intercept against an incoming
+  missile (wedge-overlap check) -- it has no concept of deciding
+  WHETHER or WHEN to launch one. Every counter-missile that has ever
+  existed in this codebase (see that file's own test,
+  `test_counter_missile.gd`) is a `MissileState` manually constructed
+  by a TEST, with `target` set directly to the incoming missile -- there
+  is no ship-level "counter-missile launcher" inventory/policy object
+  at all (unlike `weapon_mounts`/`missile_tubes`/`pd_mounts`, all of
+  which back real ship-level Dictionaries). A real AUTO/MANUAL
+  DESIGNATION/HOLD policy needs that launch-decision mechanic (when to
+  fire a counter-missile, at which incoming threat, from which tube/
+  launcher) to exist FIRST -- that is a genuine new combat-AI feature
+  (comparable in scope to `TacticalAI.select_pd_target` itself), not a
+  UI/routing item. Per this item's own checklist text ("a UI/routing
+  item... map onto what exists, log clearly whatever doesn't"), showing
+  a COUNTER-MISSILES section with buttons that silently do nothing
+  would be actively worse than the honest omission chosen here -- same
+  reasoning `OrderMenuController`'s own doc comment already gives for
+  DEFEND/COVER/FOLLOW/INTERCEPT (§56.3 item D). `test_weapon_panel_controller.gd`
+  explicitly asserts no row ever contains "COUNTER-MISSILE", even when
+  every OTHER weapon category is present on the test ship, so a future
+  pass can't accidentally "restore" a dead section without that test
+  failing first.
+
+* **POINT DEFENSE: AUTO/HOLD is real and wired; priority-target
+  designation is honestly NOT implemented.** Before this pass, PD was
+  ALWAYS fully automatic with no off switch at all --
+  `SimulationWorld._resolve_point_defense` engaged every ship's PD
+  mounts unconditionally every tick via `TacticalAI.select_pd_target`
+  (nearest usable threat, no override). This pass adds a real,
+  minimal per-ship policy: `world.ship_pd_hold: Dictionary` (ship_id ->
+  bool, absent/false = AUTO = the exact pre-existing behavior, true =
+  HOLD), set via `set_ship_pd_hold`/`transmit_ship_pd_hold` (same
+  comm-delayed convention as `transmit_ship_weapons_free`), checked by
+  `_resolve_point_defense` at the top of its per-ship loop (a held
+  ship's PD mounts are skipped entirely -- they do not even attempt to
+  track). "Priority-target" designation (letting a commander pick WHICH
+  incoming missile a ship's PD should prioritize, instead of always
+  nearest-usable) is a real, separate targeting-policy change to
+  `TacticalAI.select_pd_target` (which currently takes no override
+  parameter at all) -- honestly left out this pass rather than bolted
+  on as a half-working shortcut, consistent with "map onto what
+  exists, log the rest" for this whole item.
+
+* **Panel is non-modal, unlike `OrderMenu` (item D).** `OrderMenu`
+  deliberately covers the full viewport with `mouse_filter STOP` while
+  open, because it is a transient popup that must swallow every click
+  until dismissed (see that class's own doc comment). This panel is a
+  PERSISTENT side panel instead -- sized to its own small row-count
+  box, positioned bottom-left, rather than the full viewport. Godot
+  only routes input to a Control within its own rect, so clicks
+  anywhere outside this panel's box (the tactical plot, the 3D view,
+  the order menu when it's open) pass through to whatever sibling is
+  there exactly as before this item existed -- no change needed
+  anywhere else to keep that working, and no risk of this panel
+  accidentally becoming a second modal overlay stacked on top of
+  `OrderMenu`'s own.
+
+* **Layout: fixed bottom-left placement, same interim-placement status
+  as `CommandGroupPanel`'s own logged decision (§56.3 item B).** Not a
+  claim this matches the reference image's literal "weapon/order panels
+  on bottom" geometry -- a real non-overlapping multi-panel layout
+  (Hud + TacticalPlot + CommandGroupPanel + WeaponPanel + OrderMenu, all
+  currently independently fixed-positioned) is explicitly item F's job
+  (see CommandGroupPanel's own ASSUMPTIONS.md entry, which already
+  flagged this exact deferral before this panel even existed).
+
+* **Live/player confirmation status: none yet, and specifically
+  weaker than items B/C/D for two of the three real sections.** Item
+  E is headless-tested only (`test_weapon_panel_controller.gd`, 36
+  checks, synthetic ships), same status every §56.3 item has had before
+  a user's own live pass. But UNLIKE items B/C/D (whose underlying
+  mechanics -- formations, move orders, target designation -- are all
+  exercisable in the CURRENT 1v1 energy-only demo scenario), the
+  MISSILES and POINT DEFENSE sections of this panel cannot show up in
+  a live run of `scenes/main.tscn` AT ALL right now: neither demo ship
+  (`alpha`/`beta` in `scripts/main.gd`) has a single missile tube or PD
+  mount -- both are still energy-weapons-only, exactly as item H's own
+  checklist text already names as still-open ("give at least one side
+  missile tubes"). Only the ENERGY WEAPONS section and the panel's
+  visibility gate itself are actually observable in today's live demo;
+  MISSILES/POINT DEFENSE remain synthetic-test-only until item H lands.
+  This is not a defect introduced by item E -- it is item E correctly
+  and honestly reflecting "don't show weapons the ship doesn't have"
+  for a scenario that, today, genuinely doesn't have them.

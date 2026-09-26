@@ -75,6 +75,33 @@ What already exists from §56.2/§56.3 items A-D (do NOT rebuild, extend it):
     INTERCEPT. Headless-tested only (42 checks,
     simulation/tests/test_order_menu_controller.gd) -- NOT yet confirmed
     with a real player (same no-live-mouse caveat as items B/C).
+  - Weapon-selection panel (item E, this pass): scripts/weapon_panel_controller.gd
+    (WeaponPanelController) + scripts/weapon_panel.gd (WeaponPanel, non-modal --
+    unlike OrderMenu it does not cover the full viewport, see that file's own doc
+    comment). Visible only when EXACTLY ONE own ship is selected. ENERGY WEAPONS:
+    read-only list from world.weapon_mounts. MISSILES (only if tubes exist): salvo
+    size (click-to-cycle, capped to tube count) + throttle profile (FULL BURN/
+    EXTENDED RANGE, click-to-cycle) are BOTH real -- new optional max_launches/
+    throttle_fraction params on world.order_missile_launch/_launch_missile_from_tube
+    (both default to old behavior, every existing caller/replay entry unaffected),
+    throttle wires the pre-existing but previously-unused MissileState.set_throttle().
+    target line reuses SelectionState.designated_target_id as-is (no second target
+    concept). POINT DEFENSE (only if PD mounts exist): AUTO/HOLD is a REAL new
+    mechanic -- world.ship_pd_hold + set_ship_pd_hold/transmit_ship_pd_hold (same
+    comm-delayed convention as transmit_ship_weapons_free), checked by
+    _resolve_point_defense (a held ship's PD mounts do not engage at all). Honest
+    gaps, NOT shown: missile "type" selection (MissileTube has no type field, no
+    ship anywhere has >1 tube type), COUNTER-MISSILES entirely (no automatic
+    counter-missile LAUNCH decision exists anywhere in simulation/*.gd -- every
+    counter-missile in this codebase is a manually-constructed test double, see
+    ASSUMPTIONS.md "§56.3 item E"), PD priority-target designation (TacticalAI.
+    select_pd_target has no override parameter). Headless-tested only (36 checks,
+    simulation/tests/test_weapon_panel_controller.gd) -- NOT yet confirmed with a
+    real player (same no-live-mouse caveat as items B/C/D), AND the MISSILES/POINT
+    DEFENSE sections specifically cannot even appear in the live demo scenario yet
+    (scripts/main.gd's alpha/beta ships are still energy-only -- item H is what adds
+    missile tubes -- so only ENERGY WEAPONS + the panel's visibility gate are
+    live-observable today; MISSILES/PD are synthetic-test-only until H lands).
 Checklist (§56.3, new scope, roughly in an order that builds incrementally toward the
 15-step MVP acceptance test in AGENTS.md §56.3 / §1.10.14):
   [x] A. Multi-select: Ctrl+LMB add to selection, Shift+LMB extend, LMB drag-box select
@@ -97,11 +124,18 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
       D"). See "What already exists" above and CHANGELOG.md 2026-09-26 entry (second
       2026-09-26 entry, this pass) for full detail. Headless-verified only (42 checks),
       not live-confirmed.
-  [ ] E. Weapon-type selection panel for the selected ship: missiles (type + salvo size +
-      target + FIRE), counter-missiles (auto/manual/hold), energy weapons, PD
-      (auto/hold/priority-target) -- must only show weapons the selected ship's class
-      actually has mounted (no showing weapons it doesn't carry). AGENTS.md §1.10.8,
-      ~line 2434.
+  [x] E. Weapon-type selection panel for the selected ship -- implemented: ENERGY
+      WEAPONS (read-only mounted list), MISSILES (salvo size + throttle/profile +
+      target readout + FIRE, only shown when tubes exist), POINT DEFENSE (real
+      AUTO/HOLD toggle, only shown when PD mounts exist). Honestly NOT
+      implemented/NOT shown: missile "type" selection (no type field exists on
+      MissileTube), COUNTER-MISSILES entirely (no automatic launch-decision
+      mechanic anywhere in simulation/*.gd), PD priority-target designation (no
+      override parameter on TacticalAI.select_pd_target) -- see ASSUMPTIONS.md
+      "§56.3 item E". See "What already exists" above and CHANGELOG.md 2026-09-26
+      entry (item E) for full detail. Headless-verified only (36 checks), not
+      live-confirmed -- MISSILES/POINT DEFENSE specifically cannot even appear live
+      until item H gives a demo ship missile tubes.
   [ ] F. Command camera per §1.10.1: free camera over the battle, can go near-vertical
       top-down, orbit, zoom, quick-center on selected ship/group/contact -- extend the
       existing OrbitCamera rather than replacing it if it already covers most of this.
@@ -122,30 +156,27 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
   [ ] Run AGENTS.md §56.3/§1.10.14's 15-step MVP acceptance test yourself (headless
       script simulating the input sequence where possible) as a sanity check, but this
       does NOT substitute for the user's own live pass/fail -- see below.
-Next concrete step: item E -- weapon-type selection panel for the selected ship
-(§1.10.8, AGENTS.md ~line 2434 -- read it fresh, it was only skimmed against item D's
-own needs so far). Minimal interface per class: MISSILES (type, salvo size, target,
-throttle/profile if available, FIRE), COUNTER-MISSILES (AUTO/MANUAL DESIGNATION/HOLD),
-ENERGY WEAPONS (laser/graser/other mounted), POINT DEFENSE (AUTO/HOLD/priority-threat
-assignment). Hard requirement: "Нельзя показывать игроку оружие, которого у корабля
-нет" -- the panel must only list weapons the SELECTED ship's class actually has mounted
-(world.weapon_mounts[ship_id]/world.missile_tubes[ship_id], not a hardcoded list).
-Existing primitives to check/reuse before inventing anything: ShipCombatDirective
-(manual_target_ship_id/weapons_free -- already wired via transmit_ship_target/
-transmit_ship_weapons_free, see player_input.gd/order_menu_controller.gd for existing
-usage) covers "target"/"weapon mode" but has NO notion of missile salvo size, missile
-throttle/profile, or counter-missile/point-defense POLICY (auto/manual/hold) yet --
-grep simulation/*.gd (missile_tube.gd, point_defense_mount.gd, counter_missile_resolution.gd,
-point_defense_resolution.gd, tactical_ai.gd's select_pd_target) before assuming what
-does/doesn't already exist, same "check first, log the honest gap" discipline as item D.
-A one-shot "FIRE missiles now" action is a genuinely different kind of thing from a
-standing directive (matches order_missile_launch's own existing "immediate explicit
-trigger" convention per ship_combat_directive.gd's class doc) -- don't force it into
-ShipCombatDirective's posture model. Like item D, this is a UI/routing item: implement
-what maps cleanly onto what exists, log clearly whatever doesn't (e.g. per-missile-type
-selection, throttle/profile, counter-missile/PD policy toggles may need small new,
-additive state -- that is fine and expected, just keep it small and honestly logged,
-NOT a request to redesign weapon_mount.gd/missile_tube.gd's own resolution logic).
+Next concrete step: item F -- command camera + first real shared UI-panel layout pass
+(§1.10.1). Camera: extend the existing OrbitCamera (scripts/orbit_camera.gd) rather than
+replacing it if it already covers most of "free camera over the battle, can go
+near-vertical top-down, orbit, zoom" -- read that file fresh before assuming what it
+does/doesn't do yet, it predates §56.3 entirely (§56.1 item 1). New requirement not yet
+covered by anything: "quick-center on selected ship/group/contact" -- a hotkey/action
+that snaps/animates the camera to frame whatever SelectionState.selected_ids currently
+holds (single ship, group, or a designated_target_id contact); check whether
+OrbitCamera already exposes a "look at point X" entry point or whether this needs a
+small new method on it. Layout: Hud (top-left, hud.gd), CommandGroupPanel (top-left
+below Hud, command_group_panel.gd), and WeaponPanel (bottom-left, weapon_panel.gd) are
+ALL still independently fixed-positioned guesses (each one's own doc comment already
+flags this and defers to item F specifically -- see ASSUMPTIONS.md "§56.3 item B" and
+"§56.3 item E"). This item is the first real pass at making them coexist without
+overlapping as more panels/rows get added -- doesn't need to be pixel-perfect against
+the reference image, but should replace "each panel hardcodes its own guessed offset"
+with something that actually accounts for the others' current sizes (e.g. a shared
+layout helper each panel's sync()/update() consults, or explicit non-overlapping regions
+computed from viewport size). Read AGENTS.md §1.10.1 fresh before starting -- only
+skimmed against earlier items' own needs so far, same "read it fresh for a new lettered
+item" discipline as every prior item in this checklist.
 Tests: still fast-visible-result mode -- skip full simulation suite, headless import/smoke
 check only, until §56.3 fully closes (this is a big scope, likely spans many passes --
 that's fine, keep chipping at the checklist in order, one or two items per pass is a
@@ -157,28 +188,42 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-26 14:28 UTC (scheduled dev pass, fired from the normal 3h
+Last pass finished: 2026-09-26 14:47 UTC (scheduled dev pass, fired from the normal 3h
 cron; cron prompt still says "§56.1" -- that is a stale/generic scheduled-task prompt
 that this skill's own instructions say NOT to update via update_trigger, so it is
 intentionally ignored in favor of this file, which is the actual source of truth):
-implemented and headless-verified §56.3 item D (contextual order menu) -- new
-scripts/order_menu_controller.gd (OrderMenuController) + scripts/order_menu.gd
-(OrderMenu), new SelectionState.designated_target_id concept, tactical_plot.gd's plain-
-click branch now tries the menu before falling back to select_only, plus a new
-designated-target diamond marker in TacticalPlot._draw(); main.gd wiring (order_menu
-added to the tree AFTER tactical_plot for input priority, order_menu.sync() called from
-_on_tick). ATTACK/FOCUS FIRE/HOLD FIRE/WEAPONS FREE/APPROACH/WITHDRAW/MAINTAIN FORMATION
-implemented; DEFEND/COVER/FOLLOW/INTERCEPT honestly NOT offered in the menu (no backing
-mechanic exists -- see ASSUMPTIONS.md "§56.3 item D"). New test file
-simulation/tests/test_order_menu_controller.gd (42 checks, all passing), plus 9 existing
-regression suites re-run clean (test_selection_state.gd, test_move_order_controller.gd,
-test_command_group_controller.gd, test_tactical_plot_selection.gd,
+implemented and headless-verified §56.3 item E (weapon-selection panel) -- new
+scripts/weapon_panel_controller.gd (WeaponPanelController) + scripts/weapon_panel.gd
+(WeaponPanel, non-modal, unlike OrderMenu). ENERGY WEAPONS: read-only mounted list.
+MISSILES (only shown when tubes exist): salvo size + throttle/profile (FULL BURN/
+EXTENDED RANGE) are both REAL, newly-wired primitives -- optional max_launches/
+throttle_fraction params added to world.order_missile_launch/_launch_missile_from_tube
+(both default to exactly the old behavior, zero existing callers/replay entries
+affected), throttle wires the pre-existing but previously-unused
+MissileState.set_throttle(). Target line reuses SelectionState.designated_target_id
+as-is. POINT DEFENSE (only shown when PD mounts exist): AUTO/HOLD is a REAL new
+mechanic -- world.ship_pd_hold + set_ship_pd_hold/transmit_ship_pd_hold (same
+comm-delayed convention as transmit_ship_weapons_free), _resolve_point_defense skips a
+held ship's mounts entirely. Honestly NOT implemented/NOT shown: missile "type"
+selection (no type field on MissileTube), COUNTER-MISSILES entirely (no automatic
+launch-decision mechanic anywhere in simulation/*.gd -- every counter-missile in this
+codebase is a manually-constructed test double), PD priority-target designation (no
+override parameter on TacticalAI.select_pd_target) -- see ASSUMPTIONS.md "§56.3 item E"
+for the full grep-first writeup. New test file
+simulation/tests/test_weapon_panel_controller.gd (36 checks, all passing), plus 15
+existing regression suites re-run clean (test_weapon_resolution.gd,
+test_missile_launch_order.gd, test_point_defense.gd, test_ship_combat_directive.gd,
+test_order_menu_controller.gd, test_move_order_controller.gd,
+test_command_group_controller.gd, test_selection_state.gd, test_tactical_plot_selection.gd,
 test_tactical_plot_projector.gd, test_individual_orders.gd, test_command_transmission.gd,
-test_formation.gd, test_ship_combat_directive.gd) plus a headless scene smoke run
-(exit 0, same 16x baseline dummy-renderer errors, zero new error types). One
-non-obvious trap found and worked around while writing this pass's OWN test (not a bug
-in the shipped code, a test-authoring pitfall -- see ASSUMPTIONS.md "§56.3 item D"):
-WITHDRAW's turn-then-accelerate composite silently no-ops if the ship starts at zero
-speed (inherited from change_course's existing is_complete() semantics, same as every
-other withdraw_orders caller in this codebase already requires). ASSUMPTIONS.md/
-CHANGELOG.md updated; pushed this pass. E-I not started.
+test_formation.gd, test_missile.gd, test_subsystem_damage_consumers.gd) plus a headless
+scene smoke run (exit 0, same 16x baseline dummy-renderer errors, zero new error types --
+required one `godot --headless --import` first to refresh .godot/global_script_class_cache.cfg
+so the two new global class_name scripts were recognized, noted here in case a future
+pass hits the same "Could not find type" error after adding a new class_name script).
+IMPORTANT CAVEAT specific to this item: MISSILES/POINT DEFENSE sections are headless-
+tested only and cannot even appear in a LIVE run of scenes/main.tscn yet -- the demo
+scenario's alpha/beta ships are still energy-only (item H is what adds missile tubes to
+at least one side); only ENERGY WEAPONS + the panel's own visibility gate are actually
+observable in today's live demo. ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
+F-I not started.

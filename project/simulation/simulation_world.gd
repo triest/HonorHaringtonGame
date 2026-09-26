@@ -73,6 +73,17 @@ var formations: Dictionary = {}       # formation_id -> FormationState (§27/§2
 var command_echelons: Dictionary = {}
 var individual_orders: Dictionary = {}  # ship_id -> IndividualCommandState (§30/§31, Milestone 11 first slice)
 var ship_combat_directives: Dictionary = {}  # ship_id -> ShipCombatDirective (§30 target/weapon mode, Milestone 11 second slice)
+## §56.3 item E ("POINT DEFENSE: AUTO/HOLD", §1.10.8): ship_id -> bool,
+## true = this ship's point-defense mounts are held (see
+## set_ship_pd_hold/transmit_ship_pd_hold below and
+## _resolve_point_defense's own check) -- same lazy/sparse convention as
+## ship_combat_directives (absent == false, i.e. AUTO, the only behavior
+## that existed before this pass). PD has no "priority target"
+## designation yet -- TacticalAI.select_pd_target only supports automatic
+## nearest-usable-contact selection, and adding a commander override
+## there is a real, separate targeting mechanic, not a UI/routing change
+## -- honestly left out this pass, see ASSUMPTIONS.md "§56.3 item E".
+var ship_pd_hold: Dictionary = {}
 var _formation_assigned_targets: Dictionary = {}  # ship_id -> target_ship_id (§34.1 Doubling, rebuilt every tick by _resolve_formation_target_assignment, empty for ships with no governed formation)
 ## §34.2 Missile Time-on-Target coordination: ship_id -> {"fire_at":
 ## float world_sim_time, "target_ship_id": String}. UNLIKE
@@ -220,6 +231,7 @@ func remove_ship(ship_id: String) -> void:
 	teams.erase(ship_id)
 	individual_orders.erase(ship_id)
 	ship_combat_directives.erase(ship_id)
+	ship_pd_hold.erase(ship_id)
 	if not _pending_command_transmissions.is_empty():
 		var kept: Array = []
 		for entry in _pending_command_transmissions:
@@ -531,6 +543,8 @@ func apply_recorded_command(entry: Dictionary) -> void:
 			transmit_clear_ship_target(args["ship_id"])
 		"transmit_ship_weapons_free":
 			transmit_ship_weapons_free(args["ship_id"], args["is_free"])
+		"transmit_ship_pd_hold":
+			transmit_ship_pd_hold(args["ship_id"], args["is_hold"])
 		"transmit_return_ship_to_formation":
 			transmit_return_ship_to_formation(args["ship_id"])
 		"set_ship_target":
@@ -539,8 +553,10 @@ func apply_recorded_command(entry: Dictionary) -> void:
 			clear_ship_target(args["ship_id"])
 		"set_ship_weapons_free":
 			set_ship_weapons_free(args["ship_id"], args["is_free"])
+		"set_ship_pd_hold":
+			set_ship_pd_hold(args["ship_id"], args["is_hold"])
 		"order_missile_launch":
-			order_missile_launch(args["ship_id"], args.get("target_ship_id", ""))
+			order_missile_launch(args["ship_id"], args.get("target_ship_id", ""), args.get("max_launches", -1), args.get("throttle_fraction", 1.0))
 		"issue_formation_order":
 			issue_formation_order(args["formation_id"], FormationOrder.from_dict(args["order"]))
 		"issue_formation_order_now":
@@ -611,6 +627,7 @@ func _resolve_ship_destruction() -> void:
 			formations[formation_id].remove_member(ship_id)
 		individual_orders.erase(ship_id)
 		ship_combat_directives.erase(ship_id)
+		ship_pd_hold.erase(ship_id)
 		ecm_states.erase(ship_id)
 
 ## Explicit shot trigger. Still callable directly (e.g. by a scenario
@@ -813,6 +830,8 @@ func _resolve_point_defense(dt: float) -> void:
 	for ship_id in ships.keys():
 		if ships[ship_id].is_wreck:
 			continue  # §63.1: a wreck has no crew/power to operate point defense
+		if ship_pd_hold.get(ship_id, false):
+			continue  # §56.3 item E "POINT DEFENSE: HOLD" -- see ship_pd_hold's own doc comment
 		var mounts: Array = pd_mounts.get(ship_id, [])
 		if mounts.is_empty():
 			continue
@@ -1319,6 +1338,12 @@ func transmit_ship_weapons_free(ship_id: String, is_free: bool) -> void:
 	_record_command("transmit_ship_weapons_free", {"ship_id": ship_id, "is_free": is_free})
 	_queue_command_transmission(ship_id, Callable(self, "set_ship_weapons_free").bind(ship_id, is_free))
 
+## §56.3 item E ("POINT DEFENSE: AUTO/HOLD"): comm-delayed variant of
+## set_ship_pd_hold below, same convention as transmit_ship_weapons_free.
+func transmit_ship_pd_hold(ship_id: String, is_hold: bool) -> void:
+	_record_command("transmit_ship_pd_hold", {"ship_id": ship_id, "is_hold": is_hold})
+	_queue_command_transmission(ship_id, Callable(self, "set_ship_pd_hold").bind(ship_id, is_hold))
+
 func transmit_return_ship_to_formation(ship_id: String) -> void:
 	_record_command("transmit_return_ship_to_formation", {"ship_id": ship_id})
 	_queue_command_transmission(ship_id, Callable(self, "return_ship_to_formation").bind(ship_id))
@@ -1355,6 +1380,18 @@ func clear_ship_target(ship_id: String) -> void:
 func set_ship_weapons_free(ship_id: String, is_free: bool) -> void:
 	_record_command("set_ship_weapons_free", {"ship_id": ship_id, "is_free": is_free})
 	_get_or_create_combat_directive(ship_id).set_weapons_free(is_free)
+
+## §56.3 item E ("POINT DEFENSE: AUTO/HOLD", §1.10.8): true = held (this
+## ship's PD mounts do not engage at all this tick, see
+## _resolve_point_defense's own check), false (default/absent, see
+## ship_pd_hold's own doc comment) = AUTO, identical to every pre-
+## existing PD behavior before this pass -- PD is otherwise always fully
+## automatic (TacticalAI.select_pd_target, nearest usable threat), there
+## is no MANUAL/priority-target mode to route to here yet (see
+## ship_pd_hold's own doc comment and ASSUMPTIONS.md "§56.3 item E").
+func set_ship_pd_hold(ship_id: String, is_hold: bool) -> void:
+	_record_command("set_ship_pd_hold", {"ship_id": ship_id, "is_hold": is_hold})
+	ship_pd_hold[ship_id] = is_hold
 
 ## §30 "missile launch" (Milestone 11) -- a discrete, one-time "fire a
 ## salvo now" ORDER, deliberately distinct from BOTH `weapons_free`
@@ -1399,8 +1436,28 @@ func set_ship_weapons_free(ship_id: String, is_free: bool) -> void:
 ## Returns the number of missiles actually launched this call (0 if
 ## none -- held fire, disengaging, no valid target, or no tube ready/
 ## in range).
-func order_missile_launch(ship_id: String, target_ship_id: String = "") -> int:
-	_record_command("order_missile_launch", {"ship_id": ship_id, "target_ship_id": target_ship_id})
+## §56.3 item E ("MISSILES: salvo size... throttle/profile if
+## available", §1.10.8) EXTENSION, this pass: two new OPTIONAL trailing
+## params, both defaulted to preserve every existing call site/replay
+## entry unchanged (`max_launches = -1` == unlimited == exactly the old
+## behavior of firing every ready-and-in-range tube; `throttle_fraction
+## = 1.0` == full burn == MissileState's own default, no set_throttle()
+## call made at all). `max_launches` caps how many of this ship's ready
+## tubes actually fire this call (the UI-facing "salvo size" -- see
+## scripts/weapon_panel_controller.gd), NOT a change to ammo/cooldown
+## bookkeeping, which each MissileTube still tracks itself exactly as
+## before. `throttle_fraction` is passed straight through to
+## `_launch_missile_from_tube`, which applies it via MissileState's own
+## pre-existing set_throttle() (AGENTS.md §18.1 CANON "stepped down"
+## drives) -- no new missile-performance mechanic invented here, only
+## wiring an already-existing one up to a UI control for the first time.
+## Per-missile-type selection (the other half of §1.10.8's MISSILES
+## list) is honestly NOT implemented -- MissileTube has no "type" field
+## and no scenario/ship-loadout in this codebase constructs more than
+## one tube type per ship, so there is nothing distinct to let the
+## player choose between yet (see ASSUMPTIONS.md "§56.3 item E").
+func order_missile_launch(ship_id: String, target_ship_id: String = "", max_launches: int = -1, throttle_fraction: float = 1.0) -> int:
+	_record_command("order_missile_launch", {"ship_id": ship_id, "target_ship_id": target_ship_id, "max_launches": max_launches, "throttle_fraction": throttle_fraction})
 	var ship: ShipPhysicsState = ships.get(ship_id)
 	if ship == null:
 		return 0
@@ -1428,11 +1485,13 @@ func order_missile_launch(ship_id: String, target_ship_id: String = "") -> int:
 	var distance: float = ship.position.distance_to(target_contact.estimated_position)
 	var launched_count: int = 0
 	for tube in tubes:
+		if max_launches >= 0 and launched_count >= max_launches:
+			break  # §56.3 item E "salvo size" cap -- see this func's own doc comment
 		if not tube.is_ready():
 			continue
 		if distance > tube.effective_max_range_m():
 			continue
-		_launch_missile_from_tube(ship_id, ship, target_ship, tube)
+		_launch_missile_from_tube(ship_id, ship, target_ship, tube, throttle_fraction)
 		launched_count += 1
 	return launched_count
 
@@ -2129,11 +2188,23 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 ## everything else uses MissileState's own defaults (drive/warhead/rod
 ## configuration), same as every other missile created in this codebase
 ## via `MissileState.new()`.
-func _launch_missile_from_tube(attacker_ship_id: String, attacker: ShipPhysicsState, target, tube) -> void:
+##
+## §56.3 item E EXTENSION, this pass: optional `throttle_fraction`
+## (default 1.0 == full burn, MissileState's own default, applies to
+## every pre-existing caller unchanged -- the automatic AI in
+## `_resolve_missile_launch_ai` never passes this and always gets
+## full-burn missiles exactly as before). A value < 1.0 calls
+## `MissileState.set_throttle()` immediately after construction, BEFORE
+## `add_missile()` -- i.e. before the missile has taken a single
+## integration tick, matching set_throttle()'s own documented
+## precondition ("call BEFORE the missile starts burning").
+func _launch_missile_from_tube(attacker_ship_id: String, attacker: ShipPhysicsState, target, tube, throttle_fraction: float = 1.0) -> void:
 	var missile := MissileState.new()
 	missile.position = attacker.position
 	missile.velocity = attacker.velocity
 	missile.target = target
+	if throttle_fraction < 1.0:
+		missile.set_throttle(throttle_fraction)
 
 	_next_ai_missile_id += 1
 	var missile_id: String = "ai_missile_%d" % _next_ai_missile_id

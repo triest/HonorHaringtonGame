@@ -3471,3 +3471,154 @@ InputEventMouseButton с правой кнопкой) -- см. .tools/state.md, 
 игроком (headless-окружение не может сгенерировать настоящие мышиные
 клики) -- см. .tools/state.md, тот же урок ещё раз: не объявлять
 готовым без живого подтверждения.
+
+## 2026-09-26 (scheduled dev pass) -- §56.3 item E: панель выбора оружия для выбранного корабля
+
+ТЗ §56.3 item E / §1.10.8 ("Выбор оружия"): для ОДИНОЧНОГО выбранного
+своего корабля появляется постоянная (не модальная) боковая панель со
+секциями ENERGY WEAPONS / MISSILES / POINT DEFENSE, читающая РЕАЛЬНО
+установленное на этом корабле вооружение (`world.weapon_mounts`/
+`world.missile_tubes`/`world.pd_mounts`), НИКОГДА не хардкодя список --
+жёсткое требование §1.10.8 ("Нельзя показывать игроку оружие, которого у
+корабля нет"). См. ASSUMPTIONS.md "§56.3 item E" для полного разбора
+честных пробелов (per-missile-type, COUNTER-MISSILES, PD priority-target).
+
+* `scripts/weapon_panel_controller.gd` (новый, Node, класс
+  `WeaponPanelController`): та же §42 конвенция "controller пишет
+  данные, view читает раз в тик", что MoveOrderController/
+  OrderMenuController -- никакой ссылки на UI Control, только
+  `is_visible`/`ship_id`/`rows` (`Array[{"label","kind"}]`, тот же
+  one-kind-per-row паттерн, что `OrderMenuController.menu_entries`).
+  Панель видна ТОЛЬКО когда текущий выбор -- РОВНО один свой корабль
+  (`player_team`) -- групповой выбор/пустой выбор/вражеский контакт
+  скрывают панель целиком (нет "чьё именно вооружение показывать" для
+  группы, и нет утечки чужого loadout'а игроку).
+  * ENERGY WEAPONS: read-only список `world.weapon_mounts[ship_id]`
+    (класс оружия laser/graser через `WeaponData.weapon_class`, arc
+    через `AttackGeometry.Sector`, ready/cooling статус через
+    `mount.is_ready()`).
+  * MISSILES (только если есть тюбы): "salvo size" (клик по строке
+    циклит 1..tube_count..1, персистентно по ship_id), "throttle/profile"
+    (клик циклит FULL BURN <-> EXTENDED RANGE, персистентно по
+    ship_id) -- РЕАЛЬНО применяется через новый `throttle_fraction`
+    параметр `SimulationWorld.order_missile_launch`/
+    `_launch_missile_from_tube`, который вызывает уже существующий
+    `MissileState.set_throttle()` (ТЗ §18.1 CANON "stepped down"
+    drives) -- ни одной новой ракетной механики не изобретено, только
+    впервые подключён к UI уже существующий примитив. "target" --
+    read-only отображение `SelectionState.designated_target_id` (та же
+    концепция, что item D уже использует для order-menu, второй target
+    не заводился). FIRE MISSILES -> `world.order_missile_launch(ship_id,
+    target_id, salvo_size, throttle)`.
+  * POINT DEFENSE (только если есть PD-mounts): AUTO/HOLD, клик
+    переключает -- РЕАЛЬНО новый механизм: `world.ship_pd_hold`
+    (Dictionary) + `set_ship_pd_hold`/`transmit_ship_pd_hold` (тот же
+    comm-delayed паттерн, что `transmit_ship_weapons_free`),
+    `SimulationWorld._resolve_point_defense` пропускает корабль с
+    `ship_pd_hold == true` целиком (PD-mounts вообще не engage'ят).
+    "priority-target" designation честно НЕ реализован -- см.
+    ASSUMPTIONS.md.
+  * COUNTER-MISSILES НЕ показан вообще, ни одной disabled-строки --
+    честный пробел, не недосмотр: в `simulation/*.gd` нет НИКАКОЙ
+    automatic launch-decision механики для counter-missiles (grep
+    проверен до написания класса) -- каждый counter-missile в этом
+    кодбейзе сегодня вручную сконструированный `MissileState` с
+    `target` = входящая ракета (см. `counter_missile_resolution.gd`'s
+    own class doc); `CounterMissileResolution` только РЕЗОЛВИТ уже
+    летящий counter-missile, никогда не решает его запустить. Реальный
+    AUTO/MANUAL/HOLD policy требует сначала эту launch-decision
+    механику -- это новая combat-AI фича, не UI/routing изменение (та
+    же логика, что уже применена к DEFEND/COVER/FOLLOW/INTERCEPT в
+    item D).
+* `scripts/weapon_panel.gd` (новый, `WeaponPanel` -- Control): чистая
+  презентация, тот же hand-drawn Control стиль (draw_string/draw_rect),
+  что `OrderMenu`/`TacticalPlot`. В ОТЛИЧИЕ от `OrderMenu` НЕ модальная
+  -- размер Control'а равен размеру собственного бокса (не полный
+  viewport), поэтому клики вне панели проходят к tactical_plot/3D-виду
+  как раньше без каких-либо изменений там. Позиция -- фиксированный
+  bottom-left отступ (интерим-решение, как у `CommandGroupPanel`,
+  полноценная раскладка -- item F, см. ASSUMPTIONS.md).
+* `simulation/simulation_world.gd`:
+  * `order_missile_launch(ship_id, target_ship_id="", max_launches=-1,
+    throttle_fraction=1.0)` -- оба новых параметра ОПЦИОНАЛЬНЫ с
+    дефолтами, сохраняющими старое поведение для каждого существующего
+    вызова/replay-записи без изменений (`max_launches=-1` == без
+    ограничения == старое поведение "стрелять из каждого готового
+    тюба"; `throttle_fraction=1.0` == full burn == дефолт
+    `MissileState` == `set_throttle()` вообще не вызывается).
+  * `_launch_missile_from_tube(..., throttle_fraction=1.0)`: вызывает
+    `missile.set_throttle()` СРАЗУ после конструирования, ДО
+    `add_missile()` -- т.е. до первого тика интеграции, что и требует
+    собственный doc comment `set_throttle()`.
+  * `ship_pd_hold: Dictionary` (новое поле) + `set_ship_pd_hold`/
+    `transmit_ship_pd_hold` + `_resolve_point_defense`'s новая проверка
+    в начале цикла. Очистка в `remove_ship`/wreck-конверсии, как
+    `ship_combat_directives`.
+  * Replay-диспетчер (`_replay_command`): добавлены записи для
+    `set_ship_pd_hold`/`transmit_ship_pd_hold`, и `order_missile_launch`
+    теперь читает `max_launches`/`throttle_fraction` из `args` с теми же
+    дефолтами -- старые записанные replay-логи (без этих полей) читают
+    `args.get(..., default)`, поведение не меняется.
+* `scripts/main.gd`: создаёт `weapon_panel_controller`/`weapon_panel`,
+  тот же shared `world`/`selection`/`player_team`, добавляет
+  `weapon_panel_controller.sync()`/`weapon_panel.sync()` в `_on_tick`
+  сразу после `order_menu.sync()`.
+* Тесты (новый, ALL TESTS PASSED): `simulation/tests/test_weapon_panel_controller.gd`
+  (36 проверок -- видимость панели (пусто/вражеский/группа -> скрыта,
+  одиночный свой корабль -> видна), ENERGY-секция с arc/статусом,
+  MISSILES-секция появляется только при наличии тюбов, salvo size
+  циклит и оборачивается по числу тюбов, throttle циклит FULL BURN
+  <-> EXTENDED RANGE, FIRE ограничивает запуск ровно salvo size'ом
+  из большего числа готовых тюбов И реально применяет пониженный
+  throttle к запущенным ракетам (проверено через
+  `missile.drive_max_acceleration_mps2`/`drive_burn_time_s`), PD-секция
+  появляется только при наличии PD-mounts, toggle реально держится
+  через comm-delay (`world.ship_pd_hold`) и реально ПРЕДОТВРАЩАЕТ
+  engagement в тот же тик (прямая проверка через
+  `PointDefenseMount.cooldown_remaining_s`), COUNTER-MISSILES не
+  появляется НИКОГДА даже когда есть все остальные виды вооружения).
+
+НЕ входит в этот пасс (следующие пункты того же чек-листа, ещё НЕ
+реализованы): F (командная камера + общий layout панелей -- этой
+панели тоже нужен полноценный layout pass), G (поведение зума), H
+(сценарий 1v1 -> эскадра vs эскадра, включая выдачу missile tubes хотя
+бы одной стороне -- ТЕКУЩИЙ демо-сценарий в main.gd по-прежнему
+energy-only, поэтому MISSILES/POINT DEFENSE секции сейчас честно
+никогда не показываются в живом прогоне -- только headless-тестами на
+синтетических кораблях, тот же статус, что и live-непроверенность
+items B/C/D), I (individual override внутри группы).
+
+Проверено (режим "fast visible-result" §56.3 всё ещё в силе, полный
+симуляционный набор не гонялся):
+1. `godot --headless --import` -- чисто, обновлён
+   `.godot/global_script_class_cache.cfg` (новые class_name
+   `WeaponPanelController`/`WeaponPanel` иначе не подхватываются
+   headless-раннером до явного rescan -- это НЕ баг в новом коде, это
+   ожидаемый Godot 4 headless workflow при добавлении новых глобальных
+   классов; фиксирую здесь на случай, если следующий пасс наступит на
+   ту же "Could not find type" ошибку).
+2. `test_weapon_panel_controller.gd` (новый) -- ALL TESTS PASSED (36/36).
+3. Регресс: `test_weapon_resolution.gd`, `test_missile_launch_order.gd`,
+   `test_point_defense.gd`, `test_ship_combat_directive.gd`,
+   `test_order_menu_controller.gd` (42/42), `test_move_order_controller.gd`
+   (29/29), `test_command_group_controller.gd`, `test_selection_state.gd`,
+   `test_tactical_plot_selection.gd`, `test_tactical_plot_projector.gd`,
+   `test_individual_orders.gd`, `test_command_transmission.gd`,
+   `test_formation.gd`, `test_missile.gd`, `test_subsystem_damage_consumers.gd`
+   -- все ALL TESTS PASSED, ни один существующий вызов
+   `order_missile_launch`/`_launch_missile_from_tube` не сломан
+   (оба новых параметра опциональны).
+4. `godot --headless res://scenes/main.tscn --quit-after 120` -- exit 0,
+   ровно те же 16x baseline `mesh_get_surface_count`/"Parameter m is
+   null" (dummy-рендерер), ноль новых типов ошибок -- новое
+   `weapon_panel`/`weapon_panel_controller` wiring в живой демо-сцене
+   (где ни missile tubes, ни PD-mounts ещё не выданы -- см. пункт H)
+   ничего не сломало.
+
+**НЕ заявляется "§56.3 закрыт"** -- это только пункт E из 9+1 (A/B/C/D
+уже были закрыты ранее). Панель реально не тестировалась живым игроком
+(headless-окружение не может сгенерировать настоящие мышиные клики), и
+MISSILES/POINT DEFENSE секции конкретно не тестировались живьём вообще
+никогда, так как текущий демо-сценарий не даёт кораблям ни тюбов, ни
+PD -- см. .tools/state.md, тот же урок ещё раз: не объявлять готовым
+без живого подтверждения.

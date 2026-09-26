@@ -64,6 +64,13 @@ var move_order_controller: MoveOrderController
 ## comment). `order_menu` is the visible popup this controller drives.
 var order_menu_controller: OrderMenuController
 var order_menu: OrderMenu
+## §56.3 item E: same shared world/selection/player_team convention as
+## move_order_controller/order_menu_controller above -- see that
+## script's own doc comment for the panel's visibility rule and honest
+## gaps. `weapon_panel` is the persistent (non-modal) side panel this
+## controller drives.
+var weapon_panel_controller: WeaponPanelController
+var weapon_panel: WeaponPanel
 var player_input: PlayerInput
 var win_lose_screen: WinLoseScreen
 
@@ -181,6 +188,23 @@ func _ready() -> void:
 	tactical_plot.order_menu_controller = order_menu_controller
 	order_menu.controller = order_menu_controller
 
+	# §56.3 item E: weapon-type selection panel for the currently
+	# (singly-)selected own ship -- same shared world/selection/
+	# player_team as move_order_controller/order_menu_controller above.
+	# Non-modal (see weapon_panel.gd's own doc comment), so tree order
+	# relative to tactical_plot/order_menu does not matter for input
+	# priority the way it did for order_menu -- added after them purely
+	# to keep related §56.3 controllers/panels grouped together.
+	weapon_panel_controller = WeaponPanelController.new()
+	weapon_panel_controller.world = world
+	weapon_panel_controller.selection = selection
+	weapon_panel_controller.player_team = String(world.teams.get(HUD_POV_SHIP_ID, ""))
+	add_child(weapon_panel_controller)
+
+	weapon_panel = WeaponPanel.new()
+	weapon_panel.controller = weapon_panel_controller
+	add_child(weapon_panel)
+
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
 	# godot [input], see PlayerInput's own doc comment) into calls on
 	# `world`'s existing transmit_*/order APIs. Given `world` directly
@@ -252,6 +276,8 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	command_group_panel.update(world, selection)
 	move_order_controller.prune_completed()
 	order_menu.sync()
+	weapon_panel_controller.sync()
+	weapon_panel.sync()
 	win_lose_screen.update(world)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo

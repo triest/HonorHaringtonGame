@@ -1,8 +1,9 @@
 extends Node3D
 ## Main
 ##
-## Visual prototype bring-up scene: creates a SimulationWorld with two
-## ships on an inertial thrust course, each with a procedural hull mesh
+## Visual prototype bring-up scene: creates a SimulationWorld with a
+## small squadron per side (§56.3 item H) on an inertial thrust course,
+## each with a procedural hull mesh
 ## (scripts/hull_mesh_builder.gd) and a live wedge visualization driven by
 ## ship_defense_state.gd -- the first actually-visible prototype of the
 ## simulation, not just headless unit tests (ТЗ §56 Milestone 1-3 bring-up).
@@ -22,10 +23,12 @@ extends Node3D
 ## says. (Items 5 and 7, added in later passes, now give alpha player
 ## control and a win/lose screen -- see PlayerInput/WinLoseScreen below;
 ## this paragraph is kept as-is for the historical "why" of the
-## teams/mount setup.) Still explicitly NOT done: missile tubes for the
-## demo ships (energy weapons alone are enough to exercise weapon_fx's
-## beam path live; missile markers stay verified only by unit test until
-## a scenario actually needs missiles) and a Windows export (item 8).
+## teams/mount setup.) §56.3 item H (this pass) upgraded the scenario
+## itself from the original 1v1 (alpha vs beta) to a 3-vs-3 squadron and
+## gave red/alpha missile tubes (previously energy-only) -- see the
+## `ship_specs` table in _ready() below for the authoritative per-ship
+## layout/loadout; this paragraph is kept as-is for the historical "why"
+## of the team/mount wiring, not the current ship count.
 ## See CHANGELOG.md for the authoritative "done vs not done" list.
 ##
 ## WeaponFx (scripts/weapon_fx.gd, ТЗ §56.1 item 3) is wired into the
@@ -96,30 +99,69 @@ func _ready() -> void:
 	world = SimulationWorld.new()
 	add_child(world)
 
-	var alpha := ShipPhysicsState.new()
-	alpha.position = Vector3(-5000.0, 0.0, 0.0)
-	alpha.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
-	alpha.defense = ShipDefenseState.new()
-	# ТЗ §56.1 item 4: assigned here (previously null) so the HUD's
-	# per-subsystem readout has real, non-null state to show -- "per-ship
-	# subsystem condition" is meaningless with subsystems always null.
-	# Every subsystem starts fully healthy (ShipSubsystems._init default);
-	# nothing else about the demo scenario changes, the already-wired
-	# consumers (WEAPONS/POINT_DEFENSE/MISSILE_SYSTEMS/SENSORS/
-	# PROPULSION/MANEUVERING/COMMUNICATIONS, see ship_subsystems.gd) simply
-	# now have live data to act on as combat damages these ships.
-	alpha.subsystems = ShipSubsystems.new()
-	world.add_ship("alpha", alpha)
-	world.set_team("alpha", "red")
-
-	var beta := ShipPhysicsState.new()
-	beta.position = Vector3(5000.0, 0.0, 0.0)
-	beta.orientation = Quaternion(Vector3.UP, PI)
-	beta.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
-	beta.defense = ShipDefenseState.new()
-	beta.subsystems = ShipSubsystems.new()  # see alpha.subsystems assignment above for rationale
-	world.add_ship("beta", beta)
-	world.set_team("beta", "blue")
+	# §56.3 item H: hardcoded demo scenario upgraded from the original
+	# 1v1 (alpha vs beta) to a small squadron vs small squadron -- three
+	# ships per side, each side spread along Z around its guide's original
+	# X position. Z spread is only +/-1500 m, far under the 10,000 m X
+	# separation between the two sides, so AttackGeometry.classify()'s
+	# dominant-axis pick (see the arc comment on world.add_weapon_mount
+	# below) still always resolves to the X axis -- i.e. STARBOARD/PORT --
+	# for every cross-ship pairing, not just guide-vs-guide as before.
+	# "alpha"/"beta" (the two original guides) keep their original ids and
+	# positions unchanged: HUD_POV_SHIP_ID, PlayerInput's hardcoded
+	# player-controlled ship, and several unit tests' doc comments all
+	# still refer to exactly these two ids. alpha_2/alpha_3/beta_2/beta_3
+	# are new, reachable only through the §56.3 mouse-driven selection/
+	# group-order systems (SelectionState/CommandGroupController/
+	# MoveOrderController/OrderMenuController/WeaponPanelController all key
+	# off `player_team` = world.teams.get("alpha"), not off PlayerInput's
+	# own `_controllable_ship_ids` allowlist, so none of that needed any
+	# changes for this) -- which is exactly the point of this item: give
+	# items A-D's multi-select/group-order behavior 2+ own-team ships to
+	# actually exercise live, not just in synthetic headless test worlds.
+	#
+	# Missile tubes (this item's other half, `missile_tubes` below): every
+	# red/alpha ship gets 2 missile tubes (MissileTube's own engineering-
+	# placeholder defaults -- 10 rounds/tube, 5 s reload, 60,000 km range,
+	# see that script's doc comment -- easily in range at this scenario's
+	# ~10 km separation), so missile salvos (item E's weapon panel) have
+	# something to actually fire, live, for the first time -- previously
+	# both demo ships were energy-only (§56.1-era). Blue/beta stays
+	# energy-only: item H only requires "at least one side", and this
+	# also keeps blue a pure energy-weapon contrast case rather than
+	# doubling scope onto both sides in a single pass.
+	var ship_specs: Array = [
+		{"id": "alpha", "team": "red", "x": -5000.0, "z": 0.0, "missile_tubes": 2},
+		{"id": "alpha_2", "team": "red", "x": -5000.0, "z": 1500.0, "missile_tubes": 2},
+		{"id": "alpha_3", "team": "red", "x": -5000.0, "z": -1500.0, "missile_tubes": 2},
+		{"id": "beta", "team": "blue", "x": 5000.0, "z": 0.0, "missile_tubes": 0},
+		{"id": "beta_2", "team": "blue", "x": 5000.0, "z": 1500.0, "missile_tubes": 0},
+		{"id": "beta_3", "team": "blue", "x": 5000.0, "z": -1500.0, "missile_tubes": 0},
+	]
+	for spec in ship_specs:
+		var phys := ShipPhysicsState.new()
+		phys.position = Vector3(spec["x"], 0.0, spec["z"])
+		if spec["team"] == "blue":
+			# Blue faces the opposite way, same as the original single-ship
+			# "beta" setup (PI around Y) -- see AttackGeometry's doc comment:
+			# -Z is bow, so a PI rotation makes blue's bow point back along
+			# +Z, i.e. towards red, mirroring red's own -Z-facing bow.
+			phys.orientation = Quaternion(Vector3.UP, PI)
+		phys.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
+		phys.defense = ShipDefenseState.new()
+		# ТЗ §56.1 item 4: assigned here (previously null) so the HUD's
+		# per-subsystem readout has real, non-null state to show -- "per-ship
+		# subsystem condition" is meaningless with subsystems always null.
+		# Every subsystem starts fully healthy (ShipSubsystems._init default);
+		# nothing else about the demo scenario changes, the already-wired
+		# consumers (WEAPONS/POINT_DEFENSE/MISSILE_SYSTEMS/SENSORS/
+		# PROPULSION/MANEUVERING/COMMUNICATIONS, see ship_subsystems.gd) simply
+		# now have live data to act on as combat damages these ships.
+		phys.subsystems = ShipSubsystems.new()
+		world.add_ship(spec["id"], phys)
+		world.set_team(spec["id"], spec["team"])
+		for _i in range(int(spec["missile_tubes"])):
+			world.add_missile_tube(spec["id"], MissileTube.new())
 
 	for ship_id in world.ships.keys():
 		var view := ShipView.new()
@@ -132,13 +174,17 @@ func _ready() -> void:
 		laser.max_range_m = 500_000.0
 		laser.damage_per_hit = 100.0
 		laser.recharge_time_s = 4.0
-		# broadside_arc(), not bow_chaser_arc(): alpha/beta start abeam of
-		# each other (both on the X axis, facing along +/-Z), so the enemy
-		# is on each ship's STARBOARD per AttackGeometry.classify() from
-		# tick 1, never in its BOW arc -- neither ship turns to face the
-		# other (that would need real steering AI, out of scope for this
-		# hardcoded slice). A bow chaser here would never find arc and
-		# never fire; broadside is what actually matches this geometry.
+		# broadside_arc(), not bow_chaser_arc(): every red ship sits at
+		# roughly the same X as guide "alpha" and every blue ship at
+		# roughly the same X as guide "beta" (both facing along +/-Z, only
+		# +/-1500 m Z spread per ship -- see the §56.3 item H comment
+		# above -- well under the 10,000 m X separation between sides), so
+		# the enemy is on every ship's STARBOARD per AttackGeometry.
+		# classify() from tick 1, never in its BOW arc -- neither ship
+		# turns to face the other (that would need real steering AI, out
+		# of scope for this hardcoded slice). A bow chaser here would
+		# never find arc and never fire; broadside is what actually
+		# matches this geometry.
 		world.add_weapon_mount(ship_id, WeaponMount.new(laser, WeaponMount.broadside_arc()))
 
 	weapon_fx = WeaponFx.new()

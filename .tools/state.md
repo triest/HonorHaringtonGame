@@ -185,11 +185,48 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
       far plane over time -- a separate, slower-moving edge case from the zoom-clamp bug
       just fixed; would need main.gd to feed OrbitCamera live contact distances every
       tick (same pattern TacticalPlot's own auto-scale already uses) to close fully.
-  [ ] H. Hardcoded demo scenario upgraded from 1v1 to at least a couple of ships per side
-      (small squadron vs small squadron) so multi-select/group-order behavior in A-D is
-      actually exercisable live, and so missile salvos (E) have something meaningful to
-      fire at -- give at least one side missile tubes (currently energy-only per §56.1
-      CHANGELOG entries), this was explicitly asked about by the user separately.
+  [x] H. Hardcoded demo scenario upgraded from 1v1 to a 3-vs-3 squadron -- DONE this
+      pass. scripts/main.gd's `_ready()` now builds ships from a `ship_specs` array
+      (id/team/x/z/missile_tubes) instead of two one-off local vars: "alpha"/"beta"
+      (the original guides) keep their exact original ids/positions/orientations
+      unchanged (HUD_POV_SHIP_ID, PlayerInput's hardcoded player ship, and several
+      unit tests' doc comments all still refer to exactly these two ids); new
+      alpha_2/alpha_3 (red) and beta_2/beta_3 (blue) are spread +/-1500 m along Z
+      around their guide's original X position -- kept well under the 10,000 m X
+      separation between sides specifically so AttackGeometry.classify()'s
+      dominant-axis pick still resolves every cross-ship pairing to STARBOARD/PORT,
+      never BOW/STERN (verified by re-reading attack_geometry.gd's dominant-axis
+      logic before picking the 1500 m figure, not just assumed). All 6 ships still
+      go through the existing per-ship loop for ShipView/hull/energy weapon mount
+      (`world.add_weapon_mount`, unchanged demo_laser/broadside_arc) -- that loop
+      already iterated `world.ships.keys()` generically, so it needed no changes
+      beyond having more ships to iterate. Every red ship (alpha/alpha_2/alpha_3)
+      additionally gets 2 `MissileTube.new()` via `world.add_missile_tube` (engineering-
+      placeholder defaults: 10 rounds/tube, 5s reload, 60,000 km range -- trivially in
+      range at this scenario's ~10 km separation, and `_resolve_missile_launch_ai`
+      requires no extra wiring beyond a non-empty `missile_tubes[ship_id]` entry, same
+      target-selection/weapons-free gating as energy mounts). Blue stays energy-only
+      (item H only requires "at least one side"; considered ShipFactory + the existing
+      medusa_class.tres/sultan_class.tres ShipClassData records per this file's own
+      §0 prior guidance, but those are capital-ship-scale loadouts (26-46 missile
+      tubes, dozens of energy mounts each) not a fit for a "small squadron" demo --
+      kept the existing hand-authored-ship pattern and just added tubes/ship-count to
+      it instead of switching the whole demo scenario to the data-driven path, which
+      was not part of this item's own scope). This makes items A-D's multi-select/
+      group-order behavior actually exercisable live for the first time (2+ own-team
+      ships now exist in the live scenario, not just synthetic test worlds) and gives
+      item E's MISSILES weapon-panel section something real to show/fire live -- see
+      the "What already exists" notes on items B/C/D/E above for the exact "item H
+      upgrades that"/"until H lands" caveats this closes; those items' own
+      live-player confirmation is still open (no live mouse in this headless
+      environment), same honest gap, just no longer blocked ON item H specifically.
+      Verified this pass: `godot --headless --import` clean; headless scene smoke
+      (`main.tscn --quit-after 120`) exit 0, exactly 48 `mesh_get_surface_count`/
+      "Parameter m is null" dummy-renderer baseline errors (16 per ship-pair before
+      x3 for the 2-ship-per-side -> 6-ship scenario growth, confirmed by exact count,
+      not eyeballed), zero new error types. Fast-visible-result mode still in effect
+      (§0/Tests below) -- no full simulation-suite regression run this pass, only the
+      headless import/smoke check.
   [ ] I. Individual override: within a selected group, pick one ship and give it its own
       order while the rest keep the group order (§1.10.12 worked example).
   [ ] J. VISUAL POLISH PASS -- explicit user decision, 2026-09-26, ONLY start this AFTER
@@ -208,21 +245,26 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
   [ ] Run AGENTS.md §56.3/§1.10.14's 15-step MVP acceptance test yourself (headless
       script simulating the input sequence where possible) as a sanity check, but this
       does NOT substitute for the user's own live pass/fail -- see below.
-Next concrete step: item H -- hardcoded demo scenario upgraded from 1v1 to at least a
-small squadron vs small squadron (a couple of ships per side), and give at least one
-side missile tubes (demo ships are currently energy-only per §56.1-era CHANGELOG
-entries) so multi-select/group-order behavior (items A-D) and missile salvos (item E)
-are actually exercisable live, not just in synthetic headless test worlds. Read
-state.md's own "What already exists" section above for exactly which systems (
-SelectionState, CommandGroupController, MoveOrderController, OrderMenuController,
-weapon_panel_controller) are already wired to main.gd's world/selection instances and
-must keep working unchanged when the scenario grows from 2 ships to several per side --
-this is a scenario-data/setup change (wherever main.gd currently constructs the demo
-alpha/beta ships, plus ship_factory.gd for a missile-tube-equipped class if one doesn't
-already exist) plus the demo TacticalAI hookup, not a rework of any of the systems
-above. Read AGENTS.md's item-H requirement text fresh (state.md's own checklist entry
-above already quotes it in full) and check ship_factory.gd / any existing missile-tube-
-equipped ship class before assuming one needs to be created from scratch.
+Next concrete step: item I -- individual override within a selected group: pick one
+ship inside an already-formed group/formation and give IT its own order while the
+rest of the group keeps executing the group order (§1.10.12's worked example in
+CLOUD.md/AGENTS.md -- read that worked example fresh before starting, it specifies
+the expected UX: selecting a single ship that is already a formation member, then
+issuing it a move/attack order, should NOT pull it out of the formation or override
+the whole group, only that one ship's own execution). Read this file's own checklist
+entries for items B/C (CommandGroupController/FormationState, MoveOrderController) and
+D (OrderMenuController) above first -- item I is very likely a targeted change to
+whichever of those three currently always resolves "selection = 1 ship that happens to
+be a formation member" to a FORMATION-level order instead of an individual one (check
+move_order_controller.gd/order_menu_controller.gd's own branching on formation
+membership before writing new code -- this may already partially exist by accident of
+how those items were built, or may need an explicit single-ship-within-formation branch
+added to one or both). Now that item H gives a live 3-vs-3 scenario with real
+formations reachable via item B's G hotkey, this is also the first item that can
+realistically be exercised beyond synthetic 2-4-ship headless test worlds once a real
+player forms a group and tries overriding one member -- but headless unit tests
+(synthetic formation + single-member override) remain the actual verification for this
+pass, live confirmation is still the user's own job per this file's standing rule below.
 Tests: still fast-visible-result mode -- skip full simulation suite, headless import/smoke
 check only, until §56.3 fully closes (this is a big scope, likely spans many passes --
 that's fine, keep chipping at the checklist in order, one or two items per pass is a
@@ -234,14 +276,18 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-26 18:05 UTC (scheduled dev pass, fired from the normal 3h
+Last pass finished: 2026-09-26 20:09 UTC (scheduled dev pass, fired from the normal 3h
 cron; cron prompt still says "§56.1" -- stale/generic scheduled-task prompt, intentionally
-ignored per this skill's own instructions in favor of this file): closed §56.3 item G
-(zoom-level behavior) -- see the checklist entry above for the full writeup (a real
-far-clip-plane bug found and fixed on the 3D-view zoom-out extreme, plot side needed no
-change). Regression: test_orbit_camera (8/8, incl. 2 new), test_camera_focus (17),
-test_camera_focus_controller (5), test_hud (14), test_command_group_panel (6), all
-green; headless scene smoke (main.tscn --quit-after 120, exit 0, same 16x baseline
-errors, zero new types). Windows .exe re-exported (.pck 450768B -> 451584B, confirming
-new code is in the build). ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
-H/I/J not started.
+ignored per this skill's own instructions in favor of this file): closed §56.3 item H
+(demo scenario upgraded from 1v1 to a 3-vs-3 squadron, red side given missile tubes) --
+see the checklist entry above for the full writeup (ship-spec-array refactor of
+scripts/main.gd's _ready(), Z-offset geometry chosen to keep AttackGeometry.classify()'s
+STARBOARD/PORT resolution intact for every cross-ship pairing). Headless import clean;
+scene smoke run (main.tscn --quit-after 120) exit 0, exactly 48 baseline dummy-renderer
+errors (16 x 3, scaling with the 2->6 ship count, zero new error types). No full
+simulation-suite regression this pass (fast-visible-result mode still in effect, per
+Tests line above -- this was a scenario-data/setup change with no new production class,
+so the existing per-class unit tests were not touched and did not need re-running).
+Windows .exe re-exported (.pck 451584B -> 452032B, confirming new code is in the
+build). ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
+I/J not started.

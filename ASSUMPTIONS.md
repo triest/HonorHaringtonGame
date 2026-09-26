@@ -2907,3 +2907,61 @@ discipline as items C/D.
   headless-verified only (`test_orbit_camera.gd`'s two new cases:
   far-exceeds-max-zoom-out-distance across a wide range of base
   distances, and far grows monotonically with base distance).
+
+## §56.3 item H (demo scenario 1v1 -> 3-vs-3 squadron, missile tubes for red)
+
+* **Z-offset squadron spacing (+/-1500 m per ship around each guide's
+  original X position) is an ENGINEERING CHOICE, not a canon formation
+  spacing figure** -- no canonical inter-ship spacing exists for any
+  Honorverse formation in AGENTS.md's ship database sections. The 1500 m
+  figure was picked specifically to stay far under the existing 10,000 m
+  X separation between the two sides so `AttackGeometry.classify()`'s
+  dominant-axis pick keeps resolving every cross-ship pairing to
+  STARBOARD/PORT (never BOW/STERN) -- re-read `attack_geometry.gd`'s
+  actual dominant-axis logic before choosing the number, not assumed by
+  analogy to the original 1v1 setup.
+* **2 missile tubes per red ship, `MissileTube.new()` defaults untouched**
+  -- an ENGINEERING PLACEHOLDER choice (same status as `MissileTube`'s
+  own defaults, already logged elsewhere in this file), not tied to any
+  specific ship class's canon tube count. Picked purely to give
+  `_resolve_missile_launch_ai` and item E's weapon panel something real
+  to exercise; not meant to represent any particular class's real
+  loadout.
+* **Blue/beta deliberately left energy-only.** Item H's own requirement
+  text only asks for missile tubes on "at least one side"; giving both
+  sides tubes (and PD to intercept them) would have doubled this pass's
+  scope into point-defense territory that no other §56.3 item currently
+  requires live in the demo scenario. Logged as an explicit choice, not
+  an oversight -- if a future item needs blue to have PD/missiles too
+  (e.g. a fuller live playtest), that is new scope, not a bug in this one.
+* **`ShipFactory`/`ShipClassData` (`medusa_class.tres`, `sultan_class.tres`)
+  considered and deliberately NOT used for this item.** Both existing
+  records are capital-ship-scale (Medusa: 26/9/6 missile tubes across
+  three zones plus 13+15 broadside energy mounts; Sultan: 46 tubes,
+  16+12 broadside energy mounts) -- spawning either as-is would make a
+  "small squadron" demo scenario absurdly over-armed relative to what
+  item H actually asks for (just enough tubes to exercise items A-E's
+  UI). Kept the existing hand-authored `ShipPhysicsState`/`WeaponMount`/
+  `MissileTube` construction pattern in `main.gd` instead of switching
+  the whole demo scenario onto the data-driven `ShipFactory` path --
+  that switch is a legitimate future improvement (ties the demo scenario
+  to real §8 ship data) but was out of scope for this specific item.
+* **No PD mounts added to either side this pass.** Neither `world.
+  add_pd_mount` nor any `PointDefenseMount` was touched -- red's new
+  missiles fly at blue completely unintercepted. This was already true
+  before this pass (no ship anywhere in the live demo scenario has PD),
+  item H's own requirement text does not ask for PD, and adding it was
+  judged out of scope for a scenario-data item focused on ship
+  count/missile tubes specifically.
+* **Live/player confirmation: none yet**, same status as every §56.3
+  item before a real player exercises it with a window and mouse --
+  headless-verified only (`godot --headless --import` clean; scene
+  smoke run exit 0 with baseline dummy-renderer error count scaling
+  exactly 3x with the 2->6 ship count, zero new error types). No
+  synthetic unit test specifically targets the new 6-ship scenario data
+  itself (it is scenario/setup data in `main.gd`, not a new testable
+  class) -- existing per-class tests (`test_missile_launch_ai.gd`,
+  `test_simulation_world.gd`, etc.) already cover the underlying
+  mechanics (`add_missile_tube`, `_resolve_missile_launch_ai`) against
+  synthetic worlds and were not re-run this pass (fast-visible-result
+  mode, see .tools/state.md).

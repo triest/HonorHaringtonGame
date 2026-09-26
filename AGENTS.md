@@ -2180,6 +2180,23 @@ command-echelon UI, any new simulation mechanic. This section changes
 HOW the existing vertical slice presents itself and is controlled, not
 WHAT simulation features exist.
 
+**Process rule added after this bit the user twice (2026-09-23/26):**
+a Windows export is a build ARTIFACT, not a one-time checklist item.
+Any pass that changes scenes/scripts/UI must re-run the export
+(`godot --headless --path project --import` then
+`--export-release "Windows Desktop" build/HonorHarington.exe`) as its
+LAST step before committing, using the cached export templates at
+`.tools/godot_templates_cache/extracted2/` (copy into
+`$HOME/.local/share/godot/export_templates/4.3.stable/` if that path
+is empty in this VM -- template files themselves are NOT lost between
+passes, only their standard install location, since each scheduled
+pass may run in a fresh VM). Do not assume "I only changed scripts,
+the user's .exe is probably fine" -- twice now the user tested a stale
+binary and reported bugs that were already fixed in source. If a pass
+is genuinely too time-constrained to re-export, say so explicitly in
+the pass report ("NOT re-exported this pass, .exe is stale as of
+commit X") rather than staying silent about it.
+
 **Definition of done for 56.2:** the user can open the build, see a
 tactical plot with both ships and any missiles in flight as distinct,
 clearly visible icons at a canon-plausible logged range, select

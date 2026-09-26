@@ -42,6 +42,23 @@ func update(world: SimulationWorld, ship_id: String) -> void:
 	pov_ship_id = ship_id
 	_label.text = _build_text(world, ship_id)
 
+## §56.3 item F ("first real shared UI-panel layout pass", §1.10.1's own
+## note in .tools/state.md): this panel's CURRENT actual rendered bottom
+## edge in screen pixels, so a sibling panel that stacks below it
+## (CommandGroupPanel, see command_group_panel.gd) can position itself
+## from Hud's REAL current height instead of a second hardcoded guess at
+## "how tall is Hud usually" -- Hud's own line count varies with contact
+## count/subsystem list, so a fixed guess drifts stale exactly the way
+## CommandGroupPanel's PANEL_POSITION constant already admitted it might
+## (see that file's own doc comment, pre-item-F). Label.get_minimum_size()
+## reflects the CURRENTLY SET text's real measured size and, unlike a
+## live on-screen pixel readout, is safe to call even before this node
+## has ever been part of a rendered frame (confirmed headless via a
+## throwaway probe script before relying on it here) -- so this is a real
+## measurement, not another guess one layer removed.
+func get_bottom_y() -> float:
+	return _label.position.y + _label.get_minimum_size().y
+
 func _build_text(world: SimulationWorld, ship_id: String) -> String:
 	var ship = world.ships.get(ship_id)
 	if ship == null:

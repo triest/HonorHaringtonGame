@@ -136,12 +136,33 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
       entry (item E) for full detail. Headless-verified only (36 checks), not
       live-confirmed -- MISSILES/POINT DEFENSE specifically cannot even appear live
       until item H gives a demo ship missile tubes.
-  [ ] F. Command camera per §1.10.1: free camera over the battle, can go near-vertical
-      top-down, orbit, zoom, quick-center on selected ship/group/contact -- extend the
-      existing OrbitCamera rather than replacing it if it already covers most of this.
-      NOTE: this is also the point to do a real shared UI-panel layout pass (Hud +
-      TacticalPlot + CommandGroupPanel currently use ad-hoc fixed positions that will
-      start colliding as more panels are added -- see ASSUMPTIONS.md "§56.3 item B").
+  [x] F. Command camera per §1.10.1: free camera over the battle, can go near-vertical
+      top-down, orbit, zoom, quick-center on selected ship/group/contact -- DONE.
+      OrbitCamera already covered orbit/near-vertical top-down/zoom (§56.1 item 1);
+      this pass added quick-center: new hotkey Home (project.godot [input] action
+      "camera_focus_selection") -> scripts/camera_focus.gd (CameraFocus.compute:
+      selection -> {pivot, spread} via world.ships/world.missiles TRUE positions,
+      own selection beats designated_target_id when both exist) -> scripts/
+      camera_focus_controller.gd (CameraFocusController, plain Node +
+      _unhandled_input, same pattern as PlayerInput) -> OrbitCamera.focus_on() (new
+      method: re-centers pivot + refits distance to the new spread, KEEPS current
+      yaw/pitch unlike frame_on(), rebases _base_distance so subsequent zoom is
+      relative to the new framing, far only grows never shrinks). Also did the
+      first real shared UI-panel layout pass this item's own note named: Hud.
+      get_bottom_y() (new, real measured label height) is fed by main.gd._on_tick
+      into CommandGroupPanel.update(..., hud_bottom_y) every tick, replacing that
+      panel's old hardcoded Vector2(12, 360) guess -- see ASSUMPTIONS.md "§56.3
+      item F" for why this is honestly scoped as a FIRST pass (only Hud/
+      CommandGroupPanel actually shared a screen region and risked overlapping;
+      WeaponPanel/TacticalPlot/OrderMenu each occupy a separate region already and
+      were not touched). Headless-tested only (test_camera_focus.gd 17 checks,
+      test_camera_focus_controller.gd 5 checks, test_orbit_camera.gd +2,
+      test_hud.gd +2, new test_command_group_panel.gd 2 checks) -- NOT live-
+      confirmed (OrbitCamera cannot be instantiated outside a live scene tree in
+      this headless environment, re-confirmed this pass with a throwaway probe
+      script, not just assumed from test_orbit_camera.gd's own older comment; so
+      whether Home actually feels good live needs a real player). See
+      CHANGELOG.md 2026-09-26 entry (item F) for full detail.
   [ ] G. Zoom-level behavior (§1.10.3): at minimum ensure zooming out doesn't lose distant
       contacts (they must stay visible on the plot even far out) and zooming in reveals
       per-ship detail -- doesn't need all 4 named levels to be literally distinct modes,
@@ -153,30 +174,36 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
       CHANGELOG entries), this was explicitly asked about by the user separately.
   [ ] I. Individual override: within a selected group, pick one ship and give it its own
       order while the rest keep the group order (§1.10.12 worked example).
+  [ ] J. VISUAL POLISH PASS -- explicit user decision, 2026-09-26, ONLY start this AFTER
+      F-I are functionally done: user live-tested items A-E and confirmed they are
+      currently bare debug text/dots on a black screen (a tiny corner radar, plain text
+      lists) -- nowhere near docs/reference/tactical_command_ui_reference.png's look.
+      User was shown this gap directly and explicitly chose "finish F-I (functionality)
+      first, visual polish after" over doing polish now. Do NOT get pulled into
+      panel/theme/icon work while F-I are still open, even if it would be quick --
+      that is exactly the wrong order per this decision. When this item's turn comes:
+      replace debug-text/dot placeholders with real Control-based panels reasonably
+      close to the reference image (left squadron/group list, proper tactical-plot
+      panel with contact icons + range rings instead of a tiny debug radar, bottom
+      weapon/order control bar, event/order log panel) -- real Godot Theme/styled-
+      Control work, budget real time for it, do not rush.
   [ ] Run AGENTS.md §56.3/§1.10.14's 15-step MVP acceptance test yourself (headless
       script simulating the input sequence where possible) as a sanity check, but this
       does NOT substitute for the user's own live pass/fail -- see below.
-Next concrete step: item F -- command camera + first real shared UI-panel layout pass
-(§1.10.1). Camera: extend the existing OrbitCamera (scripts/orbit_camera.gd) rather than
-replacing it if it already covers most of "free camera over the battle, can go
-near-vertical top-down, orbit, zoom" -- read that file fresh before assuming what it
-does/doesn't do yet, it predates §56.3 entirely (§56.1 item 1). New requirement not yet
-covered by anything: "quick-center on selected ship/group/contact" -- a hotkey/action
-that snaps/animates the camera to frame whatever SelectionState.selected_ids currently
-holds (single ship, group, or a designated_target_id contact); check whether
-OrbitCamera already exposes a "look at point X" entry point or whether this needs a
-small new method on it. Layout: Hud (top-left, hud.gd), CommandGroupPanel (top-left
-below Hud, command_group_panel.gd), and WeaponPanel (bottom-left, weapon_panel.gd) are
-ALL still independently fixed-positioned guesses (each one's own doc comment already
-flags this and defers to item F specifically -- see ASSUMPTIONS.md "§56.3 item B" and
-"§56.3 item E"). This item is the first real pass at making them coexist without
-overlapping as more panels/rows get added -- doesn't need to be pixel-perfect against
-the reference image, but should replace "each panel hardcodes its own guessed offset"
-with something that actually accounts for the others' current sizes (e.g. a shared
-layout helper each panel's sync()/update() consults, or explicit non-overlapping regions
-computed from viewport size). Read AGENTS.md §1.10.1 fresh before starting -- only
-skimmed against earlier items' own needs so far, same "read it fresh for a new lettered
-item" discipline as every prior item in this checklist.
+Next concrete step: item G -- zoom-level behavior (§1.10.3): at minimum ensure
+zooming out doesn't lose distant contacts (they must stay visible on the plot even
+far out) and zooming in reveals per-ship detail -- doesn't need all 4 named levels
+(FLEET/FORMATION/SHIP/WEAPON-MISSILE VIEW) to be literally distinct modes, but the
+plot/3D view must not become unreadable at either extreme. Read AGENTS.md §1.10.3
+fresh before starting (only skimmed against earlier items' own needs so far -- same
+"read it fresh for a new lettered item" discipline as every prior item). Check
+TacticalPlot's existing AUTO_SCALE_MARGIN/plot_range_m auto-scaling (scripts/
+tactical_plot.gd) -- it already auto-scales the plot range to the farthest live
+contact every tick, so "distant contacts stay visible on the plot" may already be
+substantially covered there; the actual gap is more likely the 3D view
+(OrbitCamera's MIN/MAX_DISTANCE_SCALE zoom clamp, scripts/orbit_camera.gd) at the
+extremes -- verify both claims by reading the code fresh rather than assuming
+either is already done or already broken.
 Tests: still fast-visible-result mode -- skip full simulation suite, headless import/smoke
 check only, until §56.3 fully closes (this is a big scope, likely spans many passes --
 that's fine, keep chipping at the checklist in order, one or two items per pass is a
@@ -188,42 +215,40 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-26 14:47 UTC (scheduled dev pass, fired from the normal 3h
-cron; cron prompt still says "§56.1" -- that is a stale/generic scheduled-task prompt
-that this skill's own instructions say NOT to update via update_trigger, so it is
-intentionally ignored in favor of this file, which is the actual source of truth):
-implemented and headless-verified §56.3 item E (weapon-selection panel) -- new
-scripts/weapon_panel_controller.gd (WeaponPanelController) + scripts/weapon_panel.gd
-(WeaponPanel, non-modal, unlike OrderMenu). ENERGY WEAPONS: read-only mounted list.
-MISSILES (only shown when tubes exist): salvo size + throttle/profile (FULL BURN/
-EXTENDED RANGE) are both REAL, newly-wired primitives -- optional max_launches/
-throttle_fraction params added to world.order_missile_launch/_launch_missile_from_tube
-(both default to exactly the old behavior, zero existing callers/replay entries
-affected), throttle wires the pre-existing but previously-unused
-MissileState.set_throttle(). Target line reuses SelectionState.designated_target_id
-as-is. POINT DEFENSE (only shown when PD mounts exist): AUTO/HOLD is a REAL new
-mechanic -- world.ship_pd_hold + set_ship_pd_hold/transmit_ship_pd_hold (same
-comm-delayed convention as transmit_ship_weapons_free), _resolve_point_defense skips a
-held ship's mounts entirely. Honestly NOT implemented/NOT shown: missile "type"
-selection (no type field on MissileTube), COUNTER-MISSILES entirely (no automatic
-launch-decision mechanic anywhere in simulation/*.gd -- every counter-missile in this
-codebase is a manually-constructed test double), PD priority-target designation (no
-override parameter on TacticalAI.select_pd_target) -- see ASSUMPTIONS.md "§56.3 item E"
-for the full grep-first writeup. New test file
-simulation/tests/test_weapon_panel_controller.gd (36 checks, all passing), plus 15
-existing regression suites re-run clean (test_weapon_resolution.gd,
-test_missile_launch_order.gd, test_point_defense.gd, test_ship_combat_directive.gd,
-test_order_menu_controller.gd, test_move_order_controller.gd,
-test_command_group_controller.gd, test_selection_state.gd, test_tactical_plot_selection.gd,
-test_tactical_plot_projector.gd, test_individual_orders.gd, test_command_transmission.gd,
-test_formation.gd, test_missile.gd, test_subsystem_damage_consumers.gd) plus a headless
-scene smoke run (exit 0, same 16x baseline dummy-renderer errors, zero new error types --
-required one `godot --headless --import` first to refresh .godot/global_script_class_cache.cfg
-so the two new global class_name scripts were recognized, noted here in case a future
-pass hits the same "Could not find type" error after adding a new class_name script).
-IMPORTANT CAVEAT specific to this item: MISSILES/POINT DEFENSE sections are headless-
-tested only and cannot even appear in a LIVE run of scenes/main.tscn yet -- the demo
-scenario's alpha/beta ships are still energy-only (item H is what adds missile tubes to
-at least one side); only ENERGY WEAPONS + the panel's own visibility gate are actually
-observable in today's live demo. ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
-F-I not started.
+Last pass finished: 2026-09-26 15:47 UTC (scheduled dev pass, fired from the
+normal 3h cron; cron prompt still says "§56.1" -- that is a stale/generic
+scheduled-task prompt that this skill's own instructions say NOT to update via
+update_trigger, so it is intentionally ignored in favor of this file, which is the
+actual source of truth): implemented and headless-verified §56.3 item F (command
+camera quick-center + first shared UI-panel layout pass) -- see the checklist
+entry above for full detail, and CHANGELOG.md's 2026-09-26 "item F" entry /
+ASSUMPTIONS.md's "§56.3 item F" entry for the complete writeup (priority rule for
+own-selection-vs-designated-target, why Home was picked, why far only grows, why
+the layout pass is honestly scoped as a first pass covering only Hud/
+CommandGroupPanel). New files: scripts/camera_focus.gd (CameraFocus, pure),
+scripts/camera_focus_controller.gd (CameraFocusController, Node). Modified:
+scripts/orbit_camera.gd (new focus_on() + extracted _required_distance_for_spread()),
+scripts/hud.gd (new get_bottom_y()), scripts/command_group_panel.gd (update() now
+takes hud_bottom_y), scripts/main.gd (wiring), project.godot (new [input] action
+camera_focus_selection, Home key). New tests: test_camera_focus.gd (17 checks),
+test_camera_focus_controller.gd (5 checks), test_command_group_panel.gd (2 checks);
+extended test_orbit_camera.gd (+2) and test_hud.gd (+2). Regression: 17 existing
+test suites re-run clean (weapon_resolution, missile_launch_order, point_defense,
+ship_combat_directive, order_menu_controller, move_order_controller,
+command_group_controller, selection_state, tactical_plot_selection,
+tactical_plot_projector, individual_orders, command_transmission, formation,
+missile, subsystem_damage_consumers, weapon_panel_controller, player_input) plus a
+headless scene smoke run (exit 0, same 16x baseline dummy-renderer errors, zero new
+error types -- required a `godot --headless --import` first to refresh the global
+class cache for the two new class_name scripts, same gotcha already noted in the
+item-E entry this replaces). Windows .exe re-exported this pass (process rule in
+AGENTS.md §56.3): .pck grew from 437KB to 450KB, confirming the new code is
+actually in the build.
+IMPORTANT CAVEAT specific to this item: NOT live-confirmed. OrbitCamera cannot be
+instantiated outside a live scene tree in this headless environment (re-confirmed
+this pass with a throwaway probe script, not just assumed from the old
+test_orbit_camera.gd comment) -- so whether pressing Home actually recenters the
+rendered camera, and whether the "keep current angle, refit distance" feel is
+actually good, needs a real player with a real window and mouse. ASSUMPTIONS.md/
+CHANGELOG.md updated; pushed this pass.
+G/H/I/J not started.

@@ -71,6 +71,13 @@ var order_menu: OrderMenu
 ## controller drives.
 var weapon_panel_controller: WeaponPanelController
 var weapon_panel: WeaponPanel
+## §56.3 item F: quick-center hotkey (project.godot [input]
+## "camera_focus_selection") -- see that script's own doc comment. Same
+## shared world/selection as the other §56.3 controllers above, plus a
+## reference to the scene's own OrbitCamera (see _frame_camera_on_ships,
+## unchanged by this item other than the camera it already framed now
+## also being reachable from here).
+var camera_focus_controller: CameraFocusController
 var player_input: PlayerInput
 var win_lose_screen: WinLoseScreen
 
@@ -205,6 +212,18 @@ func _ready() -> void:
 	weapon_panel.controller = weapon_panel_controller
 	add_child(weapon_panel)
 
+	# §56.3 item F: quick-center hotkey -- same shared world/selection as
+	# every other §56.3 controller above. `camera` is looked up here
+	# (get_node_or_null("Camera3D"), same node _frame_camera_on_ships
+	# already targets below) rather than passed in from outside, since
+	# main.gd is the one place that already owns both the scene's single
+	# OrbitCamera and the single shared `selection`.
+	camera_focus_controller = CameraFocusController.new()
+	camera_focus_controller.world = world
+	camera_focus_controller.selection = selection
+	camera_focus_controller.camera = get_node_or_null("Camera3D") as OrbitCamera
+	add_child(camera_focus_controller)
+
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
 	# godot [input], see PlayerInput's own doc comment) into calls on
 	# `world`'s existing transmit_*/order APIs. Given `world` directly
@@ -273,7 +292,10 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	weapon_fx.update(world)
 	hud.update(world, HUD_POV_SHIP_ID)
 	tactical_plot.update(world, HUD_POV_SHIP_ID)
-	command_group_panel.update(world, selection)
+	# §56.3 item F: Hud's own current measured height feeds
+	# CommandGroupPanel's position -- see that script's own doc comment
+	# for why this replaces a previously-independent fixed guess.
+	command_group_panel.update(world, selection, hud.get_bottom_y())
 	move_order_controller.prune_completed()
 	order_menu.sync()
 	weapon_panel_controller.sync()

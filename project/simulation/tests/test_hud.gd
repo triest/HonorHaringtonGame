@@ -86,10 +86,32 @@ func _test_update_with_unknown_ship_id_still_shows_something() -> void:
 	_assert(label != null and label.text.length() > 0, "an unknown ship id should still produce a non-empty diagnostic label, never a blank HUD")
 	hud.queue_free()
 
+## §56.3 item F ("first real shared UI-panel layout pass"): get_bottom_y()
+## must reflect the label's REAL measured height after update(), not a
+## fixed constant -- this is what lets CommandGroupPanel stack below Hud
+## dynamically (see command_group_panel.gd/main.gd). A ship with a real
+## ShipSubsystems + at least one contact produces a multi-line label, so
+## this also incidentally guards against get_bottom_y() being hardcoded
+## back to a single-line assumption.
+func _test_get_bottom_y_reflects_real_label_height() -> void:
+	var world := _make_world_with_alpha()
+	var hud := Hud.new()
+	get_root().add_child(hud)
+	hud._ready()
+	hud.update(world, "alpha")
+	var label: Label = hud.get_node_or_null("HudLabel")
+	_assert(label != null, "sanity: HudLabel must exist to measure its height")
+	if label != null:
+		var expected: float = label.position.y + label.get_minimum_size().y
+		_assert(is_equal_approx(hud.get_bottom_y(), expected), "get_bottom_y() should equal label.position.y + label.get_minimum_size().y, got %f expected %f" % [hud.get_bottom_y(), expected])
+		_assert(hud.get_bottom_y() > label.position.y, "get_bottom_y() should be below the label's own top (position.y) once there is any text at all")
+	hud.queue_free()
+
 func _init() -> void:
 	_test_ready_creates_a_visible_label_child()
 	_test_update_sets_non_empty_text_with_expected_sections()
 	_test_update_with_unknown_ship_id_still_shows_something()
+	_test_get_bottom_y_reflects_real_label_height()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

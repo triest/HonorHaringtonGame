@@ -2759,3 +2759,98 @@ discipline as items C/D.
   This is not a defect introduced by item E -- it is item E correctly
   and honestly reflecting "don't show weapons the ship doesn't have"
   for a scenario that, today, genuinely doesn't have them.
+
+## §56.3 item F (command camera quick-center + first shared UI-panel layout pass, 2026-09-26 scheduled dev pass)
+
+* **Quick-center priority: own selection wins over a designated target.**
+  §1.10.1 only says the camera should "быстро центрироваться на
+  выбранном корабле, группе или контакте" without saying what happens
+  if the player has BOTH an own-ship selection and a designated
+  hostile target at once (§56.3 item D lets both coexist -- designating
+  a target deliberately does not clear `selected_ids`, see
+  order_menu_controller.gd/selection_state.gd). Chose: own selection
+  wins. Centering on "what I'm commanding" is the more useful default
+  when both exist (e.g. mid-order-menu with a target already
+  designated); the designated target is only used as the centering
+  point when `selected_ids` is empty. See `scripts/camera_focus.gd`'s
+  own doc comment.
+
+* **Quick-center hotkey: Home, bound as a new project.godot [input]
+  action `camera_focus_selection`, NOT a raw key check.** OrbitCamera's
+  EXISTING orbit/zoom controls (mouse drag, wheel, arrow keys, +/-) are
+  deliberately left as raw `Input.is_key_pressed`/`_unhandled_input`
+  checks per that file's own (now slightly reworded) doc comment --
+  retrofitting those into named actions is out of scope for item F,
+  which only needed one NEW control. The new control instead follows
+  the NEWER convention item 5 (PlayerInput) and items A-E already
+  established: a named [input] action, read via
+  `event.is_action_pressed(...)` in a plain `Node`'s `_unhandled_input`
+  (see `scripts/camera_focus_controller.gd`). Home was picked because
+  every single letter key already has an order_*/selection_* binding
+  (WASD, F, T, C, G, Tab -- see project.godot's existing [input]
+  section) and it is a conventional "recenter view" key in other games.
+
+* **CameraFocus.compute() resolves TRUE positions (world.ships/
+  world.missiles), not sensor-contact estimates.** The command camera
+  is an explicit god's-eye view over the whole battle (§1.10.1: "камера
+  не привязана к кабине или корпусу корабля"), unlike TacticalPlot's
+  rendering (which is deliberately fog-of-war-limited to the POV ship's
+  own `world.sensor_contacts`, per §23). This matches
+  `main.gd._frame_camera_on_ships`'s own pre-existing behavior (reads
+  `world.ships[...].position` directly for the initial framing shot),
+  so this is consistency with an existing decision, not a new one.
+
+* **OrbitCamera.focus_on() rebases `_base_distance` to the new framing
+  distance, and only ever GROWS `far`, never shrinks it.** Rebasing
+  `_base_distance` means the player's subsequent scroll-wheel/keyboard
+  zoom range is relative to whatever was just focused on (e.g. a single
+  ship), not the original whole-battle framing from `frame_on()` --
+  otherwise zooming in tight on one ship via quick-center would still
+  only let the player scroll across the ORIGINAL battle-wide distance
+  range, which defeats the point. `far` only growing (never shrinking)
+  keeps §1.10.2's "дальние объекты автоматически остаются видимыми"
+  intent honest for the 3D view too: focusing in tight on one ship must
+  not clip other, farther-out ships out of the frustum entirely.
+
+* **Layout pass this item is a FIRST pass, not a general solution.**
+  What actually changed: `Hud.get_bottom_y()` (new, returns the label's
+  real current `get_minimum_size().y`-based bottom edge) is read by
+  `main.gd._on_tick` every tick and fed into
+  `CommandGroupPanel.update(world, selection, hud_bottom_y)`, which now
+  positions itself at `hud_bottom_y + TOP_MARGIN_PX` instead of the
+  previously-hardcoded `PANEL_POSITION := Vector2(12, 360)` constant
+  (see that file's own pre-item-F doc comment, which already flagged
+  360 as a guess). This is the ONE actual overlap risk that existed in
+  the scene: Hud and CommandGroupPanel are the only two panels stacked
+  in the same screen region (top-left), and Hud's own line count varies
+  with live contact/subsystem-list length, so a fixed 360px guess could
+  genuinely drift stale as contacts come and go. WeaponPanel (bottom-
+  left, sizes/positions itself from its OWN row count and the viewport
+  every tick already -- see weapon_panel.gd), TacticalPlot (anchored
+  top-right via `PRESET_TOP_RIGHT`, fixed size), and OrderMenu (full-
+  viewport modal only while open) each occupy a SEPARATE screen region
+  and were not touched this pass -- they do not currently collide with
+  anything, so there was no overlap bug to fix there, not an oversight.
+  A genuinely general "every panel consults a shared layout registry"
+  system (item F's own next-step text explicitly allowed for either
+  approach: "a shared layout helper... or explicit non-overlapping
+  regions") remains open if a future pass adds enough NEW panels to the
+  same regions that fixed-region isolation stops being sufficient --
+  logged here so that future pass does not have to re-derive "why
+  wasn't this made fully general already."
+
+* **Live/player confirmation status: none yet.** Same status every
+  §56.3 item has had before a user's own live pass -- headless-verified
+  only (`test_camera_focus.gd` for the pure centroid/spread math,
+  `test_camera_focus_controller.gd` for the no-camera-assigned/
+  unrelated-action wiring paths, `test_orbit_camera.gd`'s two new cases
+  for the extracted `_required_distance_for_spread` formula,
+  `test_hud.gd`/`test_command_group_panel.gd` for the layout change).
+  What is SPECIFICALLY NOT headlessly testable (confirmed by an actual
+  throwaway probe script this pass, not assumed): instantiating a real
+  `OrbitCamera` outside a live scene tree hits the same engine-side
+  "Node not inside tree" error on `global_position`/`look_at()` that
+  `test_orbit_camera.gd`'s own file doc comment already documented for
+  `frame_on()` -- so whether pressing Home actually moves the rendered
+  camera, and whether the "same viewing angle, different distance" feel
+  is actually good, needs a real player with a real window and mouse.

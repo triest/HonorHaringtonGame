@@ -10,35 +10,49 @@ extends CanvasLayer
 ## CommandGroupController (scripts/command_group_controller.gd) is what
 ## actually WRITES when the player presses the group hotkey, G).
 ##
-## LAYOUT (ASSUMPTION, logged in ASSUMPTIONS.md "§56.3 item B"): fixed
-## top-left position offset well below Hud's own panel (scripts/hud.gd,
-## also top-left at (12,12)), NOT the reference image's literal
-## side-by-side "squadron list beside/above the tactical plot" geometry
-## -- Hud's per-ship subsystem/contacts readout has a variable line
-## count, so a real non-overlapping multi-panel layout needs a shared
-## layout pass across Hud/TacticalPlot/this file, which belongs with
-## item F's command-camera/view-split work, not item B alone. This is an
-## interim placement that makes the group list visible and readable, not
-## a claim it matches the reference image's exact geometry yet.
+## LAYOUT (§56.3 item F "first real shared UI-panel layout pass" --
+## previously an ASSUMPTION-logged fixed guess, see ASSUMPTIONS.md
+## "§56.3 item B" for that original decision and "§56.3 item F" for this
+## pass's change): top-left column, stacked BELOW Hud's own panel
+## (scripts/hud.gd, top-left at (12,12)) using Hud's REAL current
+## measured height (Hud.get_bottom_y(), added this pass) plus a fixed
+## margin -- not a second hardcoded pixel guess independent of Hud's
+## actual line count. main.gd passes Hud's current get_bottom_y() into
+## update() below every tick (same "composition root queries a sibling's
+## real size" pattern this pass also uses nowhere else yet -- WeaponPanel/
+## TacticalPlot/OrderMenu occupy their own separate screen regions
+## (bottom-left / top-right / full-viewport-when-open respectively) and
+## do not currently stack against anything, so they are not part of this
+## column and are NOT touched this pass -- see ASSUMPTIONS.md "§56.3 item
+## F" for why that is still an honest, if partial, "first pass" rather
+## than a claim every panel in the scene is now layout-aware of every
+## other one).
 class_name CommandGroupPanel
 
-const PANEL_POSITION := Vector2(12, 360)
+const TOP_MARGIN_PX: float = 20.0
+const FALLBACK_TOP_Y: float = 360.0  # used only if update() is ever called before _ready() has run, so _label always has a position
 
 var _label: Label
 
 func _ready() -> void:
 	_label = Label.new()
 	_label.name = "CommandGroupLabel"
-	_label.position = PANEL_POSITION
+	_label.position = Vector2(12, FALLBACK_TOP_Y)
 	_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
 	_label.add_theme_font_size_override("font_size", 16)
 	add_child(_label)
 
 ## Call once per simulation tick (same convention as Hud.update/
-## TacticalPlot.update, see main.gd._on_tick) with the world and the
-## shared SelectionState (§56.3 item A) so each group's roster can mark
-## which of its members are currently selected.
-func update(world: SimulationWorld, selection: SelectionState) -> void:
+## TacticalPlot.update, see main.gd._on_tick) with the world, the shared
+## SelectionState (§56.3 item A) so each group's roster can mark which of
+## its members are currently selected, and `hud_bottom_y` -- Hud's own
+## CURRENT get_bottom_y() this same tick, from main.gd -- so this panel's
+## position tracks Hud's real height instead of a stale fixed guess (see
+## class doc comment above). `hud_bottom_y` defaults to FALLBACK_TOP_Y so
+## existing callers/tests that only cared about `_build_text` output
+## (not position) keep working unchanged.
+func update(world: SimulationWorld, selection: SelectionState, hud_bottom_y: float = FALLBACK_TOP_Y) -> void:
+	_label.position = Vector2(12, hud_bottom_y + TOP_MARGIN_PX)
 	_label.text = _build_text(world, selection)
 
 func _build_text(world: SimulationWorld, selection: SelectionState) -> String:

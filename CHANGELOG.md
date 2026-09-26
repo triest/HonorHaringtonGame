@@ -3639,3 +3639,74 @@ PD -- см. .tools/state.md, тот же урок ещё раз: не объяв
 добавлено процессное правило: экспорт .exe -- обязательный последний
 шаг ЛЮБОГО прохода, трогающего сцены/скрипты/UI, не разовый пункт
 чек-листа.
+
+## 2026-09-26 (scheduled dev pass) -- §56.3 item F: command camera quick-center + первый проход по layout панелей
+
+**Camera quick-center (§1.10.1 "быстро центрироваться на выбранном
+корабле, группе или контакте"):** новый hotkey Home (`project.godot`
+[input] действие `camera_focus_selection`) -- `scripts/camera_focus.gd`
+(`CameraFocus.compute`, чистая функция: выбор -> {pivot, spread} по
+world.ships/world.missiles, ИСТИННЫЕ позиции, не sensor-контакты --
+камера над боем не ограничена fog-of-war) + `scripts/
+camera_focus_controller.gd` (`CameraFocusController`, обычный Node с
+`_unhandled_input`, тот же паттерн, что PlayerInput). `OrbitCamera.
+focus_on()` (новый метод) переносит pivot и пересчитывает distance под
+новый spread, СОХРАНЯЯ текущий yaw/pitch (в отличие от `frame_on()`,
+который также задаёт начальный угол) -- код дистанции вынесен в общую
+`_required_distance_for_spread()`, которую теперь используют оба
+метода. `_base_distance` перебазируется на новую дистанцию (чтобы
+зум колесом после фокуса считался от нового масштаба, а не от
+исходного общебоевого), `far` только РАСТЁТ, никогда не уменьшается
+(дальние корабли не должны пропадать из фрустума при приближении).
+Приоритет при одновременном выборе своих кораблей и назначенной цели
+(designated_target_id) -- своя группа выигрывает, цель используется
+для центрирования только если `selected_ids` пуст (см.
+ASSUMPTIONS.md "§56.3 item F").
+
+**Layout, первый проход (не общее решение, честно ограничен по
+масштабу -- см. ASSUMPTIONS.md):** `Hud.get_bottom_y()` (новый метод,
+реальная измеренная высота Label через `get_minimum_size()`) читается
+`main.gd._on_tick` каждый тик и передаётся в `CommandGroupPanel.
+update(world, selection, hud_bottom_y)`, которая теперь ставит себя на
+`hud_bottom_y + TOP_MARGIN_PX` вместо старой захардкоженной константы
+`PANEL_POSITION := Vector2(12, 360)`. Это единственная реальная зона
+риска перекрытия в сцене (Hud и CommandGroupPanel -- единственные два
+панели в одной области экрана, top-left, и высота Hud зависит от
+живого числа контактов/подсистем). WeaponPanel (bottom-left, уже сам
+считает позицию от viewport), TacticalPlot (top-right, фиксированный
+anchor) и OrderMenu (full-viewport только когда открыт) не трогались --
+они не пересекаются ни с чем уже сейчас.
+
+**Тесты (headless-only, режим "fast visible-result" из state.md ещё
+активен для §56.3 -- полный прогон отложен до закрытия фазы):** новые
+`test_camera_focus.gd` (17 проверок, чистая логика центроид/spread/
+приоритет), `test_camera_focus_controller.gd` (5 проверок,
+try_focus()/_unhandled_input без реальной камеры -- инстанцировать
+OrbitCamera вне дерева сцены нельзя, та же причина, что уже
+задокументирована в test_orbit_camera.gd, перепроверено вживую
+пробным скриптом перед тем, как это писать), 2 новых кейса в
+`test_orbit_camera.gd` (вынесенная `_required_distance_for_spread`),
+2 новых кейса в `test_hud.gd` (`get_bottom_y()`), новый
+`test_command_group_panel.gd` (2 проверки, позиционирование по
+`hud_bottom_y`). Плюс регрессионный прогон 17 существующих сьютов
+(weapon_resolution, missile_launch_order, point_defense,
+ship_combat_directive, order_menu_controller, move_order_controller,
+command_group_controller, selection_state, tactical_plot_selection,
+tactical_plot_projector, individual_orders, command_transmission,
+formation, missile, subsystem_damage_consumers,
+weapon_panel_controller, player_input) -- все зелёные, плюс headless
+scene smoke run (exit 0, те же 16x baseline dummy-renderer ошибок,
+ноль новых типов). Требовался `godot --headless --import` перед
+первым тестовым прогоном, чтобы подхватить два новых global
+class_name скрипта (CameraFocus, CameraFocusController) -- та же
+грабля, что уже отмечена в прошлом проходе (item E).
+
+**Windows-экспорт пересобран этим же проходом** (процессное правило
+из AGENTS.md §56.3: экспорт -- обязательный последний шаг любого
+прохода, трогающего сцены/скрипты/UI): `.pck` выросло с 437КБ до
+450КБ -- подтверждение, что новый код вошёл в билд.
+
+**НЕ заявляется "§56.3 закрыт" и НЕ заявляется "item F закрыт живым
+подтверждением"** -- headless-верификация не заменяет реальный тест
+игроком (нет реальной мыши/окна в этом окружении, та же оговорка, что
+у items B/C/D/E). Пункты G/H/I/J (§56.3) ещё не начаты.

@@ -8,9 +8,14 @@ extends Camera3D
 ## never let the player change.
 ##
 ## Controls (deliberately raw Input/key checks, not an Input Map action --
-## project.godot defines no input actions yet, and adding a full input
-## map is out of scope for this minimal vertical-slice camera; §56.1 item
-## 5's player-order hotkeys are a separate, later piece of work):
+## project.godot did not define any input actions when this class was
+## first written; §56.1 item 5 has since added a real [input] map for
+## per-ship order hotkeys, and §56.3 item F (see camera_focus_controller.gd)
+## follows that newer convention for the quick-center hotkey specifically,
+## but the orbit/zoom controls below are left as raw Input checks rather
+## than being retrofitted into named actions -- out of scope for item F,
+## which only needed a NEW control, not a rewrite of this file's existing
+## ones):
 ## - Right-mouse-drag: orbit (yaw/pitch) around the pivot.
 ## - Mouse wheel: zoom in/out.
 ## - Arrow keys: keyboard-only orbit fallback.
@@ -20,7 +25,7 @@ extends Camera3D
 ## the same ship-midpoint/spread calculation the old fixed camera used),
 ## not around the camera's own position -- this is a rendering-only
 ## convenience node; it never reads or writes simulation state directly
-## (§42), only the pivot point main.gd hands it.
+## (§42), only the pivot point main.gd/CameraFocusController hand it.
 class_name OrbitCamera
 
 var pivot: Vector3 = Vector3.ZERO
@@ -47,8 +52,7 @@ const KEY_ZOOM_SPEED: float = 1.5        # fraction/sec, keyboard fallback
 func frame_on(new_pivot: Vector3, spread: float) -> void:
 	pivot = new_pivot
 	fov = 60.0
-	var half_fov_rad: float = deg_to_rad(fov * 0.5)
-	var required_distance: float = (spread / tan(half_fov_rad)) * 1.6
+	var required_distance: float = _required_distance_for_spread(spread, fov)
 	distance = required_distance
 	_base_distance = required_distance
 	far = required_distance * 3.0 + 10000.0
@@ -57,6 +61,41 @@ func frame_on(new_pivot: Vector3, spread: float) -> void:
 	yaw = atan2(view_dir.x, view_dir.z)
 	pitch = clampf(asin(clampf(view_dir.y, -1.0, 1.0)), MIN_PITCH, MAX_PITCH)
 	_update_transform()
+
+## §56.3 item F (§1.10.1 "быстро центрироваться на выбранном корабле,
+## группе или контакте"): re-centers the pivot and re-fits the zoom
+## distance to `spread` WITHOUT touching yaw/pitch -- unlike frame_on()
+## (the one-time initial framing shot, which also picks a starting
+## viewing angle), a quick-center keeps whatever angle the player has
+## already orbited to; only WHERE the camera is looking and HOW FAR
+## changes. Also rebases `_base_distance` to the new framing distance, so
+## the player's subsequent scroll-wheel/keyboard zoom range (MIN/MAX_
+## DISTANCE_SCALE) is relative to whatever was just focused on (a single
+## ship, say), not the original whole-battle framing from frame_on() --
+## otherwise a focus on one ship would still only let the player zoom
+## across the ORIGINAL battle-wide distance range, which defeats the
+## point of focusing.
+##
+## `far` is only ever GROWN here, never shrunk (§1.10.2 "дальние объекты
+## автоматически остаются видимыми"): focusing in tight on one ship must
+## not clip other, farther-out contacts out of the 3D view entirely.
+func focus_on(new_pivot: Vector3, spread: float) -> void:
+	pivot = new_pivot
+	var required_distance: float = _required_distance_for_spread(spread, fov)
+	distance = required_distance
+	_base_distance = required_distance
+	far = maxf(far, required_distance * 3.0 + 10000.0)
+	_update_transform()
+
+## Pure function, extracted from frame_on()/focus_on() so both share the
+## exact same "distance needed for this fov to frame this spread" formula
+## instead of two copies drifting apart. MIN_FOCUS_SPREAD_M-scale floor on
+## `spread` lives in the caller (CameraFocus.compute), not here -- this
+## function only does the trig, it doesn't know why a caller might hand
+## it a near-zero spread (see camera_focus.gd's own doc comment).
+static func _required_distance_for_spread(spread: float, fov_deg: float) -> float:
+	var half_fov_rad: float = deg_to_rad(fov_deg * 0.5)
+	return (spread / tan(half_fov_rad)) * 1.6
 
 ## Pure function: camera offset from the pivot for a given yaw/pitch/
 ## distance. Y-up, yaw measured from +Z toward +X, matching Godot's

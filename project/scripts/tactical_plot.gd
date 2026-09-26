@@ -56,6 +56,7 @@ const ContactState = preload("res://simulation/contact_state.gd")
 const TacticalPlotProjector = preload("res://scripts/tactical_plot_projector.gd")
 const TacticalPlotSelection = preload("res://scripts/tactical_plot_selection.gd")
 const SelectionState = preload("res://scripts/selection_state.gd")
+const MoveOrderController = preload("res://scripts/move_order_controller.gd")
 
 ## Plot auto-scales each update() to comfortably fit the farthest
 ## currently-live contact -- keeps every known contact on-plot without a
@@ -104,6 +105,15 @@ const DRAG_THRESHOLD_PX: float = 4.0
 const DRAG_BOX_FILL_COLOR := Color(0.6, 0.9, 1.0, 0.12)
 const DRAG_BOX_BORDER_COLOR := Color(0.6, 0.9, 1.0, 0.8)
 
+## §56.3 item C: RMB move-order visualization (§1.10.6 -- "линия курса;
+## стрелка; конечная точка; прогнозируемый vector"). Colour deliberately
+## distinct from SELECTION_COLOR/every contact colour so a pending move
+## order reads as its own category of overlay, not a selection ring.
+const MOVE_ORDER_COLOR := Color(1.0, 0.8, 0.3, 0.95)
+const MOVE_ORDER_ENDPOINT_RADIUS_PX: float = 5.0
+const MOVE_ORDER_ARROW_LENGTH_PX: float = 10.0
+const MOVE_ORDER_ARROW_WIDTH_PX: float = 5.0
+
 var pov_ship_id: String = ""
 var plot_range_m: float = MIN_PLOT_RANGE_M
 
@@ -114,6 +124,15 @@ var plot_range_m: float = MIN_PLOT_RANGE_M
 ## read-only display (matches every other optional collaborator in this
 ## codebase, e.g. Hud/WeaponFx never assume a fully-wired scene either).
 var selection: SelectionState = null
+
+## §56.3 item C: same shared collaborator pattern as `selection` above --
+## assigned by main.gd, guarded against null everywhere it's read. Owns
+## the RMB-click-to-move-order routing/order-construction (see that
+## class's own doc comment); this file only (a) turns a RMB release into
+## a world-space point via TacticalPlotProjector.unproject and forwards
+## it, and (b) draws whatever `move_order_controller.active_move_orders`
+## currently holds -- no order-issuing logic of its own.
+var move_order_controller: MoveOrderController = null
 
 var _contacts: Array = []  # Array[Dictionary], rebuilt each update()
 var _origin_present: bool = false
@@ -235,6 +254,7 @@ func _draw() -> void:
 		var label: String = "%s  %s  %s" % [contact["id"], _format_range(projection["range_m"]), _format_bearing(projection["bearing_rad"])]
 		draw_string(ThemeDB.fallback_font, icon_pos + Vector2(8, 4), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, color)
 
+	_draw_move_orders(center, radius)
 	_draw_drag_box()
 
 func _draw_ship_icon(pos: Vector2, color: Color, clamped: bool) -> void:
@@ -262,6 +282,70 @@ func _draw_velocity_leader(from_px: Vector2, velocity: Vector3, radius: float, c
 	if lead_px.length() > radius * 0.9:
 		lead_px = lead_px.normalized() * radius * 0.9
 	draw_line(from_px, from_px + lead_px, color, 1.5)
+
+## §56.3 item C: draws every pending move order's course line, arrowhead
+## and endpoint marker (§1.10.6) -- reads `move_order_controller.
+## active_move_orders` (UI-side bookkeeping, see that class's own doc
+## comment) and looks each anchor id's CURRENT on-screen position up in
+## `_last_icons` (same "what you see is what's drawn" source hit-testing
+## itself uses) so the line always starts from wherever the anchor is
+## actually drawn this frame, not a stale remembered position. Silently
+## skips an anchor no longer present in `_last_icons` (destroyed, or
+## simply out of live sensor contact this tick -- §23 fog-of-war applies
+## here exactly as everywhere else in this file).
+##
+## NOT drawn (ASSUMPTION, §1.10.6's own text makes it conditional --
+## "при необходимости"): a distinct "predicted turn point" marker. This
+## codebase's maneuver model treats thrust as omnidirectional relative to
+## a ship's facing (see individual_order.gd/formation_order.gd class
+## docs -- "change course" retargets the velocity vector, not the nose),
+## so there is no discrete "ship turns, THEN burns" maneuver phase for a
+## move order to mark a turn point for; the course line + velocity leader
+## (drawn separately, already existing) together already show both the
+## intended destination and the ship's actual current predicted vector.
+## See ASSUMPTIONS.md "§56.3 item C".
+func _draw_move_orders(center: Vector2, radius: float) -> void:
+	if move_order_controller == null:
+		return
+	for anchor_id in move_order_controller.active_move_orders.keys():
+		var anchor_icon = _find_icon(anchor_id)
+		if anchor_icon == null:
+			continue
+		var target_point: Vector3 = move_order_controller.active_move_orders[anchor_id]["target_point"]
+		var projection: Dictionary = TacticalPlotProjector.project(target_point, _pov_position, plot_range_m, radius)
+		var target_px: Vector2 = center + projection["plot_offset_px"]
+		var from_px: Vector2 = anchor_icon["pos"]
+
+		draw_line(from_px, target_px, MOVE_ORDER_COLOR, 1.5)
+		_draw_move_order_arrowhead(from_px, target_px)
+		draw_arc(target_px, MOVE_ORDER_ENDPOINT_RADIUS_PX, 0.0, TAU, 12, MOVE_ORDER_COLOR, 1.5)
+
+## Small filled triangle at `to_px`, pointing along the from->to
+## direction -- the "стрелка" (arrow) item of §1.10.6's visualization
+## list, drawn as its own shape rather than an arrowhead baked into
+## draw_line (Godot's CanvasItem API has no built-in arrow primitive).
+func _draw_move_order_arrowhead(from_px: Vector2, to_px: Vector2) -> void:
+	var dir: Vector2 = (to_px - from_px)
+	if dir.length_squared() < 0.0001:
+		return
+	dir = dir.normalized()
+	var perp: Vector2 = Vector2(-dir.y, dir.x)
+	var tip: Vector2 = to_px
+	var base_center: Vector2 = to_px - dir * MOVE_ORDER_ARROW_LENGTH_PX
+	var left: Vector2 = base_center + perp * (MOVE_ORDER_ARROW_WIDTH_PX * 0.5)
+	var right: Vector2 = base_center - perp * (MOVE_ORDER_ARROW_WIDTH_PX * 0.5)
+	draw_polygon(PackedVector2Array([tip, left, right]), PackedColorArray([MOVE_ORDER_COLOR]))
+
+## Looks `id` up in `_last_icons` (rebuilt fresh every _draw() call --
+## see that Array's own doc comment on top of this file) -- null if not
+## currently drawn. Small linear scan: `_last_icons` is at most a
+## handful of live contacts, same cost class as TacticalPlotSelection's
+## own hit_test/box_test.
+func _find_icon(id: String):
+	for icon in _last_icons:
+		if icon["id"] == id:
+			return icon
+	return null
 
 ## §56.3 item A: a plain ring around a selected icon's already-drawn
 ## position -- deliberately not a re-draw of the icon itself (own shape/
@@ -316,6 +400,12 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 		return
 
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		if not event.pressed:
+			_on_right_release(event)
+		accept_event()
+		return
+
 	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 		_drag_current_px = event.position
 		if not _drag_active and _drag_start_px.distance_to(_drag_current_px) >= DRAG_THRESHOLD_PX:
@@ -357,4 +447,22 @@ func _on_left_release(event: InputEventMouseButton) -> void:
 			selection.clear()
 
 	_drag_active = false
+	queue_redraw()
+
+## ТЗ §56.3 item C / §1.10.6: RMB release against the plot -> a move
+## order for the current selection. A no-op if `move_order_controller`
+## was never assigned (same optional-collaborator convention as
+## `selection`, see that var's own doc comment) or if the plot has no
+## live origin yet (no pov ship -- nothing to compute a sensible world
+## point relative to).
+func _on_right_release(event: InputEventMouseButton) -> void:
+	if move_order_controller == null or not _origin_present:
+		return
+	var radius: float = minf(size.x, size.y) * 0.5 - PLOT_MARGIN_PX
+	if radius <= 4.0:
+		return
+	var center: Vector2 = size * 0.5
+	var offset_px: Vector2 = event.position - center
+	var target_point: Vector3 = TacticalPlotProjector.unproject(offset_px, _pov_position, plot_range_m, radius)
+	move_order_controller.issue_move_order(target_point)
 	queue_redraw()

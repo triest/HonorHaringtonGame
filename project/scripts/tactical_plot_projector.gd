@@ -68,3 +68,27 @@ static func project(world_pos: Vector3, origin: Vector3, plot_range_m: float, pl
 		"bearing_rad": bearing_rad,
 		"clamped": clamped,
 	}
+
+## Inverse of `project()`: maps a pixel offset FROM THE PLOT'S CENTRE back
+## to a world-space position, given the same origin/plot_range_m/
+## plot_pixel_radius the forwards mapping used. ТЗ §56.3 item C ("RMB по
+## точке пространства"): this is what turns a mouse click on the plot
+## into an actual world-space move-order target point. Exact algebraic
+## inverse of the UNCLAMPED case in project() (`plot_offset_px =
+## planar_offset * (plot_pixel_radius / plot_range_m)`, planar_offset =
+## (offset.x, offset.z)) -- a click outside the plot's own rim (e.g. in
+## one of the square Control's corners, which project() itself can never
+## produce since it always clamps a contact to the circle) simply
+## extrapolates past `plot_range_m`, an honest, unsurprising result for a
+## point the player chose to click there, not a bug to special-case.
+##
+## Returned world position keeps `origin`'s own Y (this plot is a flat,
+## single-plane top-down display -- see class doc's BEARING CONVENTION;
+## the plot has no notion of altitude to click into, and this project's
+## demo ships all maneuver in a single Y-constant plane, see
+## player_input.gd's own doc comment).
+static func unproject(plot_offset_px: Vector2, origin: Vector3, plot_range_m: float, plot_pixel_radius: float) -> Vector3:
+	var safe_radius_px: float = maxf(plot_pixel_radius, 0.001)
+	var scale_m_per_px: float = plot_range_m / safe_radius_px
+	var planar_m: Vector2 = plot_offset_px * scale_m_per_px
+	return origin + Vector3(planar_m.x, 0.0, planar_m.y)

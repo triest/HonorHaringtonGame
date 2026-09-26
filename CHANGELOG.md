@@ -3276,3 +3276,102 @@ headless smoke, НЕ живым запуском с несколькими ко�
 может сгенерировать настоящие InputEventMouseButton/Motion события с
 модификаторами) -- см. .tools/state.md, тот же урок §56.1/§56.2 ещё
 раз: не объявлять готовым без живого подтверждения.
+
+## 2026-09-26 -- §56.3 item C: RMB move order + курсовая визуализация (scheduled dev pass)
+
+Реализован и headless-проверен пункт C чек-листа §56.3 (AGENTS.md §1.10.6):
+ПКМ по точке на tactical plot -> приказ движения для текущего выбора
+(одиночный корабль или командная группа), с визуализацией курса.
+
+* `scripts/tactical_plot_projector.gd`: новый `unproject()` -- точный
+  алгебраический обратный к уже существующему `project()` (пиксель на
+  плоте -> мировая точка), тот же origin/plot_range_m/plot_pixel_radius,
+  что и прямое проецирование, так что "куда кликнул -- то и получил"
+  гарантированно согласовано с тем, что отображается.
+* `scripts/move_order_controller.gd` (новый): чистый транслятор
+  ввод->приказ, тот же паттерн что и CommandGroupController/PlayerInput.
+  Отбор: только реальные корабли (`world.ships`) команды игрока
+  (`player_team`, а не просто "одна команда друг с другом" как у
+  CommandGroupController -- ошибочно увести вражеский AI-корабль кликом
+  недопустимо). Маршрутизация: если выбранный корабль состоит в
+  formation (guide или member, проверяется каждый раз против
+  `world.formations`, без кэширования) -- приказ идёт ОДИН РАЗ на всю
+  formation через `world.issue_formation_order_now` (FormationOrder.
+  APPROACH, уже существующий примитив -- см. class doc), с дедупликацией
+  при выборе нескольких участников одной formation; одиночный корабль
+  без formation получает `IndividualOrder` через
+  `world.transmit_individual_order_now` (та же comm-delay семья §25/§31,
+  что уже использует PlayerInput -- ПКМ-приказ не является особым
+  мгновенным случаем).
+* Два непростых открытия, зафиксированных отдельно в ASSUMPTIONS.md
+  "§56.3 item C" (важно для будущих пассов, не самоочевидно из кода):
+  1. `world.issue_echelon_order` только СТАВИТ В ОЧЕРЕДЬ приказ
+     (`FormationState.issue_order`, а не `issue_order_now`) -- нет
+     `issue_echelon_order_now`. Свежий move-order обязан ЗАМЕНЯТЬ
+     текущий, а не вставать за ним в очередь, поэтому используется
+     `world.issue_formation_order_now` напрямую по formation_id, а не
+     маршрут через echelon.
+  2. Одиночный корабль: выбор между `IndividualOrder.change_course`
+     (уже движется -- держит скорость, меняет только курс) и
+     `.change_speed` (стоит на месте -- разгон до курса) -- НЕ
+     стилистический выбор. `CHANGE_SPEED.is_complete()` проверяет только
+     МОДУЛЬ скорости, не направление; если новая целевая скорость равна
+     текущей (ровно случай "уже быстрый, просто перенаправить"),
+     is_complete() становится true на первом же тике ДО применения тяги
+     на разворот -- корабль тогда вообще не поворачивает. Найдено
+     собственным headless-тестом этого пасса при первой (наивной)
+     реализации с одним `change_speed`.
+* Визуализация (`tactical_plot.gd._draw_move_orders`/
+  `_draw_move_order_arrowhead`): линия курса + стрелка + маркер конечной
+  точки поверх уже существующего plot-рендера, читает UI-side
+  `MoveOrderController.active_move_orders` (не пересчитывает
+  simulation-truth заново -- §1.10.6 явно допускает ASSUMPTION по
+  визуальному стилю). Точка отмечается достигнутой (запись убирается) в
+  `prune_completed()`, вызываемом раз в тик из main.gd. Сознательно НЕ
+  рисуется "точка разворота" -- манёвренная модель проекта не имеет
+  отдельной фазы разворот-затем-тяга (тяга всенаправленная относительно
+  ориентации), см. ASSUMPTIONS.md.
+* Тесты (новые, оба ALL TESTS PASSED): `simulation/tests/
+  test_move_order_controller.gd` (29 проверок -- пустой выбор,
+  исключение чужой команды/не-кораблей, comm-delay для одиночного
+  приказа, change_course vs change_speed в зависимости от текущей
+  скорости, клик по своей же позиции -- no-op, маршрутизация на
+  formation вместо individual для участника группы, дедупликация при
+  выборе двух участников одной formation, запись/очистка
+  active_move_orders включая "корабль пропал из world.ships"),
+  `simulation/tests/test_tactical_plot_projector.gd` (+3 новые проверки
+  для `unproject()` -- точная обратность project(), клик в центр ->
+  origin, сохранение Y origin'а; итого файл всё ещё ALL TESTS PASSED).
+
+НЕ входит в этот пасс (следующие пункты того же чек-листа, ещё НЕ
+реализованы): D (контекстное меню приказов по цели), E (панель оружия),
+F (командная камера + общий layout панелей), G (поведение зума), H
+(сценарий 1v1 -> эскадра vs эскадра), I (individual override внутри
+группы). LMB-drag как альтернативный способ задать курс (тоже упомянут
+в §1.10.6) НЕ реализован этим пассом -- ПКМ-клика оказалось достаточно
+для этого среза, drag отложен (см. ASSUMPTIONS.md).
+
+Проверено (режим "fast visible-result" §56.3 всё ещё в силе, полный
+симуляционный набор не гонялся):
+1. `godot --headless --import` -- чисто.
+2. `test_move_order_controller.gd` -- ALL TESTS PASSED (29/29).
+3. `test_tactical_plot_projector.gd` (регресс + 3 новые) -- ALL TESTS
+   PASSED (11/11).
+4. `test_command_group_controller.gd` (регресс, не менялся) -- ALL
+   TESTS PASSED.
+5. `test_individual_orders.gd` (регресс, не менялся) -- ALL TESTS
+   PASSED (36/36).
+6. `test_command_transmission.gd` (регресс, не менялся) -- ALL TESTS
+   PASSED (18/18).
+7. `godot --headless res://scenes/main.tscn --quit-after 120` -- exit
+   0, те же самые 16x baseline `mesh_get_surface_count`/"Parameter m is
+   null" (dummy-рендерер), ноль новых типов ошибок -- новый RMB-обработчик
+   и `_draw_move_orders`/`prune_completed`/wiring в main.gd ничего не
+   сломали в headless-режиме.
+
+**НЕ заявляется "§56.3 закрыт"** -- это только пункт C из 9+1 (A/B уже
+были закрыты ранее). Мышь реально не тестировалась живым пользователем
+(headless-окружение не может сгенерировать настоящие
+InputEventMouseButton с правой кнопкой) -- см. .tools/state.md, тот же
+урок ещё раз: не объявлять готовым без живого подтверждения.
+

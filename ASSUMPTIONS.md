@@ -2378,3 +2378,84 @@ command_group_controller.gd, scripts/command_group_panel.gd):
 Not yet implemented (open, see .tools/state.md): disbanding a group,
 merging two existing groups, renaming a group after creation, and any
 group interaction beyond hotkey-create + read-only list display.
+
+## §56.3 item C -- RMB move order routing/order-kind choice (INTERPRETATION, design decision, not canon)
+
+§1.10.6 requires an RMB-on-plot move order with course-line/arrow/
+endpoint/predicted-vector visualization, real acceleration/inertia (no
+teleport), and (§1.10.5) reuse of the existing CommandEchelon/
+FormationState/IndividualOrder architecture. Two non-obvious decisions
+made this pass (scripts/move_order_controller.gd, scripts/
+tactical_plot.gd, scripts/tactical_plot_projector.gd):
+
+* **Formation orders go through `world.issue_formation_order_now`, NOT
+  `world.issue_echelon_order`**, even though state.md's own plan for this
+  item named both APIs generically. Discovered while implementing:
+  `issue_echelon_order` only QUEUES the order onto the formation
+  (`FormationState.issue_order`, not `issue_order_now`) -- there is no
+  `issue_echelon_order_now`. A move order is a fresh, immediate
+  intention (exactly like every other order path here -- PlayerInput's
+  hotkeys, transmit_individual_order_now), so issuing it through the
+  queued echelon API would mean a SECOND move order clicked while a
+  formation is still flying toward the FIRST one sits behind it instead
+  of replacing it -- a visibly broken "my move order didn't do anything"
+  bug. Since `selection` here only ever resolves to a specific
+  `formation_id` (there is no "select an echelon" UI concept yet -- see
+  CommandGroupPanel, which is read-only), addressing the formation
+  directly via the immediate API loses nothing today. Revisit if/when an
+  echelon-spanning-multiple-formations selection concept is added (would
+  need a small additive `issue_echelon_order_now`, mirroring this one).
+* **A lone (non-formation) ship's move order picks between
+  IndividualOrder.change_course and .change_speed depending on whether
+  it is already moving**, rather than always using a single change_speed
+  call with an explicit heading (which would have been the simpler-
+  looking code). Reason, found by this pass's own headless test failing
+  against the naive version: `IndividualOrder.CHANGE_SPEED.is_complete()`
+  checks ONLY the target/current velocity MAGNITUDE, ignoring heading
+  entirely. If the redirect's target speed equals the ship's CURRENT
+  speed (exactly the "already fast, just point it somewhere else" case),
+  `is_complete()` reads true on the very first tick evaluation --
+  BEFORE any turning thrust is ever applied (`_resolve_individual_orders`
+  checks completion before the thrust-application branch and zeroes
+  thrust on completion) -- so the ship would silently never turn at all,
+  a real functional bug, not just a test artifact. `change_course`'s
+  own `is_complete()` checks the ANGLE between current/target velocity
+  instead, so it has no such trap; it is used whenever the ship is
+  already above `MoveOrderController.MIN_MOVE_SPEED_MPS`, and
+  `change_speed` (ramp from ~0 to `DEFAULT_MOVE_SPEED_MPS`) only for a
+  near-stationary ship, where the target magnitude will essentially
+  never exactly equal the current (near-zero) one. See
+  move_order_controller.gd's own `_issue_individual_move` doc comment
+  for the same explanation kept in-code so this isn't "simplified" back
+  by a future pass.
+* **Visualization is UI-side bookkeeping** (`MoveOrderController.
+  active_move_orders`, read by `TacticalPlot._draw()`), not derived from
+  querying `world.individual_orders`/`world.formations` order state
+  directly -- §1.10.6's own text allows "ASSUMPTION calls on exact
+  visual style"; a lone ship's `change_course`/`change_speed` orders
+  don't carry the actual clicked point (only a velocity vector), so
+  there is nothing in `world` to read the target FROM for that case
+  regardless. Cleared by `MoveOrderController.prune_completed()` (called
+  once per tick from main.gd) once the anchor ship is within
+  `ARRIVAL_TOLERANCE_M` of the recorded point, or once the anchor ship no
+  longer exists -- a UI-feel approximation of "arrived", not a
+  simulation-truth completion signal.
+* **No distinct "predicted turn point" marker drawn** -- §1.10.6's own
+  text makes this item conditional ("при необходимости"). This
+  codebase's maneuver model treats thrust as omnidirectional relative to
+  a ship's facing (`change_course`/`change_speed` retarget the velocity
+  vector, not the nose -- see individual_order.gd/formation_order.gd's
+  own class docs), so there is no discrete "turn, then burn" maneuver
+  phase to mark a turn point for.
+* Eligibility is stricter than CommandGroupController's own ("same team
+  as each other"): a move order additionally requires `player_team`
+  specifically (set by main.gd from `world.teams.get(HUD_POV_SHIP_ID)`),
+  since misdirecting an enemy AI ship via a UI bug would be a much worse
+  failure mode than a mis-scoped group name.
+
+Not yet implemented (open, see .tools/state.md): a dedicated LMB-drag
+"set course by dragging" gesture (§1.10.6 also mentions this as an
+alternative to RMB-click; RMB-click alone was judged sufficient for this
+pass's slice, drag-to-set-course deferred), and any UI affordance to
+cancel a pending move order early (currently only superseded-by-a-new-
+order or natural arrival clear the visual).

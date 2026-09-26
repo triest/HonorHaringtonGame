@@ -53,6 +53,11 @@ var command_group_controller: CommandGroupController
 ## world.command_echelons/world.formations, see that script's own doc
 ## comment for the interim layout choice.
 var command_group_panel: CommandGroupPanel
+## §56.3 item C: RMB-on-plot move order routing -- see that script's own
+## doc comment. Same shared world/selection as command_group_controller
+## above, plus `player_team` (below) so it never lets the player order an
+## enemy AI ship around.
+var move_order_controller: MoveOrderController
 var player_input: PlayerInput
 var win_lose_screen: WinLoseScreen
 
@@ -141,6 +146,18 @@ func _ready() -> void:
 	command_group_panel = CommandGroupPanel.new()
 	add_child(command_group_panel)
 
+	# §56.3 item C: same shared world/selection as command_group_controller
+	# above. player_team is world.teams.get(HUD_POV_SHIP_ID) rather than a
+	# separately hardcoded "red" literal, so this stays correct if the
+	# player-controlled ship/team ever changes without anyone remembering
+	# to update a second copy of the same fact.
+	move_order_controller = MoveOrderController.new()
+	move_order_controller.world = world
+	move_order_controller.selection = selection
+	move_order_controller.player_team = String(world.teams.get(HUD_POV_SHIP_ID, ""))
+	add_child(move_order_controller)
+	tactical_plot.move_order_controller = move_order_controller
+
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
 	# godot [input], see PlayerInput's own doc comment) into calls on
 	# `world`'s existing transmit_*/order APIs. Given `world` directly
@@ -210,6 +227,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	hud.update(world, HUD_POV_SHIP_ID)
 	tactical_plot.update(world, HUD_POV_SHIP_ID)
 	command_group_panel.update(world, selection)
+	move_order_controller.prune_completed()
 	win_lose_screen.update(world)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo

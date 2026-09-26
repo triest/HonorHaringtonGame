@@ -39,8 +39,22 @@ extends RefCounted
 class_name SelectionState
 
 signal selection_changed(selected_ids: Array)
+## §56.3 item D (§1.10.7 "После выбора собственного корабля/группы и
+## указания вражеского объекта мышью появляется контекстное меню
+## приказов"): a SEPARATE single-id concept from `selected_ids` above --
+## deliberately NOT a second multi-select and NOT folded into the
+## selection array itself, per this file's own doc comment above ("a
+## small new concept... not a second multi-select", see .tools/state.md
+## "§56.3 item D" for the exact reasoning this was logged against).
+## Designating a target does not touch `selected_ids` at all: the whole
+## point of the interaction OrderMenuController implements is that the
+## player's own-ship selection stays intact while a hostile contact is
+## additionally marked as "the target half" of an order. "" = no target
+## currently designated.
+signal designated_target_changed(target_id: String)
 
 var selected_ids: Array = []  # Array[String], selection order preserved
+var designated_target_id: String = ""
 
 func select_only(ids: Array) -> void:
 	selected_ids = ids.duplicate()
@@ -73,3 +87,22 @@ func is_selected(id: String) -> bool:
 
 func is_empty() -> bool:
 	return selected_ids.is_empty()
+
+## §56.3 item D: mark `id` (expected to be a hostile contact id) as the
+## current order-menu target. A no-op (no redundant signal emission) if
+## `id` is already the designated target, same idempotence convention as
+## clear()/other setters in this class.
+func designate_target(id: String) -> void:
+	if designated_target_id == id:
+		return
+	designated_target_id = id
+	designated_target_changed.emit(designated_target_id)
+
+func clear_designated_target() -> void:
+	if designated_target_id == "":
+		return
+	designated_target_id = ""
+	designated_target_changed.emit(designated_target_id)
+
+func has_designated_target() -> bool:
+	return designated_target_id != ""

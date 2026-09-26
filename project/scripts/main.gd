@@ -58,6 +58,12 @@ var command_group_panel: CommandGroupPanel
 ## above, plus `player_team` (below) so it never lets the player order an
 ## enemy AI ship around.
 var move_order_controller: MoveOrderController
+## §56.3 item D: same shared world/selection/player_team convention as
+## move_order_controller above; also reuses move_order_controller itself
+## for its APPROACH entry (see order_menu_controller.gd's own doc
+## comment). `order_menu` is the visible popup this controller drives.
+var order_menu_controller: OrderMenuController
+var order_menu: OrderMenu
 var player_input: PlayerInput
 var win_lose_screen: WinLoseScreen
 
@@ -158,6 +164,23 @@ func _ready() -> void:
 	add_child(move_order_controller)
 	tactical_plot.move_order_controller = move_order_controller
 
+	# §56.3 item D: the order-menu popup itself must be added to the tree
+	# AFTER tactical_plot (see order_menu.gd's own doc comment on why
+	# sibling order controls input priority -- this makes the menu
+	# properly modal over the plot once opened) so it draws/intercepts
+	# input on top of it, never the other way around.
+	order_menu = OrderMenu.new()
+	add_child(order_menu)
+
+	order_menu_controller = OrderMenuController.new()
+	order_menu_controller.world = world
+	order_menu_controller.selection = selection
+	order_menu_controller.player_team = String(world.teams.get(HUD_POV_SHIP_ID, ""))
+	order_menu_controller.move_order_controller = move_order_controller
+	add_child(order_menu_controller)
+	tactical_plot.order_menu_controller = order_menu_controller
+	order_menu.controller = order_menu_controller
+
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
 	# godot [input], see PlayerInput's own doc comment) into calls on
 	# `world`'s existing transmit_*/order APIs. Given `world` directly
@@ -228,6 +251,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	tactical_plot.update(world, HUD_POV_SHIP_ID)
 	command_group_panel.update(world, selection)
 	move_order_controller.prune_completed()
+	order_menu.sync()
 	win_lose_screen.update(world)
 
 ## Points the scene's OrbitCamera at the midpoint between the two demo

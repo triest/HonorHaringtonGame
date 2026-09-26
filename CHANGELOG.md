@@ -3375,3 +3375,99 @@ F (командная камера + общий layout панелей), G (по�
 InputEventMouseButton с правой кнопкой) -- см. .tools/state.md, тот же
 урок ещё раз: не объявлять готовым без живого подтверждения.
 
+
+## 2026-09-26 (scheduled dev pass) -- §56.3 item D: contextual order menu (target designation + routing)
+
+ТЗ §56.3 item D / §1.10.7 ("Приказы по цели"): после выбора собственного
+корабля/группы плоский (без Ctrl/Shift) LMB-клик по вражескому контакту
+на tactical plot теперь открывает контекстное меню приказов, НЕ заменяя
+текущий выбор собственных кораблей -- см. ASSUMPTIONS.md "§56.3 item D"
+для полного разбора выбранной модели взаимодействия и всех решений по
+маршрутизации.
+
+* `scripts/selection_state.gd`: новое поле `designated_target_id` +
+  `designate_target()`/`clear_designated_target()`/`has_designated_target()`
+  -- отдельная от `selected_ids` концепция ("цель" половина
+  собственный-выбор + вражеская-цель), не второй мульти-select.
+* `scripts/order_menu_controller.gd` (новый, `OrderMenuController`):
+  владеет всей логикой eligibility/маршрутизации приказов.
+  `try_open(contact_id, screen_pos)` открывает меню только если
+  контакт -- реальный вражеский корабль (не ракета/нейтрал/свой) И в
+  текущем выборе есть хотя бы один свой корабль. Держит НИКАКОЙ ссылки
+  на UI-контрол меню (та же §42 конвенция "controller пишет данные, view
+  читает раз в тик", что и MoveOrderController/TacticalPlot) -- только
+  `is_open`/`menu_screen_pos`/`menu_entries`, что делает класс полностью
+  headless-тестируемым без Viewport/Control.
+  * ATTACK/FOCUS FIRE -> `transmit_ship_target` + `transmit_ship_weapons_free(true)`
+    на каждый eligible корабль (честно идентичны при текущих примитивах,
+    см. ASSUMPTIONS.md).
+  * HOLD FIRE / WEAPONS FREE -> `transmit_ship_weapons_free`.
+  * APPROACH -> переиспользует `MoveOrderController.issue_move_order`
+    (§56.3 item C) на текущую позицию цели -- ни строчки новой логики
+    построения приказа.
+  * WITHDRAW -> `FormationOrder.withdraw_orders`/`IndividualOrder.withdraw_orders`
+    (уже существующие композиты) через ИММЕДИАТНЫЙ ОЧЕРЕДНОЙ API
+    (`issue_formation_orders`/`issue_individual_orders`), НЕ через
+    comm-delayed `transmit_*` -- см. ASSUMPTIONS.md почему двухшаговый
+    композит не может безопасно идти через "_now"-семейство.
+  * MAINTAIN FORMATION -> `issue_formation_order_now(..., FormationOrder.hold_formation())`,
+    только если хотя бы один eligible корабль реально в formation.
+  * DEFEND/COVER/FOLLOW/INTERCEPT НЕ реализованы и НЕ показаны в меню --
+    честный пробел (нет "follow/escort" механики нигде в
+    simulation/*.gd, проверено grep'ом до написания класса).
+* `scripts/order_menu.gd` (новый, `OrderMenu` -- Control): чистая
+  презентация/hit-testing. Обычный Control с ручной отрисовкой строк
+  (draw_string/draw_rect) -- в проекте нигде не используется
+  PopupMenu-виджет, см. ASSUMPTIONS.md. Полноэкранный modal-overlay
+  (mouse_filter STOP пока открыт) -- клик вне строк меню закрывает его
+  без действия. `sync()` вызывается раз в тик из main.gd (после
+  `move_order_controller.prune_completed()`), читает
+  `controller.is_open/menu_entries/menu_screen_pos`.
+* `scripts/tactical_plot.gd`: новое поле `order_menu_controller`
+  (опциональный collaborator, как `move_order_controller`); плоский клик
+  по контакту сначала пробует `order_menu_controller.try_open(...)`, и
+  только при false откатывается к прежнему `select_only([hit_id])`.
+  Также новая визуальная отметка `_draw_designated_target_marker`
+  (оранжевый ромб) вокруг `selection.designated_target_id`, отличная по
+  форме и цвету от кольца выбора.
+* `scripts/main.gd`: создаёт `order_menu`/`order_menu_controller`,
+  добавляет `order_menu` В СЦЕНУ ПОСЛЕ `tactical_plot` (для приоритета
+  input, см. ASSUMPTIONS.md), вызывает `order_menu.sync()` в `_on_tick`.
+* Тесты (новый, ALL TESTS PASSED): `simulation/tests/test_order_menu_controller.gd`
+  (42 проверки -- пустой выбор/свой корабль/не-корабль как цель = noop,
+  успешное открытие меню + сохранение выбора + список пунктов включая
+  отсутствие DEFEND/COVER/FOLLOW/INTERCEPT, MAINTAIN FORMATION
+  появляется только для участника formation, dismiss ничего не issue'ит
+  и снимает designation, ATTACK/HOLD FIRE проходят через comm-delay,
+  APPROACH переиспользует MoveOrderController, WITHDRAW разворачивает
+  корабль ОТ цели (не через comm-delay), MAINTAIN FORMATION issue'ит
+  HOLD_FORMATION один раз на formation, execute() закрывает меню и
+  снимает designation).
+
+НЕ входит в этот пасс (следующие пункты того же чек-листа, ещё НЕ
+реализованы): E (панель оружия), F (командная камера + общий layout
+панелей), G (поведение зума), H (сценарий 1v1 -> эскадра vs эскадра), I
+(individual override внутри группы). DEFEND/COVER/FOLLOW/INTERCEPT из
+минимального набора §1.10.7 честно НЕ реализованы (см. выше).
+
+Проверено (режим "fast visible-result" §56.3 всё ещё в силе, полный
+симуляционный набор не гонялся):
+1. `godot --headless --import` -- чисто.
+2. `test_order_menu_controller.gd` (новый) -- ALL TESTS PASSED (42/42).
+3. Регресс (не менялись, кроме selection_state.gd -- только аддитивно):
+   `test_selection_state.gd`, `test_move_order_controller.gd` (29/29),
+   `test_command_group_controller.gd`, `test_tactical_plot_selection.gd`,
+   `test_tactical_plot_projector.gd`, `test_individual_orders.gd`,
+   `test_command_transmission.gd`, `test_formation.gd`,
+   `test_ship_combat_directive.gd` -- все ALL TESTS PASSED.
+4. `godot --headless res://scenes/main.tscn --quit-after 120` -- exit 0,
+   ровно те же 16x baseline `mesh_get_surface_count`/"Parameter m is
+   null" (dummy-рендерер), ноль новых типов ошибок -- новое
+   `order_menu`/`order_menu_controller` wiring и `tactical_plot.gd`'s
+   новая ветка в `_on_left_release` ничего не сломали в headless-режиме.
+
+**НЕ заявляется "§56.3 закрыт"** -- это только пункт D из 9+1
+(A/B/C уже были закрыты ранее). Меню реально не тестировалось живым
+игроком (headless-окружение не может сгенерировать настоящие мышиные
+клики) -- см. .tools/state.md, тот же урок ещё раз: не объявлять
+готовым без живого подтверждения.

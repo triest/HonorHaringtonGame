@@ -94,6 +94,11 @@ const STALE_ALPHA: float = 0.45
 
 ## §56.3 item A: selection visuals + hit-testing geometry.
 const SELECTION_COLOR := Color(1.0, 1.0, 1.0, 0.9)
+## §56.3 item D: distinct from SELECTION_COLOR so "this is the order-menu's
+## designated target" reads as its own category of highlight, not a
+## second selection ring -- drawn only around `selection.designated_target_id`
+## while the order menu (or a just-issued order against it) is relevant.
+const DESIGNATED_TARGET_COLOR := Color(1.0, 0.55, 0.1, 0.95)
 const SHIP_HIT_RADIUS_PX: float = 10.0
 const MISSILE_HIT_RADIUS_PX: float = 8.0
 const OWN_SHIP_HIT_RADIUS_PX: float = 10.0
@@ -133,6 +138,17 @@ var selection: SelectionState = null
 ## it, and (b) draws whatever `move_order_controller.active_move_orders`
 ## currently holds -- no order-issuing logic of its own.
 var move_order_controller: MoveOrderController = null
+
+## §56.3 item D: same optional-collaborator pattern as `selection`/
+## `move_order_controller` above -- assigned by main.gd, guarded against
+## null everywhere it's read. Owns the "plain click on a hostile while an
+## own-ship selection is active -> designate target + open order menu"
+## routing/eligibility decision (see that class's own doc comment); this
+## file only (a) forwards the exact hit_id TacticalPlotSelection.hit_test
+## already produced plus the click's global (viewport) position, and (b)
+## falls back to its own pre-existing plain-click select_only behavior
+## whenever try_open() reports the click wasn't eligible to open a menu.
+var order_menu_controller: OrderMenuController = null
 
 var _contacts: Array = []  # Array[Dictionary], rebuilt each update()
 var _origin_present: bool = false
@@ -250,6 +266,8 @@ func _draw() -> void:
 
 		if selection != null and selection.is_selected(contact["id"]):
 			_draw_selection_ring(icon_pos, (MISSILE_HIT_RADIUS_PX if contact["is_missile"] else SHIP_HIT_RADIUS_PX) + 4.0)
+		if selection != null and selection.designated_target_id == contact["id"]:
+			_draw_designated_target_marker(icon_pos, SHIP_HIT_RADIUS_PX + 7.0)
 
 		var label: String = "%s  %s  %s" % [contact["id"], _format_range(projection["range_m"]), _format_bearing(projection["bearing_rad"])]
 		draw_string(ThemeDB.fallback_font, icon_pos + Vector2(8, 4), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, color)
@@ -354,6 +372,21 @@ func _find_icon(id: String):
 func _draw_selection_ring(pos: Vector2, ring_radius: float) -> void:
 	draw_arc(pos, ring_radius, 0.0, TAU, 16, SELECTION_COLOR, 1.5)
 
+## §56.3 item D: a small diamond marker offset outward from the icon,
+## distinct in both color and SHAPE from the circular selection ring
+## above -- so "designated order-menu target" reads unambiguously even
+## on a contact that is ALSO separately selected (own ships remain
+## selected while an enemy is designated, see OrderMenuController's own
+## doc comment on why designation never touches `selected_ids`).
+func _draw_designated_target_marker(pos: Vector2, offset: float) -> void:
+	var points := PackedVector2Array([
+		pos + Vector2(0, -offset),
+		pos + Vector2(offset, 0),
+		pos + Vector2(0, offset),
+		pos + Vector2(-offset, 0),
+	])
+	draw_polyline(points + PackedVector2Array([points[0]]), DESIGNATED_TARGET_COLOR, 2.0)
+
 func _draw_drag_box() -> void:
 	if not _drag_active:
 		return
@@ -436,7 +469,17 @@ func _on_left_release(event: InputEventMouseButton) -> void:
 			elif shift:
 				selection.add_only([hit_id])
 			else:
-				selection.select_only([hit_id])
+				# §56.3 item D: a plain click on a hostile contact, with
+				# an own-ship selection already active, opens the order
+				# menu INSTEAD of replacing the selection -- see
+				# OrderMenuController.try_open's own doc comment for the
+				# exact eligibility rule. Any other plain click (own
+				# ship, friendly/neutral, missile, or a hostile with no
+				# eligible own-ship selection to command) falls through
+				# to the pre-existing select_only behavior unchanged.
+				var opened_menu: bool = order_menu_controller != null and order_menu_controller.try_open(hit_id, get_global_mouse_position())
+				if not opened_menu:
+					selection.select_only([hit_id])
 		elif not ctrl and not shift:
 			# Plain click on empty plot space clears the selection --
 			# standard RTS-style convention, not spelled out verbatim in

@@ -2459,3 +2459,127 @@ alternative to RMB-click; RMB-click alone was judged sufficient for this
 pass's slice, drag-to-set-course deferred), and any UI affordance to
 cancel a pending move order early (currently only superseded-by-a-new-
 order or natural arrival clear the visual).
+
+## §56.3 item D -- contextual order menu: interaction model, menu widget choice, order routing (INTERPRETATION, design decision, not canon)
+
+§1.10.7 requires a contextual order menu that appears "after selecting
+one's own ship/group and designating an enemy object with the mouse",
+listing a minimum order set, routed through the existing
+ShipCombatDirective/FormationOrder/IndividualOrder architecture with no
+UI-only order model. Several non-obvious decisions this pass
+(scripts/order_menu_controller.gd, scripts/order_menu.gd,
+scripts/selection_state.gd, scripts/tactical_plot.gd):
+
+* **Interaction chosen**: a PLAIN (no Ctrl/Shift) LMB click on a hostile
+  ship contact, made while the current selection already contains at
+  least one ship on the player's team. Reuses TacticalPlotSelection's
+  existing hit-testing (no second hit-test path). If the click doesn't
+  qualify (selection empty/all-enemy, or the clicked contact isn't a
+  real hostile ship -- e.g. a missile, a friendly, or the player's own
+  ship), `OrderMenuController.try_open` returns false and
+  `TacticalPlot._on_left_release` falls back unchanged to its
+  pre-existing `select_only([hit_id])` plain-click behavior. This was
+  chosen over a dedicated modifier key because it needs no new input
+  binding and matches state.md's own suggested interaction.
+* **Designation is a new, separate single-id field on SelectionState**
+  (`designated_target_id`), not a second multi-select array and not
+  folded into `selected_ids` -- the whole point is that the player's own
+  selection stays intact while a hostile is additionally marked as "the
+  target half" of the menu interaction. It is set the instant the menu
+  opens and cleared the instant it closes (whether by choosing an action
+  or by an outside-click dismiss) -- it is scoped to the CURRENT menu
+  interaction only, not a persistent "who is my target" concept (that
+  already exists separately as `ShipCombatDirective.manual_target_ship_id`,
+  which ATTACK/FOCUS FIRE set, not designation itself).
+* **OrderMenuController holds no reference to the menu's UI Control at
+  all** -- same §42 "pure readout" division of labor as every other
+  §56.3 controller/view pair (MoveOrderController never references
+  TacticalPlot; CommandGroupController never references
+  CommandGroupPanel). It only exposes plain state
+  (`is_open`/`menu_screen_pos`/`menu_entries`); `OrderMenu` (the Control)
+  reads that state once per tick via `sync()` (called from
+  main.gd._on_tick, the same convention as Hud.update()/
+  TacticalPlot.update()) and calls back `controller.execute(kind)`/
+  `controller.dismiss()` on a click. This keeps OrderMenuController
+  fully headless-testable with zero Viewport/Control dependency (see
+  simulation/tests/test_order_menu_controller.gd, 42 checks) -- a real
+  improvement over an earlier draft of this pass that gave the
+  controller a typed `menu: OrderMenu` field and pushed `menu.open()`/
+  `menu.close()` calls directly; that draft was abandoned specifically
+  because it broke this exact testability property.
+* **Menu widget is a hand-drawn Control, not Godot's PopupMenu node** --
+  no popup-menu widget is used anywhere else in this codebase (Hud/
+  CommandGroupPanel are plain Label readouts; TacticalPlot's own
+  selection ring/drag-box are hand-drawn), so `OrderMenu` stays in that
+  same "no extra UI framework surface" style at the cost of a bit more
+  code (row layout/hit-testing done by hand in order_menu.gd).
+* **Dismiss is a full-viewport modal overlay**: while open, `OrderMenu`
+  covers the entire viewport with `mouse_filter STOP`, so any click
+  other than on one of its own drawn rows closes it without acting.
+  This is the simplest possible "click outside to dismiss" -- the
+  tradeoff is that a click elsewhere on the tactical plot while the menu
+  happens to be open is swallowed by the dismiss rather than also being
+  processed as a normal plot click; a real toolkit's popup would use
+  focus-loss instead. `main.gd` deliberately adds `order_menu` to the
+  scene tree AFTER `tactical_plot` so it draws/receives input on top of
+  it while open.
+* **ATTACK and FOCUS FIRE are behaviorally IDENTICAL given today's
+  primitives** (both call `transmit_ship_target` + `transmit_ship_weapons_free(true)`
+  for every eligible ship in the selection) -- an honest gap, not an
+  oversight: there is no separate fire-allocation/coordination mechanic
+  yet (e.g. "don't all shoot the same subsystem", "split fire across
+  multiple designated targets") that would make "focus fire" meaningfully
+  different from "attack" for a multi-ship selection. Revisit if/when
+  such a mechanic exists.
+* **APPROACH reuses `MoveOrderController.issue_move_order` as-is**,
+  aimed at the designated target's CURRENT position at the moment the
+  menu action is clicked -- mechanically identical to §56.3 item C's RMB
+  move order, and `selection` is the SAME shared object MoveOrderController
+  itself reads (never replaced/cleared by the designation interaction),
+  so no order-construction logic is duplicated for this entry.
+* **WITHDRAW is issued via the immediate QUEUED API
+  (`world.issue_formation_orders`/`world.issue_individual_orders`), NOT
+  the comm-delayed `transmit_*` family** -- `FormationOrder.withdraw_orders`/
+  `IndividualOrder.withdraw_orders` return a two-order sequence (turn
+  away, THEN accelerate) that must be queued together. The public
+  comm-delayed API only exposes a single-order "now" (interrupt-and-
+  execute-immediately) variant, and calling that twice in a row for a
+  composite would let the SECOND call's "_now" semantics cancel the
+  FIRST order before it ever took effect -- the same class of trap
+  MoveOrderController's own doc comment already documents for a
+  different single-order case. This is an honest, logged simplification
+  (WITHDRAW skips the §25 comms-delay wrapper this pass), not a claim
+  that withdrawal is somehow exempt from comms realism; a future pass
+  adding a queued-composite `transmit_*` wrapper would be a clean,
+  additive fix.
+* **WITHDRAW requires the ship (or formation guide) to already be
+  moving** -- inherited directly from `IndividualOrder.change_course`'s/
+  `FormationOrder.change_course`'s own existing behavior (holds CURRENT
+  speed while retargeting heading): if the ship's current speed is ~0,
+  `is_complete()` reads true on tick 1 before any heading is ever
+  applied, so the withdraw silently does nothing. Not a new bug
+  introduced by this item -- every existing `withdraw_orders` test in
+  this codebase (test_formation.gd, test_individual_orders.gd) already
+  starts from a nonzero velocity for the same reason, and this pass's
+  own test (`test_order_menu_controller.gd`) does too, with a comment
+  explaining why. A "withdraw" order for a ship at a dead stop is not a
+  scenario §1.10.7 (or any existing withdraw usage) actually describes.
+* **MAINTAIN FORMATION is only offered in the menu when at least one
+  eligible selected ship is currently a formation member** -- offering
+  it for a lone ship would be a dead button (nothing to "maintain").
+  Issued via `world.issue_formation_order_now(formation_id,
+  FormationOrder.hold_formation())`, deduplicated per formation, exactly
+  the "_now" immediate-posture-change semantics MoveOrderController's
+  own formation routing already uses (a single-order posture change, not
+  a composite, so the WITHDRAW trap above does not apply to it).
+* **DEFEND/COVER/FOLLOW/INTERCEPT are NOT offered in the menu at all
+  this pass** -- an honest gap, not an oversight. Confirmed by grep
+  before writing this class: no "follow/escort another ship" concept
+  exists anywhere in `simulation/*.gd`. Per item D's own checklist text
+  ("a UI/routing item, not a request for new combat mechanics"), a
+  visible menu entry that silently does nothing would be worse than
+  honestly omitting it until a future pass adds the underlying
+  mechanic. `test_order_menu_controller.gd` explicitly asserts these
+  four are absent from `menu_entries`, so a future pass can't
+  accidentally "restore" them as dead buttons without that test
+  failing first.

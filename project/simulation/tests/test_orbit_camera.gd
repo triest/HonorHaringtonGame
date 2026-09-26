@@ -17,6 +17,8 @@ func _init() -> void:
 	failures += _test_offset_magnitude_always_equals_distance()
 	failures += _test_required_distance_grows_with_spread()
 	failures += _test_required_distance_matches_frame_on_formula()
+	failures += _test_far_always_exceeds_max_zoom_out_distance()
+	failures += _test_far_grows_with_base_distance()
 
 	if failures == 0:
 		print("ALL TESTS PASSED")
@@ -84,5 +86,40 @@ func _test_required_distance_matches_frame_on_formula() -> int:
 	var actual: float = OrbitCamera._required_distance_for_spread(spread, fov_deg)
 	if not is_equal_approx(actual, expected):
 		printerr("FAIL required_distance_matches_frame_on_formula: actual=%f expected=%f" % [actual, expected])
+		return 1
+	return 0
+
+## §56.3 item G: pins the bug fix -- far must always be sized so that the
+## player's actual reachable zoom-out distance (_base_distance *
+## MAX_DISTANCE_SCALE, per the clamp in _unhandled_input/_process) stays
+## strictly inside the far clip plane. Before this pass, far was sized
+## off a fixed 3x multiplier of required_distance while the zoom clamp
+## could reach 20x -- scrolling all the way out on a wide initial framing
+## pushed the camera past its own far plane and blanked the whole 3D
+## view. Checked across a wide range of base distances (a tight
+## single-ship focus through a battle spanning hundreds of thousands of
+## metres) so this isn't just true near one hand-picked number.
+func _test_far_always_exceeds_max_zoom_out_distance() -> int:
+	var ok: bool = true
+	for base_distance in [500.0, 5000.0, 50000.0, 500000.0, 5000000.0]:
+		var far: float = OrbitCamera._required_far_for_base_distance(base_distance)
+		var max_zoom_out_distance: float = base_distance * OrbitCamera.MAX_DISTANCE_SCALE
+		ok = ok and far > max_zoom_out_distance
+	if not ok:
+		printerr("FAIL far_always_exceeds_max_zoom_out_distance")
+		return 1
+	return 0
+
+## A larger base distance (bigger battle spread) must always demand a
+## larger far plane -- otherwise a later, tighter focus_on() could try to
+## compute a smaller far than an earlier wide frame_on() already needed
+## (guarded separately at the call site by maxf(), but the underlying
+## formula itself should still be monotonic, not just non-decreasing by
+## accident of the caller's maxf()).
+func _test_far_grows_with_base_distance() -> int:
+	var small_far: float = OrbitCamera._required_far_for_base_distance(1000.0)
+	var large_far: float = OrbitCamera._required_far_for_base_distance(100000.0)
+	if not (large_far > small_far):
+		printerr("FAIL far_grows_with_base_distance: small_far=%f large_far=%f" % [small_far, large_far])
 		return 1
 	return 0

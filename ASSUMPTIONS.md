@@ -2854,3 +2854,56 @@ discipline as items C/D.
   `frame_on()` -- so whether pressing Home actually moves the rendered
   camera, and whether the "same viewing angle, different distance" feel
   is actually good, needs a real player with a real window and mouse.
+
+## §56.3 item G (zoom levels, §1.10.3)
+
+* **Real bug found and fixed, not just a "gap": `far` clip plane sizing
+  was wrong relative to the actual reachable zoom-out distance.**
+  `OrbitCamera.frame_on()`/`focus_on()` set `far = required_distance *
+  3.0 + 10000.0`, but the player's scroll-wheel/keyboard zoom-out clamp
+  in `_unhandled_input()`/`_process()` can reach `_base_distance *
+  MAX_DISTANCE_SCALE` where `MAX_DISTANCE_SCALE = 20.0` -- i.e. the
+  camera could scroll out to ~20x `required_distance` while `far` was
+  only ~3x `required_distance`. On any battle whose initial framing
+  spread was large enough, scrolling all the way out pushed the camera
+  PAST its own far clip plane and the ENTIRE 3D view went blank (not
+  "some distant contacts lost" -- literally nothing renders once the
+  camera itself is beyond `far`). This was silent because no existing
+  test exercised the actual zoom-out extreme against `far`; the prior
+  tests only checked the yaw/pitch/distance spherical-offset math and
+  the `_required_distance_for_spread` formula in isolation.
+* **Fix: extracted `_required_far_for_base_distance(base_distance)` --
+  `base_distance * MAX_DISTANCE_SCALE * 1.2 + 10000.0`** (same constant
+  the zoom clamp itself uses, so the two can never drift apart again;
+  1.2x safety margin so the camera is never sitting exactly on the far
+  plane at max zoom-out). Used by both `frame_on()` (fresh `far`) and
+  `focus_on()` (`maxf(far, ...)`, so a later tight quick-center never
+  shrinks a wider battle's existing far plane -- same "far only grows"
+  rule item F already established, now resting on a correct formula).
+* **Plot (2D minimap) side of item G needed no code change.**
+  `TacticalPlot.plot_range_m` already auto-scales every `update()` to
+  `farthest_live_contact * AUTO_SCALE_MARGIN` with no upper bound (see
+  `tactical_plot.gd` lines ~194-215) -- so "zooming out doesn't lose
+  distant contacts" was already true for the plot; the actual gap this
+  pass found was entirely on the 3D-view side, as state.md's own
+  Next-concrete-step note suspected but had not yet verified by reading
+  the code.
+* **Not addressed this pass, logged as an explicit open item, not an
+  oversight:** if a live battle's ships drift apart WITHOUT the player
+  ever pressing Home/focusing again, `far` (and `_base_distance`) stay
+  fixed at whatever `frame_on()`'s one-time initial framing computed --
+  a very long, spread-out battle could in principle still let ships
+  drift beyond the ORIGINAL `far` over time, independent of the zoom-
+  clamp bug just fixed. Re-deriving `far` from LIVE farthest-contact
+  distance every tick (the same auto-scale TacticalPlot already does)
+  would close this fully but is a bigger change (main.gd would need to
+  feed OrbitCamera live contact distances every tick, not just at
+  frame/focus time) -- left as a follow-up since item G's literal ask
+  ("zooming out doesn't lose distant contacts") is about the zoom
+  control itself, which is now fixed; this is a separate, slower-moving
+  edge case.
+* **Live/player confirmation: none yet**, same status as every §56.3
+  item before a real player exercises it with a window and mouse --
+  headless-verified only (`test_orbit_camera.gd`'s two new cases:
+  far-exceeds-max-zoom-out-distance across a wide range of base
+  distances, and far grows monotonically with base distance).

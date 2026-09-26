@@ -163,10 +163,28 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
       script, not just assumed from test_orbit_camera.gd's own older comment; so
       whether Home actually feels good live needs a real player). See
       CHANGELOG.md 2026-09-26 entry (item F) for full detail.
-  [ ] G. Zoom-level behavior (§1.10.3): at minimum ensure zooming out doesn't lose distant
-      contacts (they must stay visible on the plot even far out) and zooming in reveals
-      per-ship detail -- doesn't need all 4 named levels to be literally distinct modes,
-      but the plot must not become unreadable at either extreme.
+  [x] G. Zoom-level behavior (§1.10.3) -- DONE this pass. Plot (2D minimap) needed no
+      change: TacticalPlot.plot_range_m already auto-scales to the farthest live contact
+      with no upper bound, so distant contacts were never actually lost there. The 3D
+      view (OrbitCamera) had a REAL BUG (not just a gap): `far` was sized off a fixed 3x
+      multiplier of required_distance while the scroll-wheel/keyboard zoom-out clamp can
+      reach 20x (MAX_DISTANCE_SCALE) -- on a wide enough initial battle framing, scrolling
+      all the way out pushed the camera PAST its own far clip plane and blanked the
+      ENTIRE 3D view (not "some contacts lost" -- nothing renders once the camera itself
+      is beyond far). Fixed with a new pure `_required_far_for_base_distance()` sharing
+      the same MAX_DISTANCE_SCALE constant + 1.2x margin, used by both frame_on() and
+      focus_on() (far only ever grows, per item F's existing rule). Headless-tested only
+      (2 new test_orbit_camera.gd cases spanning base_distance 500m-5,000,000m; full
+      regression on test_camera_focus/_controller/hud/command_group_panel all green;
+      scene smoke run exit 0, same 16x baseline errors). NOT live-confirmed (same
+      OrbitCamera-can't-instantiate-outside-a-scene-tree limitation as item F). Full
+      detail: ASSUMPTIONS.md "§56.3 item G", CHANGELOG.md 2026-09-26 "item G" entry.
+      Open follow-up logged (not a blocker): far/_base_distance stay fixed at the last
+      frame_on()/focus_on() call, so a very long battle where ships drift apart WITHOUT
+      the player ever pressing Home again could in principle still outrun the original
+      far plane over time -- a separate, slower-moving edge case from the zoom-clamp bug
+      just fixed; would need main.gd to feed OrbitCamera live contact distances every
+      tick (same pattern TacticalPlot's own auto-scale already uses) to close fully.
   [ ] H. Hardcoded demo scenario upgraded from 1v1 to at least a couple of ships per side
       (small squadron vs small squadron) so multi-select/group-order behavior in A-D is
       actually exercisable live, and so missile salvos (E) have something meaningful to
@@ -190,20 +208,21 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
   [ ] Run AGENTS.md §56.3/§1.10.14's 15-step MVP acceptance test yourself (headless
       script simulating the input sequence where possible) as a sanity check, but this
       does NOT substitute for the user's own live pass/fail -- see below.
-Next concrete step: item G -- zoom-level behavior (§1.10.3): at minimum ensure
-zooming out doesn't lose distant contacts (they must stay visible on the plot even
-far out) and zooming in reveals per-ship detail -- doesn't need all 4 named levels
-(FLEET/FORMATION/SHIP/WEAPON-MISSILE VIEW) to be literally distinct modes, but the
-plot/3D view must not become unreadable at either extreme. Read AGENTS.md §1.10.3
-fresh before starting (only skimmed against earlier items' own needs so far -- same
-"read it fresh for a new lettered item" discipline as every prior item). Check
-TacticalPlot's existing AUTO_SCALE_MARGIN/plot_range_m auto-scaling (scripts/
-tactical_plot.gd) -- it already auto-scales the plot range to the farthest live
-contact every tick, so "distant contacts stay visible on the plot" may already be
-substantially covered there; the actual gap is more likely the 3D view
-(OrbitCamera's MIN/MAX_DISTANCE_SCALE zoom clamp, scripts/orbit_camera.gd) at the
-extremes -- verify both claims by reading the code fresh rather than assuming
-either is already done or already broken.
+Next concrete step: item H -- hardcoded demo scenario upgraded from 1v1 to at least a
+small squadron vs small squadron (a couple of ships per side), and give at least one
+side missile tubes (demo ships are currently energy-only per §56.1-era CHANGELOG
+entries) so multi-select/group-order behavior (items A-D) and missile salvos (item E)
+are actually exercisable live, not just in synthetic headless test worlds. Read
+state.md's own "What already exists" section above for exactly which systems (
+SelectionState, CommandGroupController, MoveOrderController, OrderMenuController,
+weapon_panel_controller) are already wired to main.gd's world/selection instances and
+must keep working unchanged when the scenario grows from 2 ships to several per side --
+this is a scenario-data/setup change (wherever main.gd currently constructs the demo
+alpha/beta ships, plus ship_factory.gd for a missile-tube-equipped class if one doesn't
+already exist) plus the demo TacticalAI hookup, not a rework of any of the systems
+above. Read AGENTS.md's item-H requirement text fresh (state.md's own checklist entry
+above already quotes it in full) and check ship_factory.gd / any existing missile-tube-
+equipped ship class before assuming one needs to be created from scratch.
 Tests: still fast-visible-result mode -- skip full simulation suite, headless import/smoke
 check only, until §56.3 fully closes (this is a big scope, likely spans many passes --
 that's fine, keep chipping at the checklist in order, one or two items per pass is a
@@ -215,40 +234,14 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-26 15:47 UTC (scheduled dev pass, fired from the
-normal 3h cron; cron prompt still says "§56.1" -- that is a stale/generic
-scheduled-task prompt that this skill's own instructions say NOT to update via
-update_trigger, so it is intentionally ignored in favor of this file, which is the
-actual source of truth): implemented and headless-verified §56.3 item F (command
-camera quick-center + first shared UI-panel layout pass) -- see the checklist
-entry above for full detail, and CHANGELOG.md's 2026-09-26 "item F" entry /
-ASSUMPTIONS.md's "§56.3 item F" entry for the complete writeup (priority rule for
-own-selection-vs-designated-target, why Home was picked, why far only grows, why
-the layout pass is honestly scoped as a first pass covering only Hud/
-CommandGroupPanel). New files: scripts/camera_focus.gd (CameraFocus, pure),
-scripts/camera_focus_controller.gd (CameraFocusController, Node). Modified:
-scripts/orbit_camera.gd (new focus_on() + extracted _required_distance_for_spread()),
-scripts/hud.gd (new get_bottom_y()), scripts/command_group_panel.gd (update() now
-takes hud_bottom_y), scripts/main.gd (wiring), project.godot (new [input] action
-camera_focus_selection, Home key). New tests: test_camera_focus.gd (17 checks),
-test_camera_focus_controller.gd (5 checks), test_command_group_panel.gd (2 checks);
-extended test_orbit_camera.gd (+2) and test_hud.gd (+2). Regression: 17 existing
-test suites re-run clean (weapon_resolution, missile_launch_order, point_defense,
-ship_combat_directive, order_menu_controller, move_order_controller,
-command_group_controller, selection_state, tactical_plot_selection,
-tactical_plot_projector, individual_orders, command_transmission, formation,
-missile, subsystem_damage_consumers, weapon_panel_controller, player_input) plus a
-headless scene smoke run (exit 0, same 16x baseline dummy-renderer errors, zero new
-error types -- required a `godot --headless --import` first to refresh the global
-class cache for the two new class_name scripts, same gotcha already noted in the
-item-E entry this replaces). Windows .exe re-exported this pass (process rule in
-AGENTS.md §56.3): .pck grew from 437KB to 450KB, confirming the new code is
-actually in the build.
-IMPORTANT CAVEAT specific to this item: NOT live-confirmed. OrbitCamera cannot be
-instantiated outside a live scene tree in this headless environment (re-confirmed
-this pass with a throwaway probe script, not just assumed from the old
-test_orbit_camera.gd comment) -- so whether pressing Home actually recenters the
-rendered camera, and whether the "keep current angle, refit distance" feel is
-actually good, needs a real player with a real window and mouse. ASSUMPTIONS.md/
-CHANGELOG.md updated; pushed this pass.
-G/H/I/J not started.
+Last pass finished: 2026-09-26 18:05 UTC (scheduled dev pass, fired from the normal 3h
+cron; cron prompt still says "§56.1" -- stale/generic scheduled-task prompt, intentionally
+ignored per this skill's own instructions in favor of this file): closed §56.3 item G
+(zoom-level behavior) -- see the checklist entry above for the full writeup (a real
+far-clip-plane bug found and fixed on the 3D-view zoom-out extreme, plot side needed no
+change). Regression: test_orbit_camera (8/8, incl. 2 new), test_camera_focus (17),
+test_camera_focus_controller (5), test_hud (14), test_command_group_panel (6), all
+green; headless scene smoke (main.tscn --quit-after 120, exit 0, same 16x baseline
+errors, zero new types). Windows .exe re-exported (.pck 450768B -> 451584B, confirming
+new code is in the build). ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
+H/I/J not started.

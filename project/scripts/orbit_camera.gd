@@ -55,7 +55,7 @@ func frame_on(new_pivot: Vector3, spread: float) -> void:
 	var required_distance: float = _required_distance_for_spread(spread, fov)
 	distance = required_distance
 	_base_distance = required_distance
-	far = required_distance * 3.0 + 10000.0
+	far = _required_far_for_base_distance(required_distance)
 
 	var view_dir := Vector3(0.15, 0.45, 1.0).normalized()
 	yaw = atan2(view_dir.x, view_dir.z)
@@ -84,7 +84,7 @@ func focus_on(new_pivot: Vector3, spread: float) -> void:
 	var required_distance: float = _required_distance_for_spread(spread, fov)
 	distance = required_distance
 	_base_distance = required_distance
-	far = maxf(far, required_distance * 3.0 + 10000.0)
+	far = maxf(far, _required_far_for_base_distance(required_distance))
 	_update_transform()
 
 ## Pure function, extracted from frame_on()/focus_on() so both share the
@@ -96,6 +96,26 @@ func focus_on(new_pivot: Vector3, spread: float) -> void:
 static func _required_distance_for_spread(spread: float, fov_deg: float) -> float:
 	var half_fov_rad: float = deg_to_rad(fov_deg * 0.5)
 	return (spread / tan(half_fov_rad)) * 1.6
+
+## §56.3 item G (§1.10.3 zoom levels -- "переход между уровнями должен
+## происходить исключительно изменением масштаба камеры"): BUG this pass
+## fixes -- `far` used to be sized off `required_distance` alone (a fixed
+## 3x multiplier), but the player's actual reachable zoom-out distance is
+## `_base_distance * MAX_DISTANCE_SCALE` (20x), not 3x. Once a battle's
+## initial framing spread was large enough, scrolling all the way out
+## pushed the camera PAST its own far clip plane -- the entire 3D view
+## went blank (everything clipped, not just "distant contacts lost"),
+## silently breaking the FLEET-VIEW extreme of zooming out. Sizing far
+## off the same MAX_DISTANCE_SCALE the zoom clamp itself uses (with a
+## 1.2x safety margin so the camera is never sitting exactly ON the far
+## plane) guarantees distance < far at every reachable zoom step, for
+## both the whole-battle frame_on() shot and a focus_on() quick-center
+## onto a small selection (whose own max-zoom-out distance is smaller,
+## but still must not exceed ITS far -- far only ever grows via maxf() at
+## the call site, never shrinks, so an earlier wide framing's far is kept
+## if it was already bigger).
+static func _required_far_for_base_distance(base_distance: float) -> float:
+	return base_distance * MAX_DISTANCE_SCALE * 1.2 + 10000.0
 
 ## Pure function: camera offset from the pivot for a given yaw/pitch/
 ## distance. Y-up, yaw measured from +Z toward +X, matching Godot's

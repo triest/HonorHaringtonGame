@@ -26,7 +26,8 @@ func _init() -> void:
 	_test_lone_ship_gets_individual_order_after_comm_delay()
 	_test_lone_ship_keeps_current_speed_if_already_fast()
 	_test_click_on_own_position_is_noop()
-	_test_formation_member_routes_to_echelon_not_individual()
+	_test_single_formation_member_selected_gets_individual_override()
+	_test_two_of_three_formation_members_selected_gets_individual_overrides_each()
 	_test_two_members_of_same_formation_issue_only_once()
 	_test_active_move_orders_records_target_for_visualization()
 	_test_prune_completed_removes_arrived_entries()
@@ -145,7 +146,17 @@ func _test_click_on_own_position_is_noop() -> void:
 	_assert(not world.is_ship_overriding_formation("alpha"), "clicking on the ship's own position must not issue a degenerate zero-heading order")
 	_assert(controller.active_move_orders.is_empty(), "a no-op click must not create a visualization entry either")
 
-func _test_formation_member_routes_to_echelon_not_individual() -> void:
+func _test_single_formation_member_selected_gets_individual_override() -> void:
+	# §56.3 item I / §1.10.12 ("select one CA inside the group, COVER a
+	# neighbour, the REST of the group keeps executing the original
+	# order"): selecting exactly ONE member of an existing formation and
+	# issuing it a move order must NOT re-route to the formation level --
+	# that would silently redirect the WHOLE group from a single-member
+	# click (this test used to assert exactly that broken behavior before
+	# item I fixed it -- see move_order_controller.gd's class doc for the
+	# full reasoning). It must give that one ship its own individual
+	# order instead, leaving the formation's own current order (and every
+	# OTHER member) completely untouched.
 	var world := SimulationWorld.new()
 	world.add_ship("alpha", _make_ship(Vector3.ZERO))
 	world.add_ship("beta", _make_ship(Vector3(1000.0, 0.0, 0.0)))
@@ -159,23 +170,73 @@ func _test_formation_member_routes_to_echelon_not_individual() -> void:
 	var echelon_id: String = group_controller.make_group_from_selection()
 	_assert(echelon_id != "", "test setup: group creation must succeed")
 
-	# Now select just the (non-guide) member and issue a move order --
-	# per §1.10.5 this must route at the FORMATION/ECHELON level, never
-	# per-ship, even though "beta" itself is what's selected.
+	var echelon: CommandEchelon = world.get_command_echelon(echelon_id)
+	var formation_id: String = echelon.commanded_formation_id
+	var formation: FormationState = world.get_formation(formation_id)
+	# Give the formation an original order first, so we can check it is
+	# left alone by the single-member override below.
+	var original_target := Vector3(0.0, 0.0, -5000.0)
+	world.issue_formation_order_now(formation_id, FormationOrder.approach(original_target, 2000.0))
+
+	# Now select just the (non-guide) member and issue a move order.
 	selection.select_only(["beta"])
 	var controller := _make_controller(world, selection, "red")
-	var target := Vector3(0.0, 0.0, -20000.0)
-	var anchors: Array = controller.issue_move_order(target)
+	var override_target := Vector3(0.0, 0.0, -20000.0)
+	var anchors: Array = controller.issue_move_order(override_target)
 
-	_assert(anchors == ["alpha"], "the visualization anchor for a grouped move order must be the formation's GUIDE ship, got %s" % [anchors])
+	_assert(anchors == ["beta"], "the visualization anchor for a single-member override must be that ship itself, got %s" % [anchors])
+	_assert(formation.current_order != null and formation.current_order.kind == FormationOrder.Kind.APPROACH and formation.current_order.target_point_world.distance_to(original_target) < 0.001, "the formation's own order must be untouched by a single-member override")
+
+	_tick_seconds(world, world.INDIVIDUAL_ORDER_BASE_TRANSMISSION_DELAY_S + 0.2)
+	_assert(world.is_ship_overriding_formation("beta"), "the selected member must have an active individual order overriding formation station-keeping (§31)")
+	_assert(not world.is_ship_overriding_formation("alpha"), "the guide/other member NOT selected must be untouched -- no individual override created for it")
+	var current_order: IndividualOrder = world.individual_orders["beta"].current_order
+	var expected_heading: Vector3 = (override_target - Vector3(1000.0, 0.0, 0.0)).normalized()
+	var actual_heading: Vector3 = current_order.target_velocity_mps.normalized()
+	_assert(actual_heading.distance_to(expected_heading) < 0.001, "beta's individual override must point at the newly clicked target, got heading %s" % actual_heading)
+
+func _test_two_of_three_formation_members_selected_gets_individual_overrides_each() -> void:
+	# Generalization of the single-member case above: selecting a STRICT
+	# SUBSET larger than one (2 of 3 members) must still give each
+	# SELECTED ship its own individual override rather than collapsing to
+	# a formation-level order -- only selecting the formation's ENTIRE
+	# current membership (see §1.10.12: exercised by
+	# _test_two_members_of_same_formation_issue_only_once below) collapses
+	# to one order.
+	var world := SimulationWorld.new()
+	world.add_ship("alpha", _make_ship(Vector3.ZERO))
+	world.add_ship("beta", _make_ship(Vector3(1000.0, 0.0, 0.0)))
+	world.add_ship("charlie", _make_ship(Vector3(-1000.0, 0.0, 0.0)))
+	world.set_team("alpha", "red")
+	world.set_team("beta", "red")
+	world.set_team("charlie", "red")
+	var selection := SelectionState.new()
+	selection.select_only(["alpha", "beta", "charlie"])
+	var group_controller := CommandGroupController.new()
+	group_controller.world = world
+	group_controller.selection = selection
+	var echelon_id: String = group_controller.make_group_from_selection()
+	_assert(echelon_id != "", "test setup: 3-ship group creation must succeed")
+
 	var echelon: CommandEchelon = world.get_command_echelon(echelon_id)
-	var formation: FormationState = world.get_formation(echelon.commanded_formation_id)
-	_assert(formation.current_order != null and formation.current_order.kind == FormationOrder.Kind.APPROACH, "a grouped move order must be a FormationOrder.APPROACH issued at the formation level")
-	_assert(formation.current_order.target_point_world.distance_to(target) < 0.001, "the formation's APPROACH order must target the clicked point")
+	var formation_id: String = echelon.commanded_formation_id
+	var formation: FormationState = world.get_formation(formation_id)
+	var original_target := Vector3(0.0, 0.0, -5000.0)
+	world.issue_formation_order_now(formation_id, FormationOrder.approach(original_target, 2000.0))
 
-	_tick_seconds(world, 5.0)
-	_assert(not world.is_ship_overriding_formation("beta"), "a grouped member's move order must NOT also create a separate individual override")
-	_assert(not world.is_ship_overriding_formation("alpha"), "the guide must not receive a separate individual override either -- the order lives on the formation")
+	# Select only beta+charlie (NOT the guide alpha -- a strict subset).
+	selection.select_only(["beta", "charlie"])
+	var controller := _make_controller(world, selection, "red")
+	var override_target := Vector3(9000.0, 0.0, 9000.0)
+	var anchors: Array = controller.issue_move_order(override_target)
+
+	_assert(anchors.size() == 2 and anchors.has("beta") and anchors.has("charlie"), "both selected subset members must be their own visualization anchors, got %s" % [anchors])
+	_assert(formation.current_order != null and formation.current_order.kind == FormationOrder.Kind.APPROACH and formation.current_order.target_point_world.distance_to(original_target) < 0.001, "the formation's own order must be untouched by a 2-of-3 subset override")
+
+	_tick_seconds(world, world.INDIVIDUAL_ORDER_BASE_TRANSMISSION_DELAY_S + 0.2)
+	_assert(world.is_ship_overriding_formation("beta"), "beta (selected) must have an active individual override")
+	_assert(world.is_ship_overriding_formation("charlie"), "charlie (selected) must have an active individual override")
+	_assert(not world.is_ship_overriding_formation("alpha"), "alpha (NOT selected, the guide) must be untouched")
 
 func _test_two_members_of_same_formation_issue_only_once() -> void:
 	var world := SimulationWorld.new()

@@ -227,8 +227,34 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
       not eyeballed), zero new error types. Fast-visible-result mode still in effect
       (§0/Tests below) -- no full simulation-suite regression run this pass, only the
       headless import/smoke check.
-  [ ] I. Individual override: within a selected group, pick one ship and give it its own
-      order while the rest keep the group order (§1.10.12 worked example).
+  [x] I. Individual override: within a selected group, pick one ship and give it its own
+      order while the rest keep the group order (§1.10.12 worked example) -- DONE this
+      pass. Real finding: the SIMULATION side (Milestone 11's individual-order-overrides-
+      formation-station-keeping mechanism, world.is_ship_overriding_formation/
+      return_ship_to_formation) already fully existed and needed ZERO changes -- the bug
+      was purely in MoveOrderController.issue_move_order and
+      OrderMenuController._execute_withdraw, which used to treat ANY selected formation
+      member as "address the WHOLE formation via its guide" (so selecting one ship and
+      giving a move/withdraw order silently redirected the entire group -- the opposite
+      of what §1.10.12 asks). Fixed: both now group selected/eligible ids by formation and
+      only collapse to one formation-level order when the selection is that formation's
+      ENTIRE current membership (new _is_full_formation_membership helper, duplicated in
+      both controllers per this codebase's existing small-helper convention); any strict
+      subset (most simply, one ship) gets an individual order per selected ship instead,
+      leaving every unselected member on the formation's existing order untouched.
+      ATTACK/FOCUS FIRE/HOLD FIRE/WEAPONS FREE were NOT affected -- already per-ship via
+      transmit_ship_target/transmit_ship_weapons_free, never through FormationState.
+      MAINTAIN FORMATION deliberately stays whole-formation (no individual reading makes
+      sense for it). Generalized beyond N=1 (also covered: 2-of-3 formation members
+      selected -> both get individual overrides, third member untouched). See
+      ASSUMPTIONS.md "§56.3 item I" for the full writeup. Tests: test_move_order_
+      controller.gd 29->35 checks (old wrong-behavior test rewritten, not just kept),
+      test_order_menu_controller.gd 44->48 checks, all passing. Headless import clean;
+      scene smoke run exit 0, same 48 baseline dummy-renderer errors, zero new error
+      types (expected -- routing-only change, no scenario/ship-count change this pass).
+      Windows .exe re-exported (.pck 452032B -> 455776B). Headless-verified only -- NOT
+      yet confirmed with a real player/mouse, same standing caveat as every other §56.3
+      item (see IMPORTANT note below).
   [ ] J. VISUAL POLISH PASS -- explicit user decision, 2026-09-26, ONLY start this AFTER
       F-I are functionally done: user live-tested items A-E and confirmed they are
       currently bare debug text/dots on a black screen (a tiny corner radar, plain text
@@ -245,26 +271,21 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
   [ ] Run AGENTS.md §56.3/§1.10.14's 15-step MVP acceptance test yourself (headless
       script simulating the input sequence where possible) as a sanity check, but this
       does NOT substitute for the user's own live pass/fail -- see below.
-Next concrete step: item I -- individual override within a selected group: pick one
-ship inside an already-formed group/formation and give IT its own order while the
-rest of the group keeps executing the group order (§1.10.12's worked example in
-CLOUD.md/AGENTS.md -- read that worked example fresh before starting, it specifies
-the expected UX: selecting a single ship that is already a formation member, then
-issuing it a move/attack order, should NOT pull it out of the formation or override
-the whole group, only that one ship's own execution). Read this file's own checklist
-entries for items B/C (CommandGroupController/FormationState, MoveOrderController) and
-D (OrderMenuController) above first -- item I is very likely a targeted change to
-whichever of those three currently always resolves "selection = 1 ship that happens to
-be a formation member" to a FORMATION-level order instead of an individual one (check
-move_order_controller.gd/order_menu_controller.gd's own branching on formation
-membership before writing new code -- this may already partially exist by accident of
-how those items were built, or may need an explicit single-ship-within-formation branch
-added to one or both). Now that item H gives a live 3-vs-3 scenario with real
-formations reachable via item B's G hotkey, this is also the first item that can
-realistically be exercised beyond synthetic 2-4-ship headless test worlds once a real
-player forms a group and tries overriding one member -- but headless unit tests
-(synthetic formation + single-member override) remain the actual verification for this
-pass, live confirmation is still the user's own job per this file's standing rule below.
+Next concrete step: item J -- VISUAL POLISH PASS. F-I are now ALL functionally done
+(headless-verified) -- this is the item the user explicitly deferred to "after F-I"
+(see item J's own checklist entry above for the full context of that decision, do not
+re-litigate it). Read AGENTS.md §56.3/CLOUD.md §1.10 fresh for this item specifically
+(new lettered item, not a resume) plus re-look at docs/reference/
+tactical_command_ui_reference.png before starting -- current UI is bare debug text/dots,
+the target is real Godot Theme/styled-Control panels (left squadron/group list, a proper
+tactical-plot panel with contact icons + range rings instead of a tiny debug radar,
+bottom weapon/order control bar, event/order log panel). This is real UI-layout work,
+budget real time for it and expect it to span multiple passes -- do not rush a sloppy
+single-pass reskin just to check the box. Pick ONE concrete sub-piece to start (e.g. the
+tactical-plot panel styling, since it's the most-used surface) rather than trying all
+panels in one pass. After J, the only remaining checklist line is the unlettered "run
+the 15-step §1.10.14 MVP acceptance test yourself (headless)" sanity check -- that does
+NOT substitute for the user's own live pass/fail and does not by itself close §56.3.
 Tests: still fast-visible-result mode -- skip full simulation suite, headless import/smoke
 check only, until §56.3 fully closes (this is a big scope, likely spans many passes --
 that's fine, keep chipping at the checklist in order, one or two items per pass is a
@@ -276,18 +297,19 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-26 20:09 UTC (scheduled dev pass, fired from the normal 3h
+Last pass finished: 2026-09-27 09:48 UTC (scheduled dev pass, fired from the normal 3h
 cron; cron prompt still says "§56.1" -- stale/generic scheduled-task prompt, intentionally
-ignored per this skill's own instructions in favor of this file): closed §56.3 item H
-(demo scenario upgraded from 1v1 to a 3-vs-3 squadron, red side given missile tubes) --
-see the checklist entry above for the full writeup (ship-spec-array refactor of
-scripts/main.gd's _ready(), Z-offset geometry chosen to keep AttackGeometry.classify()'s
-STARBOARD/PORT resolution intact for every cross-ship pairing). Headless import clean;
-scene smoke run (main.tscn --quit-after 120) exit 0, exactly 48 baseline dummy-renderer
-errors (16 x 3, scaling with the 2->6 ship count, zero new error types). No full
-simulation-suite regression this pass (fast-visible-result mode still in effect, per
-Tests line above -- this was a scenario-data/setup change with no new production class,
-so the existing per-class unit tests were not touched and did not need re-running).
-Windows .exe re-exported (.pck 451584B -> 452032B, confirming new code is in the
-build). ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
-I/J not started.
+ignored per this skill's own instructions in favor of this file): closed §56.3 item I
+(individual override within a selected group) -- see the checklist entry above for the
+full writeup (routing fix in MoveOrderController.issue_move_order and
+OrderMenuController._execute_withdraw; no simulation-side changes needed, Milestone 11's
+override mechanism already handled it). test_move_order_controller.gd 29->35 checks,
+test_order_menu_controller.gd 44->48 checks, both ALL TESTS PASSED. Headless import
+clean; scene smoke run (main.tscn --quit-after 120) exit 0, exactly 48 baseline
+dummy-renderer errors, zero new error types (expected -- routing-only change, no
+scenario/ship-count change this pass). No full simulation-suite regression this pass
+(fast-visible-result mode still in effect, per Tests line above). Windows .exe
+re-exported (.pck 452032B -> 455776B, confirming new code is in the build).
+ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
+J not started (next concrete step above); the unlettered 15-step MVP acceptance test
+sanity check also not started.

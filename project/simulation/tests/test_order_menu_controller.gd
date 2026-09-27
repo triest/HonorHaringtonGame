@@ -36,6 +36,7 @@ func _init() -> void:
 	_test_approach_reuses_move_order_controller()
 	_test_withdraw_lone_ship_issues_course_then_speed_away_from_target()
 	_test_maintain_formation_issues_hold_formation_once_per_formation()
+	_test_withdraw_single_formation_member_selected_gets_individual_override()
 	_test_execute_closes_menu_and_clears_designation()
 
 	if _failures == 0:
@@ -283,6 +284,54 @@ func _test_maintain_formation_issues_hold_formation_once_per_formation() -> void
 	var echelon: CommandEchelon = world.get_command_echelon(echelon_id)
 	var formation: FormationState = world.get_formation(echelon.commanded_formation_id)
 	_assert(formation.current_order != null and formation.current_order.kind == FormationOrder.Kind.HOLD_FORMATION, "MAINTAIN FORMATION must issue a HOLD_FORMATION order at the formation level")
+
+func _test_withdraw_single_formation_member_selected_gets_individual_override() -> void:
+	# §56.3 item I / §1.10.12, WITHDRAW variant (same fix/reasoning as
+	# MoveOrderController's move-order case): selecting exactly one
+	# member of an existing formation and choosing WITHDRAW must give
+	# THAT ship its own individual withdraw order, not re-route to the
+	# formation level (which would pull the whole formation, including
+	# ships the player never selected).
+	var world := SimulationWorld.new()
+	# Both moving already -- withdraw_orders' first leg (change_course)
+	# holds current speed while retargeting heading; a cold (zero-
+	# velocity) ship's is_complete() would read true before ever turning
+	# (see order_menu_controller.gd's own WITHDRAW test/doc comment on
+	# this exact trap).
+	world.add_ship("alpha", _make_ship(Vector3.ZERO, Vector3(100.0, 0.0, 0.0)))
+	world.add_ship("charlie", _make_ship(Vector3(1000.0, 0.0, 0.0), Vector3(100.0, 0.0, 0.0)))
+	world.set_team("alpha", "red")
+	world.set_team("charlie", "red")
+	world.add_ship("bravo", _make_ship(Vector3(5000.0, 0.0, 0.0)))
+	world.set_team("bravo", "blue")
+
+	var selection := SelectionState.new()
+	selection.select_only(["alpha", "charlie"])
+	var group_controller := CommandGroupController.new()
+	group_controller.world = world
+	group_controller.selection = selection
+	var echelon_id: String = group_controller.make_group_from_selection()
+	_assert(echelon_id != "", "test setup: group creation must succeed")
+
+	var echelon: CommandEchelon = world.get_command_echelon(echelon_id)
+	var formation_id: String = echelon.commanded_formation_id
+	var formation: FormationState = world.get_formation(formation_id)
+	world.issue_formation_order_now(formation_id, FormationOrder.hold_formation())
+
+	# Select just the non-guide member ("charlie") and WITHDRAW.
+	selection.select_only(["charlie"])
+	var controller := _make_controller(world, selection)
+	controller.try_open("bravo", Vector2.ZERO)
+	controller.execute("WITHDRAW")
+
+	_assert(formation.current_order != null and formation.current_order.kind == FormationOrder.Kind.HOLD_FORMATION, "the formation's own order must be untouched by a single-member WITHDRAW override")
+	world.tick_simulation(0.1)
+	_assert(world.individual_orders.has("charlie"), "WITHDRAW on a single selected member must issue it a real individual order")
+	_assert(not world.individual_orders.has("alpha") or not world.individual_orders["alpha"].is_active(), "the guide/other member NOT selected must be untouched by a single-member WITHDRAW")
+	var state: IndividualCommandState = world.individual_orders["charlie"]
+	_assert(state.current_order != null, "charlie's WITHDRAW order must be actively executing")
+	var heading: Vector3 = state.current_order.target_velocity_mps.normalized()
+	_assert(heading.x < -0.9, "WITHDRAW must point charlie AWAY from the designated target (got heading %s)" % heading)
 
 func _test_execute_closes_menu_and_clears_designation() -> void:
 	var world := _basic_two_side_world()

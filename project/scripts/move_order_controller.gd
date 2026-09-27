@@ -22,20 +22,45 @@ extends Node
 ## possible to right-click and fly an enemy AI ship around). A selection
 ## containing zero eligible ids is a no-op.
 ##
-## ROUTING (per state.md's item C plan / §1.10.5): for each eligible ship
-## that is a formation member (guide OR ordinary member, checked live
+## ROUTING (per state.md's item C plan / §1.10.5, REVISED this pass by
+## §56.3 item I / §1.10.12 -- see the paragraph below): eligible ships that
+## belong to the SAME formation (guide OR ordinary member, checked live
 ## against `world.formations` every call -- never cached, so this stays
-## correct across group creation/leader transfer/disbanding), the order
-## is issued ONCE at that formation (world.issue_formation_order_now,
-## see `_issue_formation_move`'s own doc for why the FORMATION-level
-## immediate API is used rather than routing through the owning
-## CommandEchelon -- ASSUMPTIONS.md "§56.3 item C"), deduplicated so
-## selecting two members of the same formation together still issues
-## exactly one order. A ship with no formation at all uses the plain
-## IndividualOrder path via world.transmit_individual_order_now (the
-## SAME comm-delayed family PlayerInput's own hotkeys already use for
-## player-issued orders -- §25/§31 realism, not an unexplained instant-
-## effect special case for mouse input specifically).
+## correct across group creation/leader transfer/disbanding) are first
+## grouped together so the whole-group-vs-subset decision can be made
+## once per formation rather than per ship. A ship with no formation at
+## all always uses the plain IndividualOrder path via
+## world.transmit_individual_order_now (the SAME comm-delayed family
+## PlayerInput's own hotkeys already use for player-issued orders --
+## §25/§31 realism, not an unexplained instant-effect special case for
+## mouse input specifically).
+##
+## §56.3 item I / §1.10.12 ("select one CA inside an 8-ship squadron,
+## COVER a neighbour, the other 7 keep executing the original order"): a
+## formation-member group only collapses to ONE formation-level order
+## (world.issue_formation_order_now, see `_issue_formation_move`'s own
+## doc for why the FORMATION-level immediate API is used rather than
+## routing through the owning CommandEchelon -- ASSUMPTIONS.md "§56.3
+## item C" -- dedup so selecting every member of the same formation
+## together still issues exactly one order) when the selected/eligible
+## ids for that formation are its ENTIRE current membership (guide +
+## every member_offsets key -- see `_is_full_formation_membership`).
+## Selecting a smaller subset -- most simply, exactly one member -- is
+## NOT "the group, addressed by one of its ships": each ship in that
+## subset instead gets its OWN individual move order, exactly like a
+## ship with no formation at all. This does not touch FormationState/
+## member_offsets and does not pull the ship out of its formation --
+## SimulationWorld._resolve_individual_orders already runs AFTER
+## _resolve_formation_keeping every tick and simply overwrites
+## commanded_thrust_local for whichever ship has an active individual
+## order (see that function's own doc comment, and
+## world.is_ship_overriding_formation), so every OTHER member of the
+## formation (not in the selected subset) is left completely untouched
+## and keeps executing whatever order the formation already had. This is
+## the entire mechanism §1.10.12's worked example asks for -- no new
+## simulation-side plumbing was needed, only this routing fix (the old
+## "any selected member -> whole formation" behavior was the bug; see
+## CHANGELOG.md/ASSUMPTIONS.md §56.3 item I for the discovery).
 class_name MoveOrderController
 
 var world: SimulationWorld
@@ -87,20 +112,40 @@ func issue_move_order(target_point_world: Vector3) -> Array:
 	if eligible.is_empty():
 		return []
 
-	var handled_formations: Dictionary = {}  # formation_id -> true, dedupe multi-member selections
-	var anchors: Array = []
+	# Group eligible ids by formation membership first (see class doc's
+	# §56.3 item I paragraph) so we can tell "the whole formation was
+	# selected" (one formation-level order) apart from "a subset -- most
+	# simply one ship -- was selected" (each of THOSE ships gets its own
+	# individual override instead).
+	var formation_groups: Dictionary = {}  # formation_id -> Array[ship_id]
+	var lone_ids: Array = []
 	for ship_id in eligible:
 		var formation_id: String = _formation_id_for_ship(ship_id)
-		if formation_id != "":
-			if handled_formations.has(formation_id):
-				continue
-			handled_formations[formation_id] = true
+		if formation_id == "":
+			lone_ids.append(ship_id)
+			continue
+		if not formation_groups.has(formation_id):
+			formation_groups[formation_id] = []
+		formation_groups[formation_id].append(ship_id)
+
+	var anchors: Array = []
+	for ship_id in lone_ids:
+		_issue_individual_move(ship_id, target_point_world)
+		anchors.append(ship_id)
+
+	for formation_id in formation_groups.keys():
+		var group_ids: Array = formation_groups[formation_id]
+		if _is_full_formation_membership(formation_id, group_ids):
 			var anchor_id: String = _issue_formation_move(formation_id, target_point_world)
 			if anchor_id != "":
 				anchors.append(anchor_id)
 		else:
-			_issue_individual_move(ship_id, target_point_world)
-			anchors.append(ship_id)
+			# §56.3 item I: a strict subset of this formation's members was
+			# selected -- give THOSE ships their own individual override
+			# instead of moving the WHOLE formation via its guide.
+			for member_id in group_ids:
+				_issue_individual_move(member_id, target_point_world)
+				anchors.append(member_id)
 
 	return anchors
 
@@ -124,6 +169,28 @@ func _formation_id_for_ship(ship_id: String) -> String:
 		if formation.guide_ship_id == ship_id or formation.member_offsets.has(ship_id):
 			return formation_id
 	return ""
+
+## §56.3 item I / §1.10.12: true only if `group_ids` (the eligible/selected
+## ids that resolved to `formation_id`) is EXACTLY that formation's full
+## current membership (its guide plus every member_offsets key) -- not
+## merely non-empty. A single selected member (or any other strict
+## subset) returns false, which routes the caller to per-ship individual
+## overrides instead of a formation-level order -- see class doc.
+func _is_full_formation_membership(formation_id: String, group_ids: Array) -> bool:
+	var formation: FormationState = world.get_formation(formation_id)
+	if formation == null:
+		return false
+	var full_members: Dictionary = {}
+	if formation.guide_ship_id != "":
+		full_members[formation.guide_ship_id] = true
+	for member_id in formation.member_offsets.keys():
+		full_members[member_id] = true
+	if full_members.size() != group_ids.size():
+		return false
+	for ship_id in group_ids:
+		if not full_members.has(ship_id):
+			return false
+	return true
 
 ## Formation-level order: FormationOrder.APPROACH already does exactly
 ## what §1.10.6 asks for a formation guide (continuously re-aims at a

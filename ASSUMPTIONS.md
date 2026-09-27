@@ -2965,3 +2965,76 @@ discipline as items C/D.
   mechanics (`add_missile_tube`, `_resolve_missile_launch_ai`) against
   synthetic worlds and were not re-run this pass (fast-visible-result
   mode, see .tools/state.md).
+
+## §56.3 item I -- individual override within a selected group (INTERPRETATION, design decision, not canon)
+
+§1.10.12's worked example: select an 8-ship squadron, FOCUS FIRE; then
+select ONE ship inside that group and give it a COVER order -- the other
+7 keep executing the original order. This pass's actual finding: the
+simulation-side plumbing for this ALREADY existed in full from Milestone
+11 (`SimulationWorld._resolve_individual_orders` runs every tick AFTER
+`_resolve_formation_keeping` and simply overwrites `commanded_thrust_local`
+for whichever ship has an active individual order -- see that function's
+own doc comment, and `world.is_ship_overriding_formation`/
+`return_ship_to_formation`). What did NOT exist, and was the actual bug
+this item fixes, was purely at the CONTROLLER/routing layer:
+
+* **`MoveOrderController.issue_move_order` and
+  `OrderMenuController._execute_withdraw` used to treat "any selected
+  ship that happens to be a formation member" as "route the WHOLE
+  formation, addressed via its guide"** -- so selecting exactly one
+  member of a group and RMB-clicking a point silently redirected the
+  ENTIRE group, exactly the opposite of §1.10.12's requirement. This was
+  even pinned down by a previous pass's own regression test
+  (`test_move_order_controller.gd`'s
+  `_test_formation_member_routes_to_echelon_not_individual`, written for
+  item C before item I's own worked example was read carefully) --
+  i.e. the OLD behavior was believed correct until this pass re-read
+  §1.10.12 and CLOUD.md's worked example against it.
+* **Fix**: both controllers now group the eligible/selected ids by
+  formation first, then only collapse to ONE formation-level order when
+  the selected ids for that formation are its ENTIRE current membership
+  (`_is_full_formation_membership` -- duplicated in both controllers,
+  matching this codebase's existing convention for small order-routing
+  eligibility helpers, e.g. `_formation_id_for_ship`). Any strict subset
+  -- most simply, exactly one ship -- instead gets an individual order
+  PER selected ship, via the exact same `world.transmit_individual_order_now`
+  / `world.issue_individual_orders` path a lone (formation-less) ship
+  already used. This does not call `FormationState.remove_member` or
+  touch `member_offsets` at all -- the ship stays a formation member on
+  paper; only its OWN commanded thrust is overridden tick-by-tick for as
+  long as the individual order is active (`world.
+  is_ship_overriding_formation` reports this correctly with zero new
+  simulation-side code).
+* **ATTACK/FOCUS FIRE/HOLD FIRE/WEAPONS FREE were NOT bugged this way** --
+  those already operate per-`_pending_eligible_ids` ship via
+  `world.transmit_ship_target`/`world.transmit_ship_weapons_free`, never
+  routing through `FormationState` at all, so a single selected member
+  already got its own directive without touching the rest of the group.
+  Only the two order kinds that go through
+  `_formation_id_for_ship`-based grouping (move/APPROACH, and WITHDRAW)
+  had the bug.
+* **MAINTAIN FORMATION is deliberately NOT changed by this item** -- it
+  has no meaningful "individual" reading (a lone ship cannot
+  "maintain formation" with itself); it remains a whole-formation
+  `FormationOrder.hold_formation()` regardless of how many members are
+  selected, exactly as before.
+* **Generalized beyond the single-ship case in the ТЗ's own wording**:
+  "select one ship" is treated as the N=1 instance of "select a strict
+  subset of the formation's current membership" -- selecting 2 of a
+  3-ship formation's members, for example, gives BOTH of those ships
+  their own individual override while the third (unselected) member is
+  left completely alone, still executing the formation's order. No
+  §1.10.12 text contradicts this reading; it is the natural
+  generalization and is covered by its own headless test
+  (`_test_two_of_three_formation_members_selected_gets_individual_overrides_each`).
+* **Live/player confirmation: none yet**, same standing caveat as every
+  §56.3 item before a real player exercises it with a window and mouse --
+  headless-verified only: `test_move_order_controller.gd` (35 checks,
+  up from 29 -- the old wrong-behavior test was rewritten, not just
+  extended) and `test_order_menu_controller.gd` (48 checks, up from 44)
+  both pass; `godot --headless --import` clean; scene smoke run
+  (`scenes/main.tscn --quit-after 120`) exit 0, exactly the same 48
+  baseline dummy-renderer errors as the previous pass (zero new error
+  types -- expected, this pass touched routing logic only, not scenario
+  data/ship count).

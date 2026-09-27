@@ -187,6 +187,29 @@ func _formation_id_for_ship(ship_id: String) -> String:
 			return formation_id
 	return ""
 
+## §56.3 item I / §1.10.12: duplicated from MoveOrderController's identical
+## helper -- same codebase convention as `_formation_id_for_ship` just
+## above (see that method's own doc comment/class doc for why small
+## order-routing eligibility helpers are duplicated rather than shared).
+## True only if `group_ids` is EXACTLY `formation_id`'s full current
+## membership (guide + every member_offsets key), false for any strict
+## subset (including a single selected member).
+func _is_full_formation_membership(formation_id: String, group_ids: Array) -> bool:
+	var formation: FormationState = world.get_formation(formation_id)
+	if formation == null:
+		return false
+	var full_members: Dictionary = {}
+	if formation.guide_ship_id != "":
+		full_members[formation.guide_ship_id] = true
+	for member_id in formation.member_offsets.keys():
+		full_members[member_id] = true
+	if full_members.size() != group_ids.size():
+		return false
+	for ship_id in group_ids:
+		if not full_members.has(ship_id):
+			return false
+	return true
+
 func _any_in_formation(eligible: Array) -> bool:
 	for ship_id in eligible:
 		if _formation_id_for_ship(ship_id) != "":
@@ -257,36 +280,63 @@ func _execute_approach() -> void:
 ## through the "_now" family at all). Skipping the comms-delay wrapper
 ## for this one order is an honest, logged simplification, not a claim
 ## that WITHDRAW is somehow exempt from §25 comms realism.
+##
+## §56.3 item I / §1.10.12 (same fix as MoveOrderController.issue_move_order
+## -- see that class's doc comment for the full reasoning): a formation
+## only gets ONE withdraw order issued at the formation level (via its
+## guide) when the eligible/selected ids for that formation are its
+## ENTIRE current membership. A strict subset (most simply, one member)
+## instead gets an individual withdraw order per selected ship, leaving
+## every other member of that formation untouched.
 func _execute_withdraw() -> void:
 	var target_ship: ShipPhysicsState = world.ships.get(_pending_target_id)
 	if target_ship == null:
 		return
 
-	var handled_formations: Dictionary = {}
+	var formation_groups: Dictionary = {}  # formation_id -> Array[ship_id]
+	var lone_ids: Array = []
 	for ship_id in _pending_eligible_ids:
 		var formation_id: String = _formation_id_for_ship(ship_id)
-		if formation_id != "":
-			if handled_formations.has(formation_id):
-				continue
-			handled_formations[formation_id] = true
+		if formation_id == "":
+			lone_ids.append(ship_id)
+		else:
+			if not formation_groups.has(formation_id):
+				formation_groups[formation_id] = []
+			formation_groups[formation_id].append(ship_id)
+
+	for ship_id in lone_ids:
+		var ship: ShipPhysicsState = world.ships.get(ship_id)
+		if ship == null:
+			continue
+		var away: Vector3 = ship.position - target_ship.position
+		if away.length_squared() < 0.0001:
+			continue
+		world.issue_individual_orders(ship_id, IndividualOrder.withdraw_orders(ship, away, WITHDRAWAL_SPEED_MPS))
+
+	for formation_id in formation_groups.keys():
+		var group_ids: Array = formation_groups[formation_id]
+		if _is_full_formation_membership(formation_id, group_ids):
 			var formation: FormationState = world.get_formation(formation_id)
 			if formation == null or formation.guide_ship_id == "":
 				continue
 			var guide: ShipPhysicsState = world.ships.get(formation.guide_ship_id)
 			if guide == null:
 				continue
-			var away: Vector3 = guide.position - target_ship.position
-			if away.length_squared() < 0.0001:
+			var away_guide: Vector3 = guide.position - target_ship.position
+			if away_guide.length_squared() < 0.0001:
 				continue
-			world.issue_formation_orders(formation_id, FormationOrder.withdraw_orders(guide, away, WITHDRAWAL_SPEED_MPS))
+			world.issue_formation_orders(formation_id, FormationOrder.withdraw_orders(guide, away_guide, WITHDRAWAL_SPEED_MPS))
 		else:
-			var ship: ShipPhysicsState = world.ships.get(ship_id)
-			if ship == null:
-				continue
-			var away2: Vector3 = ship.position - target_ship.position
-			if away2.length_squared() < 0.0001:
-				continue
-			world.issue_individual_orders(ship_id, IndividualOrder.withdraw_orders(ship, away2, WITHDRAWAL_SPEED_MPS))
+			# §56.3 item I: subset override, same reasoning as
+			# MoveOrderController.issue_move_order.
+			for member_id in group_ids:
+				var member: ShipPhysicsState = world.ships.get(member_id)
+				if member == null:
+					continue
+				var away_member: Vector3 = member.position - target_ship.position
+				if away_member.length_squared() < 0.0001:
+					continue
+				world.issue_individual_orders(member_id, IndividualOrder.withdraw_orders(member, away_member, WITHDRAWAL_SPEED_MPS))
 
 ## §1.10.7 MAINTAIN FORMATION: FormationOrder.hold_formation() issued
 ## immediately (world.issue_formation_order_now, same "_now" semantics

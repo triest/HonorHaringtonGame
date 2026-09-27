@@ -3136,3 +3136,14 @@ its closure.
   behind it" on a real screen is exactly the kind of thing this
   environment cannot judge -- needs the user's own live look, same as
   every other honest gap logged in this file.
+
+
+## §56.3 item J -- sub-piece 2: CommandGroupPanel styling (2026-09-27, second scheduled pass)
+
+CommandGroupPanel now uses the same UiTheme.panel_stylebox() background recipe as
+Hud (sub-piece 1). ASSUMPTION: its text color changed from the old amber
+(1.0, 0.9, 0.6) to UiTheme.ACCENT_COLOR so both top-left panels read as one visual
+system; per-line coloring (e.g. selected members highlighted) is NOT done -- a plain
+Label can't color substrings, same RichTextLabel deferral as Hud's condition colors.
+Label position contract unchanged; background extends PANEL_PADDING_PX (10 px, local
+literal duplicating Hud's) outward, so the visible Hud->group gap is 10 px.

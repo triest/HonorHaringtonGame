@@ -1,5 +1,22 @@
 # CHANGELOG.md
 
+## 2026-09-27 (scheduled dev pass, 2) -- §56.3 item J, часть 2: стилизация CommandGroupPanel
+
+Под-часть (a) из плана state.md: `scripts/command_group_panel.gd` получил тот
+же стиль "HUD-стекла", что Hud в части 1 -- `Panel` `CommandGroupBackground`
+с `UiTheme.panel_stylebox()` (добавлен до label, `MOUSE_FILTER_IGNORE`),
+обтягивает реальный `get_minimum_size()` label'а + `PANEL_PADDING_PX` (10),
+текст теперь `UiTheme.ACCENT_COLOR` с тёмной обводкой вместо жёлтого без фона.
+Семантика позиции label не изменилась (y = hud_bottom_y + TOP_MARGIN_PX), видимый
+зазор между панелями Hud и CommandGroupPanel = 10 px. Добавлен
+`CommandGroupPanel.get_bottom_y()` (задел для будущего перекомпонования
+экрана, под-часть (c)). Тесты: test_command_group_panel.gd 5 -> 13 проверок
+(новый тест фона), test_hud.gd 21/21 -- всё зелёное. Headless import чистый,
+smoke `scenes/main.tscn --quit-after 120` exit 0, те же 48 базовых ошибок
+dummy-рендерера. Windows .exe переэкспортирован (.pck 458960B -> 460720B;
+шаблоны экспорта пришлось заново развернуть из `.tools/godot_templates_cache/
+extracted2/` -- сессионный $HOME был чистым). Не подтверждено живым игроком.
+
 ## 2026-09-27 (scheduled dev pass) -- §56.3 item J, часть 1: стилизация панели Hud
 
 Начало пункта J чек-листа §56.3 (визуальный полишинг, `.tools/state.md`) --

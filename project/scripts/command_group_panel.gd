@@ -27,20 +27,49 @@ extends CanvasLayer
 ## F" for why that is still an honest, if partial, "first pass" rather
 ## than a claim every panel in the scene is now layout-aware of every
 ## other one).
+##
+## §56.3 item J sub-piece 2 (visual polish, 2026-09-27): same styled
+## "HUD glass panel" background as Hud got in sub-piece 1 -- a Panel with
+## UiTheme.panel_stylebox() hugging the label's real measured bounds plus
+## PANEL_PADDING_PX, accent-colored text + dark outline, mouse_filter
+## IGNORE so the decorative chrome never steals clicks from the 3D view /
+## TacticalPlot. Label position semantics are UNCHANGED (label.y ==
+## hud_bottom_y + TOP_MARGIN_PX, as test_command_group_panel.gd pins) --
+## the background extends PANEL_PADDING_PX outward from that, so the
+## visible gap between Hud's drawn panel and this one is
+## TOP_MARGIN_PX - PANEL_PADDING_PX (10 px). get_bottom_y() added for a
+## future sibling that stacks below this panel (layout reflow, item J
+## sub-piece (c)).
 class_name CommandGroupPanel
 
+const UiTheme = preload("res://scripts/ui_theme.gd")
+
+## Same value/meaning as Hud.PANEL_PADDING_PX (kept as a local literal per
+## this codebase's small-helper convention, see UiTheme.ACCENT_COLOR's doc).
+const PANEL_PADDING_PX: float = 10.0
 const TOP_MARGIN_PX: float = 20.0
 const FALLBACK_TOP_Y: float = 360.0  # used only if update() is ever called before _ready() has run, so _label always has a position
 
 var _label: Label
+var _background: Panel
 
 func _ready() -> void:
+	# Background first so it draws behind the label (same as Hud._ready).
+	_background = Panel.new()
+	_background.name = "CommandGroupBackground"
+	_background.add_theme_stylebox_override("panel", UiTheme.panel_stylebox())
+	_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_background)
+
 	_label = Label.new()
 	_label.name = "CommandGroupLabel"
 	_label.position = Vector2(12, FALLBACK_TOP_Y)
-	_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+	_label.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR)
+	_label.add_theme_color_override("font_outline_color", Color(0.0, 0.02, 0.02, 0.9))
+	_label.add_theme_constant_override("outline_size", 2)
 	_label.add_theme_font_size_override("font_size", 16)
 	add_child(_label)
+	_layout_background()
 
 ## Call once per simulation tick (same convention as Hud.update/
 ## TacticalPlot.update, see main.gd._on_tick) with the world, the shared
@@ -54,6 +83,25 @@ func _ready() -> void:
 func update(world: SimulationWorld, selection: SelectionState, hud_bottom_y: float = FALLBACK_TOP_Y) -> void:
 	_label.position = Vector2(12, hud_bottom_y + TOP_MARGIN_PX)
 	_label.text = _build_text(world, selection)
+	_layout_background()
+
+## Hugs `_background` around `_label`'s current real measured bounds
+## (Label.get_minimum_size()) + PANEL_PADDING_PX -- identical recipe to
+## Hud._layout_background(), re-run after every text change so the panel
+## grows/shrinks with the group roster.
+func _layout_background() -> void:
+	if _background == null or _label == null:
+		return
+	var pad := Vector2(PANEL_PADDING_PX, PANEL_PADDING_PX)
+	_background.position = _label.position - pad
+	_background.size = _label.get_minimum_size() + pad * 2.0
+
+## Real bottom edge of the drawn panel (background if present, else bare
+## label) -- same contract as Hud.get_bottom_y().
+func get_bottom_y() -> float:
+	if _background != null:
+		return _background.position.y + _background.size.y
+	return _label.position.y + _label.get_minimum_size().y
 
 func _build_text(world: SimulationWorld, selection: SelectionState) -> String:
 	var lines: Array = []

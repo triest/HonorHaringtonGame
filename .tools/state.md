@@ -275,7 +275,11 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
       (HudBackground) hugging its measured text bounds, cyan accent text matching
       TacticalPlot's own-ship color, instead of bare unstyled text -- see
       ASSUMPTIONS.md "§56.3 item J" and CHANGELOG.md 2026-09-27 entry for full detail.
-      CommandGroupPanel/OrderMenu/WeaponPanel/TacticalPlot's own chrome NOT touched
+      SUB-PROGRESS 2 (2026-09-27, second pass): sub-piece (a) DONE --
+      CommandGroupPanel now has the same styled background (CommandGroupBackground,
+      UiTheme.panel_stylebox(), accent text + outline, new get_bottom_y()); test_
+      command_group_panel.gd 5->13 checks green. Remaining: (b), (c) below.
+      OrderMenu/WeaponPanel/TacticalPlot's own chrome NOT touched
       yet -- next sub-piece candidates, in no particular required order: (a) apply
       UiTheme.panel_stylebox() to CommandGroupPanel the same way (quickest, same
       pattern just established for Hud), (b) OrderMenu/WeaponPanel backgrounds+
@@ -287,27 +291,20 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
   [ ] Run AGENTS.md §56.3/§1.10.14's 15-step MVP acceptance test yourself (headless
       script simulating the input sequence where possible) as a sanity check, but this
       does NOT substitute for the user's own live pass/fail -- see below.
-Next concrete step: item J -- VISUAL POLISH PASS, next sub-piece. This pass (2026-09-27)
-did sub-piece 1: new shared scripts/ui_theme.gd (UiTheme) + Hud (scripts/hud.gd) now has
-a real styled background panel + accent text color instead of bare text -- see item J's
-own checklist entry above (SUB-PROGRESS note) and ASSUMPTIONS.md "§56.3 item J" for full
-detail. Item J is NOT closed -- do not re-read AGENTS.md §56.3/CLOUD.md §1.10 or the
-reference image again just to "start" it, this is a resume of an already-started item,
-not a new lettered item (see this file's own §0 rule on when a fresh doc re-read is
-actually needed). Next sub-piece candidates (pick ONE, in no strictly required order):
-(a) apply UiTheme.panel_stylebox() to CommandGroupPanel (scripts/command_group_panel.gd)
-the same way Hud just got it -- quickest, same pattern, already proven this pass;
-(b) do the same for OrderMenu/WeaponPanel; (c) actually reflow the screen layout toward
-the reference image's composition (squadron list top-left / tactical-plot-minimap
-top-right / ship-card+weapon-bar bottom) instead of the current ad-hoc stacked-top-left
-layout -- the biggest, most reference-faithful piece; consider doing it after (a)/(b)
-give every panel at least a consistent basic style first, so the reflow has consistently-
-styled panels to arrange rather than a mix of styled/unstyled ones. This is real UI-layout
-work, budget real time for it and expect it to span multiple more passes -- do not rush a
-sloppy single-pass reskin just to check the box. After J, the only remaining checklist
-line is the unlettered "run the 15-step §1.10.14 MVP acceptance test yourself (headless)"
-sanity check -- that does NOT substitute for the user's own live pass/fail and does not
-by itself close §56.3.
+Next concrete step: item J -- VISUAL POLISH PASS, sub-piece (b): apply
+UiTheme.panel_stylebox() backgrounds/borders + UiTheme.ACCENT_COLOR text to OrderMenu
+(scripts/order_menu.gd -- hand-drawn Control, likely draw_style_box() in _draw rather
+than a child Panel; careful: it covers the full viewport when open, so the stylebox
+goes around the menu entries rect only) and WeaponPanel (scripts/weapon_panel.gd).
+Sub-pieces 1 (Hud) and (a) (CommandGroupPanel) are done -- use their pattern. After
+(b): sub-piece (c), reflow the layout toward the reference image composition
+(squadron list top-left / plot top-right / ship-card+weapon bar bottom) -- biggest
+piece, likely multiple passes. Do NOT re-read AGENTS.md/CLOUD.md/reference image just
+to resume J. After J: the unlettered 15-step §1.10.14 headless sanity check.
+NOTE for export: session $HOME may lack Godot export templates -- copy
+.tools/godot_templates_cache/extracted2/templates/* into
+~/.local/share/godot/export_templates/4.3.stable/ before --export-release.
+Main scene path is res://scenes/main.tscn (not res://main.tscn).
 Tests: still fast-visible-result mode -- skip full simulation suite, headless import/smoke
 check only, until §56.3 fully closes (this is a big scope, likely spans many passes --
 that's fine, keep chipping at the checklist in order, one or two items per pass is a
@@ -319,26 +316,8 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-27 (scheduled dev pass, fired from the normal 3h cron; cron
-prompt still says "§56.1" -- stale/generic scheduled-task prompt, intentionally ignored
-per this skill's own instructions in favor of this file): item J sub-piece 1 -- new
-shared scripts/ui_theme.gd (UiTheme: panel_stylebox()/ACCENT_COLOR/condition_color(),
-meant for reuse by every other panel in later sub-passes) + Hud (scripts/hud.gd) got a
-real styled StyleBoxFlat background panel (HudBackground, hugs the label's measured
-bounds with padding) and cyan accent text color matching TacticalPlot's own-ship marker,
-replacing the previous bare pale-text-on-nothing look. Hud.get_bottom_y() now returns
-the background panel's real bottom edge (not the bare label's) so CommandGroupPanel
-(which stacks below it) tracks the actual drawn panel -- see ASSUMPTIONS.md "§56.3 item
-J" for the full writeup including honest gaps (only Hud styled so far; per-subsystem
-condition-color infra built but not wired; screen layout not reflowed toward the
-reference composition yet). test_hud.gd 16->21 checks, ALL TESTS PASSED (one existing
-test's expected-value formula updated to match get_bottom_y()'s new, more-correct
-meaning, plus one new test for the background panel itself). Headless import clean;
-scene smoke run (main.tscn --quit-after 120) exit 0, exactly 48 baseline dummy-renderer
-errors, zero new error types. No full simulation-suite regression this pass
-(fast-visible-result mode still in effect, per Tests line above). Windows .exe
-re-exported (.pck 455776B -> 458960B, confirming new code is in the build).
-ASSUMPTIONS.md/CHANGELOG.md updated; pushed this pass.
-Item J checklist line stays UNCHECKED (this is sub-piece 1 of several, see item J's own
-SUB-PROGRESS note and the Next concrete step above for what's left); the unlettered
-15-step MVP acceptance test sanity check also not started.
+Last pass finished: 2026-09-27 (second scheduled pass that day): item J sub-piece (a)
+-- CommandGroupPanel styled like Hud (see item J SUB-PROGRESS 2). Tests green
+(command_group_panel 13, hud 21), import clean, smoke exit 0 with 48 baseline errors,
+Windows .exe re-exported (.pck 460720B). Item J still UNCHECKED; nothing is live-
+confirmed; §56.3 NOT closed. CHANGELOG/ASSUMPTIONS updated; pushed this pass.

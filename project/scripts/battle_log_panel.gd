@@ -127,10 +127,16 @@ func _ingest(e: Dictionary) -> void:
 			var l3 := _merge("det:" + tg, t)
 			l3["count"] += 1
 			l3["dmg"] += dmg
-			var hp: int = _hull_pct(tg)
-			var hp_txt: String = (" (корпус %d%%)" % hp) if hp >= 0 else ""
+			for st in (d.get("subsystems", []) if _own(tg) else []):
+				if not l3.has("mods"):
+					l3["mods"] = {}
+				l3["mods"][ShipStatus.long_name(st)] = true
+			var hp_txt: String = ""
+			if l3.has("mods") and not l3["mods"].is_empty():
+				var mk: Array = l3["mods"].keys()
+				hp_txt = " — задеты: " + ", ".join(mk.slice(0, 4)) + (" и др." if mk.size() > 4 else "")
 			if l3["dmg"] > 0.0:
-				l3["bb"] = "[color=%s]%s[/color]: подрывов %d, урон %d%s" % [_col(tg), ShipNames.of(tg), l3["count"], int(l3["dmg"]), hp_txt]
+				l3["bb"] = "[color=%s]%s[/color]: попаданий %d%s" % [_col(tg), ShipNames.of(tg), l3["count"], hp_txt]
 			else:
 				l3["bb"] = "[color=%s]%s[/color]: %d ракет%s взорвались без урона (клин/бортовая стена)" % [_col(tg), ShipNames.of(tg), l3["count"], _plural(l3["count"])]
 		"weapon_hit":
@@ -138,7 +144,13 @@ func _ingest(e: Dictionary) -> void:
 			var l4 := _merge("beam:" + tg2, t)
 			l4["count"] += 1
 			l4["dmg"] += float(d.get("damage_dealt", 0.0))
-			l4["bb"] = "[color=%s]%s[/color]: лучевых попаданий %d, урон %d (корпус %d%%)" % [_col(tg2), ShipNames.of(tg2), l4["count"], int(l4["dmg"]), _hull_pct(tg2)]
+			l4["bb"] = "[color=%s]%s[/color]: лучевых попаданий %d" % [_col(tg2), ShipNames.of(tg2), l4["count"]]
+		"subsystem_disabled":
+			var ss: String = d.get("ship_id", "")
+			if not _own(ss):
+				return  # enemy internals are not observable (no cheat vision)
+			_lines.append({"key": "sub:%d" % e["seq"], "t": t, "bb": "[color=%s]%s[/color]: [color=%s]выбито — %s[/color]" % [_col(ss), ShipNames.of(ss), WARN_HEX, ShipStatus.long_name(int(d.get("subsystem", 0)))]})
+			_trim()
 		"ship_destroyed":
 			var sd: String = d.get("ship_id", "")
 			_lines.append({"key": "dead:" + sd, "t": t, "bb": "[b][color=%s]%s УНИЧТОЖЕН[/color][/b]" % [_col(sd), ShipNames.of(sd)]})

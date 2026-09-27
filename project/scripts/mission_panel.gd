@@ -109,6 +109,10 @@ func _process(_d: float) -> void:
 		if world.ships[sid].is_wreck:
 			continue
 		var own: bool = String(world.teams.get(sid, "")) == player_team
+		# Out of the fight (no power / disarmed) counts as knocked out for
+		# the mission result -- capability, not hit points (§25.1).
+		if world.is_combat_ineffective(sid):
+			continue
 		var ammo: int = 0
 		for t in world.missile_tubes.get(sid, []):
 			ammo += t.ammo_count
@@ -165,7 +169,7 @@ func _count(e: Dictionary) -> void:
 func _show_debrief(result: String, own_alive: int, en_alive: int) -> void:
 	_mode = "debrief"
 	world.clock.paused = true
-	var title: String = {"win": "[color=#8cf2ff]ПОБЕДА[/color]", "loss": "[color=#ff6a5a]ПОРАЖЕНИЕ[/color]", "draw": "ВЗАИМНОЕ УНИЧТОЖЕНИЕ", "spent": "БОЕЗАПАС ИСЧЕРПАН — БОЙ ПРЕКРАЩЁН"}[result]
+	var title: String = {"win": "[color=#8cf2ff]ПОБЕДА — противник выведен из боя[/color]", "loss": "[color=#ff6a5a]ПОРАЖЕНИЕ[/color]", "draw": "ВЗАИМНОЕ УНИЧТОЖЕНИЕ", "spent": "БОЕЗАПАС ИСЧЕРПАН — БОЙ ПРЕКРАЩЁН"}[result]
 	var t: int = int(world.world_sim_time)
 	var s := func(k: String) -> int: return int(_stats.get(k, 0.0))
 	var body: String = ""
@@ -178,7 +182,7 @@ func _show_debrief(result: String, own_alive: int, en_alive: int) -> void:
 	body += "[cell]Остановлено клином/стеной   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_blocked"), s.call("en_blocked")]
 	body += "[cell]Лучевых попаданий   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_beam_hits"), s.call("en_beam_hits")]
 	body += "[cell]Потеряно кораблей   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_lost"), s.call("en_lost")]
-	body += "[/table]\n\nВ строю: у нас %d, у противника %d." % [own_alive, en_alive]
+	body += "[/table]\n\nБоеспособных: у нас %d, у противника %d." % [own_alive, en_alive]
 	_text.text = "[center][b][font_size=26]%s[/font_size][/b][/center]\n\n%s" % [title, body]
 	_button.text = "Осмотреть поле боя"
 	visible = true

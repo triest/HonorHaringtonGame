@@ -317,6 +317,8 @@ debrief + ship names (MissionPanel, ShipNames, DemoScenario.MISSION_*), formatio
 salvo labels with ETA, off-screen arrows, default attitude broadside. Ideas queued for
 "less boring": multiple missions/campaign, counter-missiles, enemy AI that maneuvers and
 retreats, captain/crew voice lines in the log, better models + explosions + sound.
+FOLLOW-UP #5: HP bar removed; module damage model (subsystem_damage_model, ShipStatus,
+module grid in cards, observed-only enemy status). HullState no longer used by the demo.
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -343,5 +345,5 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-27 ~13:30 UTC (interactive, feedback #4): mission framing,
-formation/salvo readability, balance; tests green, Xvfb checked, .exe exported, pushed.
+Last pass finished: 2026-09-27 ~14:10 UTC (interactive, feedback #5): module damage
+instead of HP; tests green, Xvfb checked, .exe exported, pushed.

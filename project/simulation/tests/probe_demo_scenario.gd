@@ -48,8 +48,12 @@ func _init() -> void:
 			var line := "t=%4.0f sep=%9.0f km msl_total=%d active=%d intercepted=%d detonated=%d |" % [t, world.ships["alpha"].position.distance_to(world.ships["beta"].position) / 1000.0, launched.size(), _active(world), intercepted, detonated]
 			for sid in ["alpha","alpha_2","alpha_3","alpha_4","beta","beta_2","beta_3","beta_4"]:
 				if world.ships.has(sid):
-					var h = world.hulls.get(sid)
-					line += " %s:%d%s" % [sid, int(h.integrity) if h else -1, "W" if world.ships[sid].is_wreck else ""]
+					var sub = world.ships[sid].subsystems
+					var dead: int = 0
+					for tv in range(11):
+						if sub.is_disabled(tv):
+							dead += 1
+					line += " %s:S%d/off%d%s" % [sid, int(100 * sub.get_condition(9)), dead, "W" if world.ships[sid].is_wreck else ""]
 			print(line)
 	print("missile state transitions by owner team: ", final_counts)
 	print("guide orientation ", world.ships["alpha"].orientation, " beta ", world.ships["beta"].orientation)

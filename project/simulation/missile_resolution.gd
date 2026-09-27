@@ -135,6 +135,7 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null, f
 	var any_formation_covered: bool = false
 	var subsystem_damage_totals: Dictionary = {}
 
+	SubsystemDamageResolution.begin_sticky()
 	for rod_position in rod_positions:
 		if defense == null:
 			rod_results.append(RodResult.new(null, Outcome.HIT_UNPROTECTED, damage_per_rod))
@@ -170,6 +171,7 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null, f
 		for k in sub_damage:
 			subsystem_damage_totals[k] = subsystem_damage_totals.get(k, 0.0) + sub_damage[k]
 
+	SubsystemDamageResolution.end_sticky()
 	if total_damage > 0.0 and target_hull != null:
 		target_hull.apply_damage(total_damage)
 

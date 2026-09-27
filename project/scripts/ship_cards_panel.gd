@@ -88,19 +88,25 @@ func _make_card(sid: String) -> Dictionary:
 	name.add_theme_font_size_override("normal_font_size", 14)
 	name.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(name)
-	var bar := ProgressBar.new()
-	bar.min_value = 0
-	bar.max_value = 100
-	bar.show_percentage = false
-	bar.custom_minimum_size = Vector2(290, 7)
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.1, 0.15, 0.17, 0.9)
-	bar.add_theme_stylebox_override("background", bg)
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = UiTheme.CONDITION_GOOD_COLOR
-	bar.add_theme_stylebox_override("fill", fill)
-	v.add_child(bar)
+	# Module grid (AGENTS.md §25.1: no health bar -- each module's own
+	# condition, colour-coded, grey = knocked out).
+	var grid := GridContainer.new()
+	grid.columns = 6
+	grid.add_theme_constant_override("h_separation", 2)
+	grid.add_theme_constant_override("v_separation", 2)
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(grid)
+	var cells: Dictionary = {}
+	for m in ShipStatus.MODULES:
+		var cell := Label.new()
+		cell.text = m[1]
+		cell.tooltip_text = m[2]
+		cell.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cell.custom_minimum_size = Vector2(46, 0)
+		cell.add_theme_font_size_override("font_size", 10)
+		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		grid.add_child(cell)
+		cells[m[0]] = cell
 	var info := RichTextLabel.new()
 	info.bbcode_enabled = true
 	info.fit_content = true
@@ -108,7 +114,7 @@ func _make_card(sid: String) -> Dictionary:
 	info.add_theme_font_size_override("normal_font_size", 12)
 	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(info)
-	return {"panel": panel, "name": name, "bar": bar, "fill": fill, "info": info}
+	return {"panel": panel, "name": name, "cells": cells, "info": info}
 
 func _card_input(sid: String, ev: InputEvent) -> void:
 	if not (ev is InputEventMouseButton) or not ev.pressed or ev.button_index != MOUSE_BUTTON_LEFT:
@@ -143,10 +149,6 @@ func _process(_d: float) -> void:
 	for sid in _cards.keys():
 		var c: Dictionary = _cards[sid]
 		var ship: ShipPhysicsState = world.ships[sid]
-		var hull = world.hulls.get(sid)
-		var frac: float = 1.0
-		if hull != null and hull.max_integrity > 0.0:
-			frac = hull.integrity / hull.max_integrity
 		var sel: bool = selection != null and selection.is_selected(sid)
 		var border: Color = Color.WHITE if sel else (Color(0.5, 0.5, 0.5, 0.5) if ship.is_wreck else UiTheme.ACCENT_COLOR_DIM)
 		var sb := UiTheme.panel_stylebox(border)
@@ -160,10 +162,23 @@ func _process(_d: float) -> void:
 		if ship.is_wreck:
 			head = "[color=#888888][s]%s[/s]  УНИЧТОЖЕН[/color]" % ShipNames.of(sid)
 		else:
-			head += "   [color=%s]%d%%[/color]   %d км/с" % [_hex(UiTheme.condition_color(frac)), int(round(frac * 100.0)), int(ship.velocity.length() / 1000.0)]
+			var vd: Dictionary = ShipStatus.verdict(world, sid)
+			head += "   %d км/с\n[color=%s]%s[/color]" % [int(ship.velocity.length() / 1000.0), _hex(vd["color"]), vd["text"]]
 		c["name"].text = "[color=%s]%s[/color]" % [_hex(UiTheme.ACCENT_COLOR), head] if not ship.is_wreck else head
-		c["bar"].value = frac * 100.0
-		c["fill"].bg_color = UiTheme.condition_color(frac)
+		for m in ShipStatus.MODULES:
+			var cond: float = ship.subsystems.get_condition(ShipStatus.type_of(m[0])) if ship.subsystems != null else 1.0
+			if ship.is_wreck:
+				cond = 0.0
+			var cell: Label = c["cells"][m[0]]
+			var csb := StyleBoxFlat.new()
+			var mc: Color = ShipStatus.module_color(cond)
+			csb.bg_color = Color(mc, 0.28 if cond > 0.0 else 0.15)
+			csb.border_color = mc
+			csb.set_border_width_all(1)
+			csb.set_corner_radius_all(2)
+			cell.add_theme_stylebox_override("normal", csb)
+			cell.add_theme_color_override("font_color", mc if cond > 0.0 else Color(0.6, 0.6, 0.6))
+			cell.tooltip_text = "%s: %s" % [m[2], ("%d%%" % int(round(cond * 100.0))) if cond > 0.0 else "выбито"]
 		if ship.is_wreck:
 			c["info"].text = ""
 			continue
@@ -186,15 +201,6 @@ func _process(_d: float) -> void:
 		var tgt: String = world.get_weapon_target_designation(sid)
 		if tgt != "":
 			line += "\n[color=#9fd]цель: [color=#ff6a5a]%s[/color][/color]" % ShipNames.of(tgt)
-		var dmg: Array = []
-		if ship.subsystems != null:
-			for tv in SubsystemType.Type.values():
-				var cond: float = ship.subsystems.get_condition(tv)
-				if cond < 0.995:
-					var nm: String = SubsystemType.Type.keys()[tv]
-					dmg.append("[color=%s]%s %d%%[/color]" % [_hex(UiTheme.condition_color(cond)), SUBSYS_RU.get(nm, nm), int(round(cond * 100.0))])
-		if not dmg.is_empty():
-			line += "\n" + " · ".join(dmg)
 		c["info"].text = line
 	# Enemy roster (from own sensor picture: shown only once detected).
 	var pov: String = ""
@@ -210,11 +216,10 @@ func _process(_d: float) -> void:
 		if not contacts.has(sid) or contacts[sid].state == ContactState.Type.UNKNOWN:
 			el.append("[color=#777]%s — не обнаружен[/color]" % ShipNames.of(sid))
 			continue
-		var h = world.hulls.get(sid)
-		var f: float = 1.0 if h == null or h.max_integrity <= 0.0 else h.integrity / h.max_integrity
 		var mark: String = "◎ " if selection != null and selection.designated_target_id == sid else ""
 		if world.ships[sid].is_wreck:
 			el.append("[color=#888][s]%s[/s] уничтожен[/color]" % ShipNames.of(sid))
 		else:
-			el.append("[color=#ff6a5a]%s%s[/color]  [color=%s]%d%%[/color]" % [mark, ShipNames.of(sid), _hex(UiTheme.condition_color(f)), int(round(f * 100.0))])
+			var ev: Dictionary = ShipStatus.verdict_observed(world, sid)
+			el.append("[color=#ff6a5a]%s%s[/color]  [color=%s]%s[/color]" % [mark, ShipNames.of(sid), _hex(ev["color"]), ev["text"]])
 	_enemy_label.text = "\n".join(el)

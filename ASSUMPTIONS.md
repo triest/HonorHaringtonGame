@@ -3192,3 +3192,11 @@ Engine changes this required (ENGINEERING CHOICES):
   0.3 rad/s max, is sometimes too late -- a partial, not perfect, defense).
 * laserhead_sidewall_floor 0.35 in the demo: minimum laserhead transmission through an
   intact sidewall (books: sidewalls degrade, do not stop, laserheads). Default 0.
+
+
+## Module damage model for the demo (2026-09-27, feedback #5, AGENTS.md §25.1)
+Weighted per-aspect module tables, one module per laserhead, structural share 0.1,
+power factor 0.25+0.75*power, POWER/PROPULSION loss drops the wedge, DEFENSIVE_SYSTEMS
+drive sidewall condition, destruction at STRUCTURAL_INTEGRITY = 0: all ASSUMPTION
+(engineering/gameplay choices consistent with the books' "systems knocked out one by
+one" narrative, no canon figures). HullState stays in the codebase for old tests only.

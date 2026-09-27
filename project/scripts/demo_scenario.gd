@@ -107,6 +107,11 @@ static func build(world: SimulationWorld) -> void:
 	ShipNames.names = DISPLAY_NAMES.duplicate()
 	world.sensor_range_m = SENSOR_RANGE_M
 	world.player_controlled_teams["red"] = true
+	world.subsystem_damage_model = true
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1904
+	SubsystemDamageResolution.spread_rng = rng
+	SubsystemDamageResolution.structural_share_override = 0.1
 	world.missile_sensor_update_interval_ticks = 6
 	world.missile_detonation_range_override_m = LASERHEAD_TERMINAL_RANGE_M
 	world.missile_max_lifetime_override_s = MISSILE_MAX_LIFETIME_S
@@ -148,10 +153,9 @@ static func _build_side(world: SimulationWorld, ids: Array, team: String, z: flo
 		phys.defense = ShipDefenseState.new()
 		phys.defense.laserhead_sidewall_floor = LASERHEAD_SIDEWALL_FLOOR
 		phys.subsystems = ShipSubsystems.new()
-		var hull := HullState.new()
-		hull.max_integrity = HULL_INTEGRITY
-		hull.integrity = HULL_INTEGRITY
-		world.add_ship(ship_id, phys, hull)
+		# No hit-point pool (AGENTS.md §25.1): destruction and combat
+		# capability come from the ship's modules (subsystem_damage_model).
+		world.add_ship(ship_id, phys)
 		world.set_team(ship_id, team)
 
 		for _t in range(TUBES_PER_SHIP):

@@ -424,12 +424,13 @@ func _centroid_ids(own: bool):
 	return c / float(n) if n > 0 else null
 
 func _ship_label(sid: String) -> String:
-	var h = world.hulls.get(sid)
-	if world.ships[sid].is_wreck:
-		return "%s  УНИЧТОЖЕН" % ShipNames.of(sid)
-	if h != null and h.max_integrity > 0.0:
-		return "%s  %d%%" % [ShipNames.of(sid), int(round(100.0 * h.integrity / h.max_integrity))]
-	return ShipNames.of(sid)
+	# No hit-point percentage (AGENTS.md §25.1): name + combat-capability
+	# verdict from the ship's modules (ShipStatus).
+	var own: bool = String(world.teams.get(sid, "")) == player_team
+	var vd: Dictionary = ShipStatus.verdict(world, sid) if own else ShipStatus.verdict_observed(world, sid)
+	if vd["text"] == "" or vd["text"] == "боеспособен" or vd["text"] == "без видимых повреждений":
+		return ShipNames.of(sid)
+	return "%s — %s" % [ShipNames.of(sid), vd["text"]]
 
 func _draw_brackets(p: Vector2, r: float, col: Color) -> void:
 	var l: float = r * 0.45

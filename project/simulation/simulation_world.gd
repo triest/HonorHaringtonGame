@@ -73,6 +73,21 @@ var sensor_range_m: float = SensorResolution.DEFAULT_SENSOR_RANGE_M
 ## report: "no control over the ship"). Weapons/PD/missile fire AI still
 ## runs for them (fire control, not helm). Empty by default = old behavior.
 var player_controlled_teams: Dictionary = {}
+## 2026-09-27 (user: "drop the HP bar, module damage per the spec" --
+## AGENTS.md §25/§25.1). OPT-IN (default false = old behavior, HullState
+## decides destruction): when true,
+##   * a ship is DESTROYED when its STRUCTURAL_INTEGRITY reaches 0 (the
+##     hull breaks up) -- no hit-point pool involved;
+##   * POWER feeds everything: weapons / PD / tubes / thrust run at
+##     own_condition * (0.25 + 0.75 * power); POWER at 0 also drops the
+##     wedge and sidewalls (ship dead in space, still a ship);
+##   * DEFENSIVE_SYSTEMS = sidewall generators: port/starboard sidewall
+##     condition follows it;
+##   * PROPULSION at 0 = impeller nodes gone: wedge down, no thrust;
+##   * every module that drops to 0 raises a "subsystem_disabled" battle
+##     event for the log.
+var subsystem_damage_model: bool = false
+var _disabled_seen: Dictionary = {}  # ship_id -> {type: true}
 ## 2026-09-27 (user feedback #3: "not like the book"): combat ATTITUDE per
 ## ship -- how the hull is turned relative to the threat, the core
 ## Honorverse tactical trade-off. Opt-in: only ships with an entry here
@@ -671,6 +686,8 @@ func _resolve_ship_destruction() -> void:
 		var hull = hulls.get(ship_id)
 		if hull != null and hull.is_destroyed():
 			destroyed_ids.append(ship_id)
+		elif subsystem_damage_model and ship.subsystems != null and ship.subsystems.is_disabled(SubsystemType.Type.STRUCTURAL_INTEGRITY):
+			destroyed_ids.append(ship_id)  # hull broke up (see subsystem_damage_model)
 	for ship_id in destroyed_ids:
 		_record_event("ship_destroyed", {"ship_id": ship_id})
 		var ship: ShipPhysicsState = ships[ship_id]
@@ -774,6 +791,48 @@ func _sync_subsystem_driven_conditions() -> void:
 			mount.condition = ship.subsystems.get_condition(SubsystemType.Type.POINT_DEFENSE)
 		for tube in missile_tubes.get(ship_id, []):
 			tube.condition = ship.subsystems.get_condition(SubsystemType.Type.MISSILE_SYSTEMS)
+		if subsystem_damage_model:
+			_apply_extended_subsystem_effects(ship_id, ship)
+
+func _apply_extended_subsystem_effects(ship_id: String, ship: ShipPhysicsState) -> void:
+	var subs = ship.subsystems
+	var power: float = subs.get_condition(SubsystemType.Type.POWER)
+	var pf: float = 0.25 + 0.75 * power
+	for mount in weapon_mounts.get(ship_id, []):
+		mount.condition *= pf
+	for mount in pd_mounts.get(ship_id, []):
+		mount.condition *= pf
+	for tube in missile_tubes.get(ship_id, []):
+		tube.condition *= pf
+	ship.propulsion_condition = pf
+	var d = ship.defense
+	if d != null:
+		var walls: float = subs.get_condition(SubsystemType.Type.DEFENSIVE_SYSTEMS)
+		if power <= 0.0:
+			walls = 0.0
+		d.port_sidewall_condition = walls
+		d.starboard_sidewall_condition = walls
+		d.wedge_up = not ship.is_wreck and power > 0.0 and not subs.is_disabled(SubsystemType.Type.PROPULSION)
+	var seen: Dictionary = _disabled_seen.get(ship_id, {})
+	for t in SubsystemType.Type.values():
+		if subs.is_disabled(t) and not seen.has(t):
+			seen[t] = true
+			_battle_event("subsystem_disabled", {"ship_id": ship_id, "subsystem": t})
+	_disabled_seen[ship_id] = seen
+
+## True when the ship can no longer fight: destroyed, no power, or both
+## its missile systems and energy weapons knocked out. (For the mission
+## result and the UI -- the simulation itself does not act on it.)
+func is_combat_ineffective(ship_id: String) -> bool:
+	var ship: ShipPhysicsState = ships.get(ship_id)
+	if ship == null or ship.is_wreck:
+		return true
+	var subs = ship.subsystems
+	if subs == null:
+		return false
+	if subs.is_disabled(SubsystemType.Type.POWER):
+		return true
+	return subs.is_disabled(SubsystemType.Type.MISSILE_SYSTEMS) and subs.is_disabled(SubsystemType.Type.WEAPONS)
 
 func _cleanup_inactive_missiles() -> void:
 	for missile_id in missiles.keys():
@@ -870,7 +929,7 @@ func _update_missiles(dt: float) -> void:
 					if ships[sid] == target:
 						tgt_id = sid
 						break
-				_battle_event("missile_detonation", {"attacker_ship_id": missile_owners.get(missile_id, ""), "target_ship_id": tgt_id, "damage_dealt": det.damage_dealt, "outcome": det.outcome})
+				_battle_event("missile_detonation", {"attacker_ship_id": missile_owners.get(missile_id, ""), "target_ship_id": tgt_id, "damage_dealt": det.damage_dealt, "outcome": det.outcome, "subsystems": det.subsystem_damage.keys()})
 
 ## ТЗ §20: any missile whose target is itself another (incoming) missile
 ## is a counter-missile -- check whether it has closed to kill radius.

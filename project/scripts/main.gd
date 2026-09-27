@@ -82,6 +82,10 @@ var weapon_panel: WeaponPanel
 ## also being reachable from here).
 var camera_focus_controller: CameraFocusController
 var player_input: PlayerInput
+## 2026-09-27 live feedback: screen-space tactical symbols + mouse
+## selection/orders over the 3D view, and a bottom bar of real buttons.
+var battle_overlay: BattleOverlay
+var command_bar: CommandBar
 var win_lose_screen: WinLoseScreen
 
 ## ТЗ §56.1 item 4 (Minimal HUD): which ship the single HUD panel is a
@@ -99,93 +103,18 @@ func _ready() -> void:
 	world = SimulationWorld.new()
 	add_child(world)
 
-	# §56.3 item H: hardcoded demo scenario upgraded from the original
-	# 1v1 (alpha vs beta) to a small squadron vs small squadron -- three
-	# ships per side, each side spread along Z around its guide's original
-	# X position. Z spread is only +/-1500 m, far under the 10,000 m X
-	# separation between the two sides, so AttackGeometry.classify()'s
-	# dominant-axis pick (see the arc comment on world.add_weapon_mount
-	# below) still always resolves to the X axis -- i.e. STARBOARD/PORT --
-	# for every cross-ship pairing, not just guide-vs-guide as before.
-	# "alpha"/"beta" (the two original guides) keep their original ids and
-	# positions unchanged: HUD_POV_SHIP_ID, PlayerInput's hardcoded
-	# player-controlled ship, and several unit tests' doc comments all
-	# still refer to exactly these two ids. alpha_2/alpha_3/beta_2/beta_3
-	# are new, reachable only through the §56.3 mouse-driven selection/
-	# group-order systems (SelectionState/CommandGroupController/
-	# MoveOrderController/OrderMenuController/WeaponPanelController all key
-	# off `player_team` = world.teams.get("alpha"), not off PlayerInput's
-	# own `_controllable_ship_ids` allowlist, so none of that needed any
-	# changes for this) -- which is exactly the point of this item: give
-	# items A-D's multi-select/group-order behavior 2+ own-team ships to
-	# actually exercise live, not just in synthetic headless test worlds.
-	#
-	# Missile tubes (this item's other half, `missile_tubes` below): every
-	# red/alpha ship gets 2 missile tubes (MissileTube's own engineering-
-	# placeholder defaults -- 10 rounds/tube, 5 s reload, 60,000 km range,
-	# see that script's doc comment -- easily in range at this scenario's
-	# ~10 km separation), so missile salvos (item E's weapon panel) have
-	# something to actually fire, live, for the first time -- previously
-	# both demo ships were energy-only (§56.1-era). Blue/beta stays
-	# energy-only: item H only requires "at least one side", and this
-	# also keeps blue a pure energy-weapon contrast case rather than
-	# doubling scope onto both sides in a single pass.
-	var ship_specs: Array = [
-		{"id": "alpha", "team": "red", "x": -5000.0, "z": 0.0, "missile_tubes": 2},
-		{"id": "alpha_2", "team": "red", "x": -5000.0, "z": 1500.0, "missile_tubes": 2},
-		{"id": "alpha_3", "team": "red", "x": -5000.0, "z": -1500.0, "missile_tubes": 2},
-		{"id": "beta", "team": "blue", "x": 5000.0, "z": 0.0, "missile_tubes": 0},
-		{"id": "beta_2", "team": "blue", "x": 5000.0, "z": 1500.0, "missile_tubes": 0},
-		{"id": "beta_3", "team": "blue", "x": 5000.0, "z": -1500.0, "missile_tubes": 0},
-	]
-	for spec in ship_specs:
-		var phys := ShipPhysicsState.new()
-		phys.position = Vector3(spec["x"], 0.0, spec["z"])
-		if spec["team"] == "blue":
-			# Blue faces the opposite way, same as the original single-ship
-			# "beta" setup (PI around Y) -- see AttackGeometry's doc comment:
-			# -Z is bow, so a PI rotation makes blue's bow point back along
-			# +Z, i.e. towards red, mirroring red's own -Z-facing bow.
-			phys.orientation = Quaternion(Vector3.UP, PI)
-		phys.commanded_thrust_local = Vector3(0.0, 0.0, -1.0)
-		phys.defense = ShipDefenseState.new()
-		# ТЗ §56.1 item 4: assigned here (previously null) so the HUD's
-		# per-subsystem readout has real, non-null state to show -- "per-ship
-		# subsystem condition" is meaningless with subsystems always null.
-		# Every subsystem starts fully healthy (ShipSubsystems._init default);
-		# nothing else about the demo scenario changes, the already-wired
-		# consumers (WEAPONS/POINT_DEFENSE/MISSILE_SYSTEMS/SENSORS/
-		# PROPULSION/MANEUVERING/COMMUNICATIONS, see ship_subsystems.gd) simply
-		# now have live data to act on as combat damages these ships.
-		phys.subsystems = ShipSubsystems.new()
-		world.add_ship(spec["id"], phys)
-		world.set_team(spec["id"], spec["team"])
-		for _i in range(int(spec["missile_tubes"])):
-			world.add_missile_tube(spec["id"], MissileTube.new())
+	# 2026-09-27: canon-shaped squadron engagement (two 4-ship line-abreast
+	# squadrons, bow-on approach from ~5.3M km, missile broadsides + PD +
+	# energy mounts on both sides, real HullState so ships can die) --
+	# replaces the old 10 km point-blank 3v3 laser brawl the user rejected
+	# live. See scripts/demo_scenario.gd's doc comment for the full why.
+	DemoScenario.build(world)
 
 	for ship_id in world.ships.keys():
 		var view := ShipView.new()
 		view.bind(world.ships[ship_id])  # builds its own procedural hull + wedge planes
 		add_child(view)
-
-		hulls[ship_id] = HullState.new()
-		var laser := WeaponData.new()
-		laser.id = "demo_laser"
-		laser.max_range_m = 500_000.0
-		laser.damage_per_hit = 100.0
-		laser.recharge_time_s = 4.0
-		# broadside_arc(), not bow_chaser_arc(): every red ship sits at
-		# roughly the same X as guide "alpha" and every blue ship at
-		# roughly the same X as guide "beta" (both facing along +/-Z, only
-		# +/-1500 m Z spread per ship -- see the §56.3 item H comment
-		# above -- well under the 10,000 m X separation between sides), so
-		# the enemy is on every ship's STARBOARD per AttackGeometry.
-		# classify() from tick 1, never in its BOW arc -- neither ship
-		# turns to face the other (that would need real steering AI, out
-		# of scope for this hardcoded slice). A bow chaser here would
-		# never find arc and never fire; broadside is what actually
-		# matches this geometry.
-		world.add_weapon_mount(ship_id, WeaponMount.new(laser, WeaponMount.broadside_arc()))
+		hulls[ship_id] = world.hulls.get(ship_id)
 
 	weapon_fx = WeaponFx.new()
 	add_child(weapon_fx)
@@ -285,6 +214,38 @@ func _ready() -> void:
 	win_lose_screen = WinLoseScreen.new()
 	add_child(win_lose_screen)
 
+	var player_team: String = String(world.teams.get(HUD_POV_SHIP_ID, ""))
+	battle_overlay = BattleOverlay.new()
+	battle_overlay.world = world
+	battle_overlay.selection = selection
+	battle_overlay.camera = get_node_or_null("Camera3D") as Camera3D
+	battle_overlay.player_team = player_team
+	battle_overlay.move_order_controller = move_order_controller
+	battle_overlay.order_menu_controller = order_menu_controller
+	add_child(battle_overlay)
+	# Drawn under the other Controls (plot, menus): move to the front of
+	# the Control draw order, i.e. index right after the world node.
+	move_child(battle_overlay, 1)
+
+	command_bar = CommandBar.new()
+	command_bar.world = world
+	command_bar.selection = selection
+	command_bar.player_team = player_team
+	command_bar.command_group_controller = command_group_controller
+	command_bar.tactical_plot = tactical_plot
+	command_bar.camera_focus_controller = camera_focus_controller
+	add_child(command_bar)
+
+	# Live-game clock tuning (defaults off for tests, see SimClock.advance):
+	# coarser ticks at high time scales + a per-frame CPU budget so 25x/100x
+	# stay responsive with hundreds of missiles in flight.
+	world.clock.max_dt_multiplier = 6
+	world.clock.frame_budget_ms = 10.0
+	# Start on the whole squadron selected, at 5x: the opening approach is
+	# minutes of sim time before missile range.
+	selection.select_only(DemoScenario.RED_IDS.duplicate())
+	world.clock.set_time_scale(5.0)
+
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()
 
@@ -345,6 +306,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	move_order_controller.prune_completed()
 	order_menu.sync()
 	weapon_panel_controller.sync()
+	weapon_panel.bottom_reserved_px = command_bar.get_height()
 	weapon_panel.sync()
 	win_lose_screen.update(world)
 

@@ -39,6 +39,7 @@ class_name Hud
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
 const ContactState = preload("res://simulation/contact_state.gd")
 const UiTheme = preload("res://scripts/ui_theme.gd")
+const MissileState = preload("res://simulation/missile_state.gd")
 
 ## Gap (px) between the label's own text bounds and the drawn panel edge
 ## around it -- purely a legibility/aesthetic choice (ASSUMPTION, same
@@ -69,7 +70,7 @@ func _ready() -> void:
 	_label.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR)
 	_label.add_theme_color_override("font_outline_color", Color(0.0, 0.02, 0.02, 0.9))
 	_label.add_theme_constant_override("outline_size", 2)
-	_label.add_theme_font_size_override("font_size", 16)
+	_label.add_theme_font_size_override("font_size", 13)
 	add_child(_label)
 	_layout_background()
 
@@ -145,10 +146,19 @@ func _build_text(world: SimulationWorld, ship_id: String) -> String:
 	if contacts.is_empty():
 		lines.append("(none)")
 	else:
+		# 2026-09-27: missiles are summarized as one count line -- at the
+		# canon-scale demo there can be hundreds of missile contacts, and
+		# listing each one pushed every other panel off the screen.
+		var missile_tracks: int = 0
 		for contact_id in contacts.keys():
 			var contact = contacts[contact_id]
+			if contact.target is MissileState:
+				if contact.state != ContactState.Type.UNKNOWN and contact.target.is_active():
+					missile_tracks += 1
+				continue
 			var state_name: String = ContactState.Type.keys()[contact.state]
 			lines.append("%s: %s" % [contact_id, state_name])
+		lines.append("missile tracks: %d" % missile_tracks)
 
 	var text: String = ""
 	for i in range(lines.size()):

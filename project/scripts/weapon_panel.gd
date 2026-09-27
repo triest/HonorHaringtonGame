@@ -51,6 +51,10 @@ var controller: WeaponPanelController = null
 var _entries: Array = []  # Array[{"label": String, "kind": String}], last synced from controller.rows
 var _hover_index: int = -1
 
+## 2026-09-27: pixels reserved at the screen bottom by CommandBar (set by
+## main.gd every tick) so this panel sits above the bar, not under it.
+var bottom_reserved_px: float = 0.0
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	visible = false
@@ -67,7 +71,7 @@ func sync() -> void:
 		_entries = controller.rows
 		var box_size: Vector2 = _box_size()
 		var viewport_size: Vector2 = get_viewport_rect().size
-		position = Vector2(MARGIN_PX, maxf(MARGIN_PX, viewport_size.y - box_size.y - MARGIN_PX))
+		position = Vector2(MARGIN_PX, maxf(MARGIN_PX, viewport_size.y - box_size.y - MARGIN_PX - bottom_reserved_px))
 		size = box_size
 		visible = true
 		queue_redraw()

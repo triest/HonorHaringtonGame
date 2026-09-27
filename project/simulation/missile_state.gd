@@ -135,6 +135,8 @@ func estimated_powered_range_m() -> float:
 ## ASSUMPTION placeholders, not found in canon sources during this
 ## session's verification pass — see ASSUMPTIONS.md.
 var max_lifetime_s: float = 600.0
+## Opt-in zero-effort-miss guidance, see MissileGuidance._zem_thrust_direction.
+var use_zem_guidance: bool = false
 var terminal_detonation_range_m: float = 50_000.0
 var max_turn_rate_rad_s: float = 0.5
 
@@ -172,6 +174,7 @@ func integrate(dt: float, desired_thrust_world_dir: Vector3) -> void:
 		# arcade missiles (ТЗ §11 prohibits universal arcade constants).
 		acceleration = Vector3.ZERO
 
+	var prev_position: Vector3 = position
 	var result: Array = KinematicsUtils.integrate_linear(position, velocity, acceleration, dt)
 	velocity = result[0]
 	position = result[1]
@@ -185,6 +188,35 @@ func integrate(dt: float, desired_thrust_world_dir: Vector3) -> void:
 
 	if target != null and guidance_state != GuidanceState.SELF_DESTRUCTED:
 		var dist: float = position.distance_to(target.position)
+		# 2026-09-27 canon-scale fix (live user report "no missile combat
+		# like in Weber's books"): at canon closing speeds (tens of
+		# thousands km/s) a missile moves >1,000 km per 1/60 s tick, so an
+		# end-of-tick-only distance check against a 5 km arming radius
+		# essentially never fires -- the missile flies straight through its
+		# target. Swept check: find the closest approach of the missile to
+		# the target over THIS tick (relative motion assumed linear within
+		# one tick; target's start-of-tick position back-extrapolated from
+		# its velocity) and, if that closest approach is inside the
+		# terminal radius, treat the missile as being AT that point
+		# (position snapped to it) so MissileResolution's rod geometry --
+		# which aims from missile.position toward target.position -- is
+		# computed from the real closest-approach point, not from 1,000 km
+		# past the target. Counter-missile targets are excluded (their
+		# kill check is CounterMissileResolution's own). ASSUMPTION, see
+		# ASSUMPTIONS.md "canon-scale swept missile arming".
+		if not (target is MissileState) and dist > terminal_detonation_range_m * 0.1:
+			var target_vel: Vector3 = target.velocity if "velocity" in target else Vector3.ZERO
+			var rel_start: Vector3 = prev_position - (target.position - target_vel * dt)
+			var rel_end: Vector3 = position - target.position
+			var seg: Vector3 = rel_end - rel_start
+			var seg_len_sq: float = seg.length_squared()
+			if seg_len_sq > 0.0:
+				var t: float = clampf(-rel_start.dot(seg) / seg_len_sq, 0.0, 1.0)
+				var closest: Vector3 = rel_start + seg * t
+				if closest.length() < dist:
+					dist = closest.length()
+					if dist <= terminal_detonation_range_m * 0.1:
+						position = target.position + closest
 		if dist <= terminal_detonation_range_m:
 			guidance_state = GuidanceState.TERMINAL if guidance_state != GuidanceState.TERMINAL else guidance_state
 			# ASSUMPTION: arm + detonate threshold at 10% of terminal range —

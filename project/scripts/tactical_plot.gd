@@ -120,6 +120,13 @@ const MOVE_ORDER_ARROW_LENGTH_PX: float = 10.0
 const MOVE_ORDER_ARROW_WIDTH_PX: float = 5.0
 
 var pov_ship_id: String = ""
+## 2026-09-27 live user request "make the radar enlargeable": `enlarged`
+## toggles between the small corner plot and a big one (M key / command
+## bar button); `range_zoom` > 1 zooms the displayed range in from the
+## auto-scale (mouse wheel over the plot, or command bar Радар +/-).
+var enlarged: bool = false
+var range_zoom: float = 1.0
+const ENLARGED_FRACTION_OF_HEIGHT: float = 0.72
 var plot_range_m: float = MIN_PLOT_RANGE_M
 
 ## Shared with other §56.3 UI (squadron-list panel, order menu) via
@@ -198,6 +205,8 @@ func update(world: SimulationWorld, ship_id: String) -> void:
 		if contact.state == ContactState.Type.UNKNOWN:
 			continue  # never actually detected -- nothing to show yet (§23)
 		var is_missile: bool = contact.target is MissileState
+		if is_missile and not contact.target.is_active():
+			continue  # destroyed/detonated missile: stale contact, not a threat
 		var range_m: float = _pov_position.distance_to(contact.estimated_position)
 		farthest_m = maxf(farthest_m, range_m)
 		_contacts.append({
@@ -212,7 +221,7 @@ func update(world: SimulationWorld, ship_id: String) -> void:
 				and world.teams.get(contact_id, "") == world.teams.get(ship_id, ""),
 		})
 
-	plot_range_m = maxf(farthest_m * AUTO_SCALE_MARGIN, MIN_PLOT_RANGE_M)
+	plot_range_m = maxf(maxf(farthest_m * AUTO_SCALE_MARGIN, MIN_PLOT_RANGE_M) / maxf(range_zoom, 1.0), 1000.0)
 	queue_redraw()
 
 func _draw() -> void:
@@ -247,6 +256,7 @@ func _draw() -> void:
 	if selection != null and selection.is_selected(pov_ship_id):
 		_draw_selection_ring(center, OWN_SHIP_HIT_RADIUS_PX + 4.0)
 
+	var label_positions: Array = []
 	for contact in _contacts:
 		var projection: Dictionary = TacticalPlotProjector.project(contact["estimated_position"], _pov_position, plot_range_m, radius)
 		var icon_pos: Vector2 = center + projection["plot_offset_px"]
@@ -269,8 +279,20 @@ func _draw() -> void:
 		if selection != null and selection.designated_target_id == contact["id"]:
 			_draw_designated_target_marker(icon_pos, SHIP_HIT_RADIUS_PX + 7.0)
 
-		var label: String = "%s  %s  %s" % [contact["id"], _format_range(projection["range_m"]), _format_bearing(projection["bearing_rad"])]
-		draw_string(ThemeDB.fallback_font, icon_pos + Vector2(8, 4), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, color)
+		# 2026-09-27: no per-missile text (hundreds of missiles made the
+		# plot unreadable), and ship labels that would land on top of an
+		# already-drawn label are skipped (a squadron seen from millions
+		# of km is one dot; its first member's label stands for it).
+		if not contact["is_missile"]:
+			var overlaps: bool = false
+			for lp in label_positions:
+				if lp.distance_to(icon_pos) < 12.0:
+					overlaps = true
+					break
+			if not overlaps:
+				label_positions.append(icon_pos)
+				var label: String = "%s  %s  %s" % [contact["id"], _format_range(projection["range_m"]), _format_bearing(projection["bearing_rad"])]
+				draw_string(ThemeDB.fallback_font, icon_pos + Vector2(8, 4), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, color)
 
 	_draw_move_orders(center, radius)
 	_draw_drag_box()
@@ -407,8 +429,12 @@ func _contact_color(contact: Dictionary) -> Color:
 	return NEUTRAL_COLOR
 
 static func _format_range(range_m: float) -> String:
-	if range_m >= 1_000_000.0:
-		return "%.2f Mkm" % (range_m / 1_000_000.0)
+	# 2026-09-27: was "%.2f Mkm" of range/1e6 -- i.e. THOUSANDS of km
+	# mislabelled "Mkm" (5.6 million km showed as "5640 Mkm").
+	if range_m >= 1.0e9:
+		return "%.2f млн км" % (range_m / 1.0e9)
+	if range_m >= 1.0e6:
+		return "%.0f тыс. км" % (range_m / 1.0e6)
 	return "%.0f km" % (range_m / 1000.0)
 
 static func _format_bearing(bearing_rad: float) -> String:
@@ -418,7 +444,26 @@ static func _format_bearing(bearing_rad: float) -> String:
 ## §1.10.4 and SelectionState's own doc comment for the exact semantics
 ## chosen for each modifier. A no-op entirely if `selection` was never
 ## assigned (see that var's own doc comment).
+func set_enlarged(on: bool) -> void:
+	enlarged = on
+	var side: float = PLOT_SIZE_PX
+	if on and get_viewport() != null:
+		var vs: Vector2 = get_viewport().get_visible_rect().size
+		side = maxf(PLOT_SIZE_PX, minf(vs.y * ENLARGED_FRACTION_OF_HEIGHT, vs.x * 0.55))
+	custom_minimum_size = Vector2(side, side)
+	size = Vector2(side, side)
+	set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_KEEP_SIZE, int(PLOT_MARGIN_PX))
+	queue_redraw()
+
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		range_zoom = clampf(range_zoom * (1.25 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 0.8), 1.0, 10000.0)
+		accept_event()
+		return
+	if event is InputEventMouseButton and event.pressed and event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
+		set_enlarged(not enlarged)
+		accept_event()
+		return
 	if selection == null:
 		return
 

@@ -50,16 +50,43 @@ func advance(frame_delta: float) -> void:
 		return
 
 	_accumulator += frame_delta * time_scale
-	# Avoid spiral-of-death if the host frame stalls badly; simulation
-	# correctness (§43) matters more than perfectly matching wall time.
+	# 2026-09-27 (live demo at canon scale, hundreds of missiles in
+	# flight): optional adaptive coarsening + per-frame CPU budget. Both
+	# default OFF (max_dt_multiplier = 1, frame_budget_ms = 0) so every
+	# existing test/caller still gets exactly FIXED_DT ticks as before.
+	#  * max_dt_multiplier > 1: at high time scales each tick covers
+	#    FIXED_DT * m sim-seconds (m grows with time_scale, capped), so
+	#    25x/100x don't require 1,500-6,000 ticks per real second.
+	#  * frame_budget_ms > 0: stop running ticks once this frame has spent
+	#    the budget and drop the backlog, so the window stays responsive;
+	#    the sim then honestly runs slower than the requested scale, and
+	#    `effective_time_scale` reports what was actually achieved.
+	var m: int = 1
+	if max_dt_multiplier > 1 and time_scale > 1.0:
+		m = clampi(int(time_scale / 4.0), 1, max_dt_multiplier)
+	var step: float = FIXED_DT * float(m)
 	var max_ticks_per_frame := 100
 	var ticks_run := 0
-	while _accumulator >= FIXED_DT and ticks_run < max_ticks_per_frame:
-		_run_tick()
-		_accumulator -= FIXED_DT
+	var t0: int = Time.get_ticks_usec()
+	var sim_before: float = sim_time
+	while _accumulator >= step and ticks_run < max_ticks_per_frame:
+		_run_tick(step)
+		_accumulator -= step
 		ticks_run += 1
+		if frame_budget_ms > 0.0 and float(Time.get_ticks_usec() - t0) / 1000.0 > frame_budget_ms:
+			_accumulator = minf(_accumulator, step)
+			break
+	if frame_delta > 0.0:
+		var achieved: float = (sim_time - sim_before) / frame_delta
+		effective_time_scale = lerpf(effective_time_scale, achieved, 0.1)
 
-func _run_tick() -> void:
+## See advance(): both default to the old exact behavior.
+var max_dt_multiplier: int = 1
+var frame_budget_ms: float = 0.0
+## Smoothed actually-achieved sim-seconds per real second (UI readout).
+var effective_time_scale: float = 1.0
+
+func _run_tick(step: float = FIXED_DT) -> void:
 	tick_count += 1
-	sim_time += FIXED_DT
-	simulation_tick.emit(FIXED_DT, tick_count, sim_time)
+	sim_time += step
+	simulation_tick.emit(step, tick_count, sim_time)

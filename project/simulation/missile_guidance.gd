@@ -72,6 +72,9 @@ static func compute_thrust_direction(missile, target_position_estimate: Vector3,
 			return missile.velocity.normalized()
 		return Vector3.FORWARD
 
+	if "use_zem_guidance" in missile and missile.use_zem_guidance:
+		return _zem_thrust_direction(missile, target_position_estimate, target_velocity_estimate)
+
 	var current_speed: float = maxf(missile.velocity.length(), 1.0)  # avoid div-by-zero at launch
 	var intercept_point: Vector3 = predict_intercept_point(
 		missile.position, current_speed, target_position_estimate, target_velocity_estimate
@@ -112,3 +115,31 @@ static func resolve_thrust_direction(missile, dt: float, sensor_range_m: float =
 
 	var contact = missile.sensor_contact
 	return compute_thrust_direction(missile, contact.estimated_position, contact.estimated_velocity, missile.sensor_state)
+
+## 2026-09-27 (opt-in, MissileState.use_zem_guidance; default off so every
+## existing test keeps the lead-pursuit law above): "zero-effort-miss"
+## guidance. The lead-pursuit law above aims at a predicted target point
+## but never cancels the missile's OWN sideways velocity (inherited from a
+## launching ship that was maneuvering laterally, e.g. the crossing-T AI):
+## in the canon-scale demo every such salvo missed by (lateral speed x
+## 150 s flight) and self-destructed. ZEM = where the target will be
+## relative to the missile's current ballistic path at time-to-go;
+## thrusting along it steers that miss to zero. ENGINEERING CHOICE, not
+## canon (no source specifies missile guidance laws).
+static func _zem_thrust_direction(missile, target_pos: Vector3, target_vel: Vector3) -> Vector3:
+	var r: Vector3 = target_pos - missile.position
+	var d: float = r.length()
+	if d <= 0.0:
+		return Vector3.FORWARD
+	var v_rel: Vector3 = target_vel - missile.velocity
+	var closing: float = maxf(-r.dot(v_rel) / d, 0.0)
+	var a: float = missile.drive_max_acceleration_mps2 if missile.drive_burn_remaining_s > 0.0 else 0.0
+	var t_go: float
+	if a > 0.0:
+		t_go = (-closing + sqrt(closing * closing + 2.0 * a * d)) / a
+	else:
+		t_go = d / maxf(closing, 1.0)
+	var zem: Vector3 = r + v_rel * t_go
+	if zem.length_squared() <= 0.0:
+		return r / d
+	return zem.normalized()

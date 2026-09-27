@@ -59,6 +59,26 @@ var ships: Dictionary = {}            # ship_id -> ShipPhysicsState
 var hulls: Dictionary = {}            # ship_id -> HullState (optional)
 var weapon_mounts: Dictionary = {}    # ship_id -> Array[WeaponMount]
 var missile_tubes: Dictionary = {}    # ship_id -> Array[MissileTube] (§26 "launch missiles")
+## 2026-09-27 canon-scale scenario: per-world sensor range (ship sensors
+## AND missile seeker/telemetry), defaulting to the old global constant so
+## every existing test/scenario is unchanged. The live demo raises it (see
+## scripts/main.gd) so squadrons see each other at canon missile-duel
+## ranges of several million km. ASSUMPTION, see ASSUMPTIONS.md.
+var sensor_range_m: float = SensorResolution.DEFAULT_SENSOR_RANGE_M
+## 2026-09-27: teams whose ships are commanded by the human player. The
+## autonomous crossing-T maneuver AI (_resolve_crossing_t_maneuver) skips
+## them, so the player's flagship flies the course the PLAYER set instead
+## of being silently turned/re-vectored by AI every tick (live user
+## report: "no control over the ship"). Weapons/PD/missile fire AI still
+## runs for them (fire control, not helm). Empty by default = old behavior.
+var player_controlled_teams: Dictionary = {}
+## 2026-09-27 canon-scale demo knobs (defaults = old behavior):
+## see _update_sensors / _launch_missile_from_tube.
+var missile_sensor_update_interval_ticks: int = 1
+var _sensor_observer_index: int = 0
+var missile_detonation_range_override_m: float = -1.0
+var missile_max_lifetime_override_s: float = -1.0
+var missile_zem_guidance: bool = false
 var pd_mounts: Dictionary = {}        # ship_id -> Array[PointDefenseMount]
 var ecm_states: Dictionary = {}       # ship_id -> ECMState (optional)
 var sensor_contacts: Dictionary = {}  # ship_id -> Dictionary[contact_key -> SensorContact]
@@ -732,6 +752,7 @@ func _cleanup_inactive_missiles() -> void:
 ## and every active missile, reading its own SENSORS subsystem condition
 ## (§25) and each target's ECM (§24) if present.
 func _update_sensors(dt: float) -> void:
+	_sensor_observer_index = 0
 	for observer_id in ships.keys():
 		var observer: ShipPhysicsState = ships[observer_id]
 		if observer.is_wreck:
@@ -746,11 +767,22 @@ func _update_sensors(dt: float) -> void:
 				continue
 			var target = ships[other_id]
 			var target_ecm = ecm_states.get(other_id)
-			SensorResolution.update_contacts(contacts, other_id, target, observer.position, dt, SensorResolution.DEFAULT_SENSOR_RANGE_M, target_ecm, observer.subsystems)
+			SensorResolution.update_contacts(contacts, other_id, target, observer.position, dt, sensor_range_m, target_ecm, observer.subsystems)
 
-		for missile_id in missiles.keys():
-			var missile = missiles[missile_id]
-			SensorResolution.update_contacts(contacts, missile_id, missile, observer.position, dt, SensorResolution.DEFAULT_SENSOR_RANGE_M, null, observer.subsystems)
+		# 2026-09-27 perf: with hundreds of missiles in flight this
+		# observer x missile loop dominated the tick (~4.5 ms of ~9.5 ms
+		# at 160 missiles). Optional staggering: each observer refreshes
+		# its missile contacts every Nth tick (offset per observer so the
+		# cost spreads evenly), integrating the skipped time as one dt*N
+		# step. Default N=1 = old per-tick behavior. PD range checks and
+		# missile arming use TRUE positions, so this only delays track
+		# state by <= N ticks.
+		_sensor_observer_index += 1
+		var n: int = maxi(1, missile_sensor_update_interval_ticks)
+		if n == 1 or (_tick_index + _sensor_observer_index) % n == 0:
+			for missile_id in missiles.keys():
+				var missile = missiles[missile_id]
+				SensorResolution.update_contacts(contacts, missile_id, missile, observer.position, dt * float(n), sensor_range_m, null, observer.subsystems)
 
 ## ТЗ §18/§19/§21: guide, fly, and (if armed) detonate every active missile.
 ##
@@ -782,7 +814,7 @@ func _update_missiles(dt: float) -> void:
 		if not missile.is_active():
 			continue
 
-		var thrust_dir: Vector3 = MissileGuidance.resolve_thrust_direction(missile, dt)
+		var thrust_dir: Vector3 = MissileGuidance.resolve_thrust_direction(missile, dt, sensor_range_m)
 		missile.integrate(dt, thrust_dir)
 
 		var is_counter_missile: bool = missile.target is MissileState
@@ -1131,7 +1163,16 @@ func _resolve_formation_keeping(dt: float) -> void:
 			if max_accel <= 0.0:
 				continue
 
-			var desired_accel: Vector3 = to_station * K_P_STATION + velocity_error * K_D_STATION
+			# 2026-09-27: guide-acceleration FEEDFORWARD. Without it a
+			# member of a formation whose guide is under sustained thrust
+			# (the normal case in a canon approach -- squadrons accelerate
+			# toward each other for many minutes) settles at a steady-state
+			# lag of guide_accel / K_P_STATION (~25 km at 500 m/s^2),
+			# i.e. the line visibly falls apart behind the flagship. The
+			# guide's own last-tick acceleration is exactly the station
+			# point's acceleration (ignoring rotation), so adding it makes
+			# the PD terms only correct residual error, as intended.
+			var desired_accel: Vector3 = guide.acceleration + to_station * K_P_STATION + velocity_error * K_D_STATION
 			if desired_accel.length() > max_accel:
 				desired_accel = desired_accel.normalized() * max_accel
 
@@ -1726,6 +1767,8 @@ func _resolve_crossing_t_maneuver(dt: float) -> void:
 		if order_state != null and order_state.is_active():
 			continue
 
+		if player_controlled_teams.has(teams[ship_id]):
+			continue  # helm belongs to the player, see player_controlled_teams
 		if _is_station_kept_formation_member(ship_id):
 			continue
 
@@ -2200,6 +2243,11 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 ## precondition ("call BEFORE the missile starts burning").
 func _launch_missile_from_tube(attacker_ship_id: String, attacker: ShipPhysicsState, target, tube, throttle_fraction: float = 1.0) -> void:
 	var missile := MissileState.new()
+	if missile_detonation_range_override_m > 0.0:
+		missile.terminal_detonation_range_m = missile_detonation_range_override_m
+	if missile_max_lifetime_override_s > 0.0:
+		missile.max_lifetime_s = missile_max_lifetime_override_s
+	missile.use_zem_guidance = missile_zem_guidance
 	missile.position = attacker.position
 	missile.velocity = attacker.velocity
 	missile.target = target

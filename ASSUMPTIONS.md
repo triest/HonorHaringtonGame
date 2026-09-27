@@ -3147,3 +3147,39 @@ system; per-line coloring (e.g. selected members highlighted) is NOT done -- a p
 Label can't color substrings, same RichTextLabel deferral as Hud's condition colors.
 Label position contract unchanged; background extends PANEL_PADDING_PX (10 px, local
 literal duplicating Hud's) outward, so the visible Hud->group gap is 10 px.
+
+
+## Canon-shaped demo scenario + canon-scale combat fixes (2026-09-27, live user feedback)
+
+User rejected the 10 km point-blank 3v3 laser brawl as "not a Weber squadron
+engagement". scripts/demo_scenario.gd now builds a bow-on approach of two 4-ship
+line-abreast squadrons from 5.3M km. ALL numbers there are ASSUMPTION/pacing, not
+canon citations: 20 km line spacing, 300 km/s initial closing per side, 80% thrust,
+4 tubes x 12 rounds, 20 s broadside reload, 5M km launch range (inside the existing
+46,000 g x 180 s ~7.3M km powered envelope, which was NOT changed), 10M km sensor
+range (stands in for gravitic detection + missile telemetry link), 3 PD mounts
+(200,000 km, 0.7 s reaction, 0.5 s recharge, 1 hit kills), 3,000 km laserhead
+standoff arming (terminal range 30,000 km x 10%), 240 s missile lifetime, hull
+6,000, energy mounts 400,000 km / 150 dmg / 6 s. Tuned in a headless probe so
+roughly a third of missiles are intercepted and both sides take losses in ~4 min.
+
+Engine changes this required (ENGINEERING CHOICES):
+* Swept closest-approach arming in MissileState.integrate (always on): at
+  60,000+ km/s a missile moves >1,000 km per tick; end-of-tick distance checks
+  never saw it within the arming radius. Position is snapped to the
+  closest-approach point so laserhead rod geometry is computed from there.
+* Guide-acceleration feedforward in formation keeping (always on): removes the
+  ~guide_accel/K_P steady-state lag (~25 km) during sustained thrust.
+* Opt-in (defaults keep old behavior): world.sensor_range_m,
+  world.player_controlled_teams (crossing-T AI skips player helm),
+  missile_sensor_update_interval_ticks (missile contacts refreshed every Nth tick,
+  staggered per observer), missile detonation-range / lifetime overrides,
+  MissileState.use_zem_guidance (zero-effort-miss law; the old lead pursuit never
+  cancels the missile's own inherited lateral velocity), SimClock
+  max_dt_multiplier + frame_budget_ms (live game: coarser ticks at x25/x100 and
+  a 10 ms/frame budget, achieved speed shown as "факт xN").
+* Known honest gaps: ships still don't rotate their bow toward their thrust vector
+  (velocity-vector orders thrust in any direction); no counter-missiles; hull
+  meshes are sub-pixel at this scale, so the 3D view relies on the new screen-space
+  BattleOverlay symbols; float32 positions at ~2.65e9 m give ~256 m precision
+  (fine for these distances, origin rebasing still not done).

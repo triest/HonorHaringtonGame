@@ -291,16 +291,29 @@ Checklist (§56.3, new scope, roughly in an order that builds incrementally towa
   [ ] Run AGENTS.md §56.3/§1.10.14's 15-step MVP acceptance test yourself (headless
       script simulating the input sequence where possible) as a sanity check, but this
       does NOT substitute for the user's own live pass/fail -- see below.
-Next concrete step: item J -- VISUAL POLISH PASS, sub-piece (b): apply
-UiTheme.panel_stylebox() backgrounds/borders + UiTheme.ACCENT_COLOR text to OrderMenu
-(scripts/order_menu.gd -- hand-drawn Control, likely draw_style_box() in _draw rather
-than a child Panel; careful: it covers the full viewport when open, so the stylebox
-goes around the menu entries rect only) and WeaponPanel (scripts/weapon_panel.gd).
-Sub-pieces 1 (Hud) and (a) (CommandGroupPanel) are done -- use their pattern. After
-(b): sub-piece (c), reflow the layout toward the reference image composition
-(squadron list top-left / plot top-right / ship-card+weapon bar bottom) -- biggest
-piece, likely multiple passes. Do NOT re-read AGENTS.md/CLOUD.md/reference image just
-to resume J. After J: the unlettered 15-step §1.10.14 headless sanity check.
+Next concrete step: *** TOP PRIORITY OVERRIDE (2026-09-27, live user feedback) ***
+The user ran the .exe and rejected it: no visible missiles, point-blank laser brawl
+instead of a long-range missile duel "like in Weber's books", no formation, no ship
+control / course plotting / order panel / mouse selection, wants buttons and an
+enlargeable radar. An interactive session the same day implemented (see CHANGELOG
+2026-09-27 "живой отзыв пользователя"): scripts/demo_scenario.gd (canon-shaped
+4v4 squadron approach from 5.3M km, missile broadsides both sides, PD, formations,
+real hulls), scripts/battle_overlay.gd (screen-space tactical symbols + mouse
+select/box/RMB course/LMB-enemy order menu over the 3D view), scripts/command_bar.gd
+(bottom button bar: time, selection, maneuver, fire, radar), radar enlarge/zoom,
+plus sim fixes (swept missile arming, formation feedforward, ZEM guidance opt-in,
+perf knobs). NOT yet live-confirmed by the user.
+Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
+newer than this), fix what they report FIRST; (2) otherwise, improve along the same
+line, in this order: ships should visibly turn their bow toward their thrust/course
+(today velocity orders thrust in any direction without rotating); an event log panel
+(launches, intercepts, hits, ship lost) like the reference image; per-ship status
+cards for the selection (hull %, ammo left, PD state) in place of the long HUD text;
+then item J sub-piece (b)/(c) styling. Keep checking the live .exe look with the Xvfb
+capture: SCREENSHOT_PRESIM_S=680 SCREENSHOT_RADAR_BIG=1 xvfb-run ... --rendering-driver
+opengl3 res://scenes/dev/screenshot_capture.tscn (see CHANGELOG), and the headless
+battle probe simulation/tests/probe_demo_scenario.gd (env PROBE_S, PROBE_M,
+PROBE_SHIFT_KM=310000 to start right at missile range).
 NOTE for export: session $HOME may lack Godot export templates -- copy
 .tools/godot_templates_cache/extracted2/templates/* into
 ~/.local/share/godot/export_templates/4.3.stable/ before --export-release.
@@ -316,8 +329,8 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-27 (second scheduled pass that day): item J sub-piece (a)
--- CommandGroupPanel styled like Hud (see item J SUB-PROGRESS 2). Tests green
-(command_group_panel 13, hud 21), import clean, smoke exit 0 with 48 baseline errors,
-Windows .exe re-exported (.pck 460720B). Item J still UNCHECKED; nothing is live-
-confirmed; §56.3 NOT closed. CHANGELOG/ASSUMPTIONS updated; pushed this pass.
+Last pass finished: 2026-09-27 ~11:30 UTC (interactive session with the user, not
+cron): canon-shaped scenario + BattleOverlay + CommandBar + radar enlarge + sim
+fixes, see "Next concrete step" above and CHANGELOG. 33 targeted test files green,
+headless battle probe and Xvfb screenshots checked, Windows .exe re-exported
+(.pck 754160 B), pushed. §56.3 NOT closed; nothing live-confirmed yet.

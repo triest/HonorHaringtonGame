@@ -35,6 +35,19 @@ func _presim() -> void:
 				m.tick(dt)
 		world.tick_simulation(dt)
 	world.clock.paused = true
+	if OS.get_environment("SCREENSHOT_KEEP_BRIEFING") != "1" and main.get("mission_panel") != null:
+		main.get("mission_panel").visible = false
+	var cfc0 = main.get("camera_focus_controller")
+	var cam0 = main.get_node("Camera3D")
+	if OS.get_environment("SCREENSHOT_VIEW") == "squadron":
+		cfc0.view_own_squadron()
+	elif OS.get_environment("SCREENSHOT_VIEW") == "all":
+		cfc0.view_all()
+	cam0._fly_t = 1.0
+	cam0._pivot_offset = Vector3.ZERO
+	if cam0.target_distance > 0.0:
+		cam0.distance = cam0.target_distance
+	cam0.target_distance = -1.0
 	if OS.get_environment("SCREENSHOT_RADAR_BIG") == "1":
 		main.get("tactical_plot").set_enlarged(true)
 	var focus_id: String = OS.get_environment("SCREENSHOT_FOCUS")

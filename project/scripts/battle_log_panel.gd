@@ -56,7 +56,8 @@ func _process(_d: float) -> void:
 	if world == null:
 		return
 	var vs: Vector2 = _panel.get_viewport_rect().size
-	_panel.position = Vector2(8, vs.y - bottom_reserved_px - _panel.size.y - 4)
+	# Right column under the radar (the left column is the ship cards).
+	_panel.position = Vector2(vs.x - _panel.size.x - 8, 348)
 	var changed: bool = false
 	for e in world.battle_events:
 		if e["seq"] <= _last_seq:
@@ -114,12 +115,12 @@ func _ingest(e: Dictionary) -> void:
 						tgt = sid
 			var l := _merge("launch:" + a + ":" + tgt, t)
 			l["count"] += 1
-			l["bb"] = "[color=%s]%s[/color]: залп %d ракет%s → [color=%s]%s[/color]" % [_col(a), a, l["count"], _plural(l["count"]), _col(tgt), tgt]
+			l["bb"] = "[color=%s]%s[/color]: залп %d ракет%s → [color=%s]%s[/color]" % [_col(a), ShipNames.of(a), l["count"], _plural(l["count"]), _col(tgt), ShipNames.of(tgt)]
 		"pd_intercept":
 			var s: String = d.get("ship_id", "")
 			var l2 := _merge("pd:" + s, t)
 			l2["count"] += 1
-			l2["bb"] = "[color=%s]ПРО %s[/color]: сбито ракет %d" % [_col(s), s, l2["count"]]
+			l2["bb"] = "[color=%s]ПРО %s[/color]: сбито ракет %d" % [_col(s), ShipNames.of(s), l2["count"]]
 		"missile_detonation":
 			var tg: String = d.get("target_ship_id", "")
 			var dmg: float = float(d.get("damage_dealt", 0.0))
@@ -129,21 +130,21 @@ func _ingest(e: Dictionary) -> void:
 			var hp: int = _hull_pct(tg)
 			var hp_txt: String = (" (корпус %d%%)" % hp) if hp >= 0 else ""
 			if l3["dmg"] > 0.0:
-				l3["bb"] = "[color=%s]%s[/color]: подрывов %d, урон %d%s" % [_col(tg), tg, l3["count"], int(l3["dmg"]), hp_txt]
+				l3["bb"] = "[color=%s]%s[/color]: подрывов %d, урон %d%s" % [_col(tg), ShipNames.of(tg), l3["count"], int(l3["dmg"]), hp_txt]
 			else:
-				l3["bb"] = "[color=%s]%s[/color]: %d ракет%s взорвались без урона (клин/бортовая стена)" % [_col(tg), tg, l3["count"], _plural(l3["count"])]
+				l3["bb"] = "[color=%s]%s[/color]: %d ракет%s взорвались без урона (клин/бортовая стена)" % [_col(tg), ShipNames.of(tg), l3["count"], _plural(l3["count"])]
 		"weapon_hit":
 			var tg2: String = d.get("target_ship_id", "")
 			var l4 := _merge("beam:" + tg2, t)
 			l4["count"] += 1
 			l4["dmg"] += float(d.get("damage_dealt", 0.0))
-			l4["bb"] = "[color=%s]%s[/color]: лучевых попаданий %d, урон %d (корпус %d%%)" % [_col(tg2), tg2, l4["count"], int(l4["dmg"]), _hull_pct(tg2)]
+			l4["bb"] = "[color=%s]%s[/color]: лучевых попаданий %d, урон %d (корпус %d%%)" % [_col(tg2), ShipNames.of(tg2), l4["count"], int(l4["dmg"]), _hull_pct(tg2)]
 		"ship_destroyed":
 			var sd: String = d.get("ship_id", "")
-			_lines.append({"key": "dead:" + sd, "t": t, "bb": "[b][color=%s]%s УНИЧТОЖЕН[/color][/b]" % [_col(sd), sd]})
+			_lines.append({"key": "dead:" + sd, "t": t, "bb": "[b][color=%s]%s УНИЧТОЖЕН[/color][/b]" % [_col(sd), ShipNames.of(sd)]})
 			_trim()
 		"formation_leader_lost":
-			_lines.append({"key": "lead:%d" % e["seq"], "t": t, "bb": "[color=%s]Флагман %s потерян, командование принял %s[/color]" % [WARN_HEX, d.get("old_guide_id", ""), d.get("new_guide_id", "")]})
+			_lines.append({"key": "lead:%d" % e["seq"], "t": t, "bb": "[color=%s]Флагман %s потерян, командование принял %s[/color]" % [WARN_HEX, ShipNames.of(d.get("old_guide_id", "")), ShipNames.of(d.get("new_guide_id", ""))]})
 			_trim()
 
 func _plural(n: int) -> String:

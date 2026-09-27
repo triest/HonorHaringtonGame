@@ -97,19 +97,23 @@ func _visible_objects() -> Array:
 			if c == null or c.state == ContactState.Type.UNKNOWN:
 				continue
 			out.append({"id": sid, "pos3": c.estimated_position, "vel3": c.estimated_velocity, "kind": "ship", "own": false, "wreck": ship.is_wreck})
+	var ship_by_obj: Dictionary = {}
+	for sid2 in world.ships.keys():
+		ship_by_obj[world.ships[sid2]] = sid2
 	for mid in world.missiles.keys():
 		var m = world.missiles[mid]
 		if not m.is_active():
 			continue
+		var tgt_id: String = ship_by_obj.get(m.target, "") if m.target != null else ""
 		var owner_team: String = String(world.teams.get(world.missile_owners.get(mid, ""), ""))
 		var own_m: bool = owner_team == player_team
 		if own_m:
-			out.append({"id": mid, "pos3": m.position, "vel3": m.velocity, "kind": "missile", "own": true, "wreck": false})
+			out.append({"id": mid, "pos3": m.position, "vel3": m.velocity, "kind": "missile", "own": true, "wreck": false, "target": tgt_id})
 		else:
 			var mc = contacts.get(mid)
 			if mc == null or mc.state == ContactState.Type.UNKNOWN:
 				continue
-			out.append({"id": mid, "pos3": mc.estimated_position, "vel3": mc.estimated_velocity, "kind": "missile", "own": false, "wreck": false})
+			out.append({"id": mid, "pos3": mc.estimated_position, "vel3": mc.estimated_velocity, "kind": "missile", "own": false, "wreck": false, "target": tgt_id})
 	return out
 
 func _draw() -> void:
@@ -221,6 +225,10 @@ func _draw() -> void:
 			_label_hits.append({"rect": Rect2(at + Vector2(0, -fs), Vector2(w, fs + 3)), "id": sid, "own": c["own"], "wreck": world.ships[sid].is_wreck})
 			at.y += 15
 
+	_draw_salvos(objs, font)
+	_draw_formations()
+	_draw_offscreen(objs, font)
+
 	if _dragging:
 		var r := Rect2(_lmb_start, _lmb_cur - _lmb_start).abs()
 		draw_rect(r, Color(0.6, 0.9, 1.0, 0.12), true)
@@ -232,13 +240,196 @@ func _outlined(font: Font, at: Vector2, text: String, fs: int, col: Color) -> vo
 	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color(0, 0, 0, 0.9))
 	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
+# ------------------------------------------------------------------
+# 2026-09-27 (user: "no formation, confusing exchanges, confusing view")
+
+const SALVO_CLUSTER_PX: float = 40.0
+
+## Missiles grouped into SALVOS: all active missiles with the same target
+## that are close together on screen get one label --
+## "12 ракет → КЕВ «Отважный» · 38 с" -- plus a bracket, so a stream of
+## dots reads as "which salvo is going where, and when does it land".
+func _draw_salvos(objs: Array, font: Font) -> void:
+	var groups: Array = []  # {pos, n, target, own, eta}
+	for o in objs:
+		if o["kind"] != "missile":
+			continue
+		var r3: Vector3 = RenderOrigin.to_render(o["pos3"])
+		if camera.is_position_behind(r3):
+			continue
+		var p: Vector2 = camera.unproject_position(r3)
+		var tgt: String = o.get("target", "")
+		var eta: float = -1.0
+		if world.ships.has(tgt):
+			var tpos: Vector3 = world.ships[tgt].position
+			var tvel: Vector3 = world.ships[tgt].velocity
+			var rel: Vector3 = tpos - o["pos3"]
+			var closing: float = -(tvel - o["vel3"]).dot(rel.normalized())
+			if closing > 1.0:
+				eta = rel.length() / closing
+		var joined: bool = false
+		for g in groups:
+			if g["target"] == tgt and g["own"] == o["own"] and g["pos"].distance_to(p) < SALVO_CLUSTER_PX:
+				g["n"] += 1
+				g["sum"] += p
+				if eta >= 0.0:
+					g["eta"] = eta if g["eta"] < 0.0 else minf(g["eta"], eta)
+				joined = true
+				break
+		if not joined:
+			groups.append({"pos": p, "sum": p, "n": 1, "target": tgt, "own": o["own"], "eta": eta})
+	var salvo_label_rects: Array = []
+	for g in groups:
+		if g["n"] < 2:
+			continue
+		var c: Vector2 = g["sum"] / float(g["n"])
+		# Just-launched salvos still sit on top of their launcher: the ship
+		# label is there already, skip until they separate.
+		var near_ship: bool = false
+		for ic in _icons:
+			if ic["pos"].distance_to(c) < 30.0:
+				near_ship = true
+				break
+		if near_ship:
+			continue
+		var col: Color = OWN_MISSILE_COLOR if g["own"] else HOSTILE_MISSILE_COLOR
+		draw_arc(c, 14.0, 0.0, TAU, 20, Color(col, 0.7), 1.2)
+		# Never stack salvo labels on top of each other: a label that would
+		# overlap an earlier one is dropped (its ring stays).
+		var lr := Rect2(c + Vector2(16, -10), Vector2(260, 16))
+		var clash: bool = false
+		for r in salvo_label_rects:
+			if r.intersects(lr):
+				clash = true
+				break
+		if clash:
+			continue
+		salvo_label_rects.append(lr)
+		var txt: String = "%d ракет%s → %s" % [g["n"], _plural_ru(g["n"]), ShipNames.of(g["target"])]
+		if g["eta"] >= 0.0:
+			txt += " · %d с" % int(g["eta"])
+		_outlined(font, c + Vector2(16, 4), txt, 12, col)
+
+static func _plural_ru(n: int) -> String:
+	var n10: int = n % 10
+	var n100: int = n % 100
+	if n10 == 1 and n100 != 11:
+		return "а"
+	if n10 >= 2 and n10 <= 4 and (n100 < 12 or n100 > 14):
+		return "ы"
+	return ""
+
+const FORMATION_LINE_COLOR := Color(0.55, 0.95, 1.0, 0.55)
+const ENEMY_FORMATION_LINE_COLOR := Color(1.0, 0.35, 0.3, 0.5)
+
+## The formation itself made visible: members joined in slot order (by
+## their station's lateral offset) with a line, and the formation's shape
+## named. Drawn only when the line is at least a few pixels long -- from
+## millions of km it is one symbol anyway (then the squadron label says it).
+func _draw_formations() -> void:
+	var font: Font = get_theme_default_font()
+	for fid in world.formations.keys():
+		var f: FormationState = world.formations[fid]
+		var guide: ShipPhysicsState = world.ships.get(f.guide_ship_id)
+		if guide == null or guide.is_wreck:
+			continue
+		var own: bool = String(world.teams.get(f.guide_ship_id, "")) == player_team
+		var ids: Array = [f.guide_ship_id]
+		for m in f.member_ids():
+			if world.ships.has(m) and not world.ships[m].is_wreck:
+				ids.append(m)
+		if ids.size() < 2:
+			continue
+		ids.sort_custom(func(a, b): return _slot_x(f, a) < _slot_x(f, b))
+		var pts := PackedVector2Array()
+		for sid in ids:
+			var r3: Vector3 = RenderOrigin.to_render(world.ships[sid].position)
+			if camera.is_position_behind(r3):
+				pts = PackedVector2Array()
+				break
+			pts.append(camera.unproject_position(r3))
+		if pts.size() < 2 or pts[0].distance_to(pts[pts.size() - 1]) < 10.0:
+			continue
+		var col: Color = FORMATION_LINE_COLOR if own else ENEMY_FORMATION_LINE_COLOR
+		draw_polyline(pts, col, 1.5)
+		var mid: Vector2 = (pts[0] + pts[pts.size() - 1]) * 0.5
+		_outlined(font, mid + Vector2(-40, 28), "строй: фронт, %d кор." % ids.size(), 12, col)
+
+func _slot_x(f: FormationState, sid: String) -> float:
+	if sid == f.guide_ship_id:
+		return 0.0
+	return (f.member_offsets.get(sid, Vector3.ZERO) as Vector3).x
+
+## Edge-of-screen arrows for things that matter but are out of view: the
+## enemy squadron, our squadron, and incoming salvos aimed at our ships.
+func _draw_offscreen(objs: Array, font: Font) -> void:
+	var vr: Rect2 = get_viewport_rect()
+	if vr.size.x < 200.0 or vr.size.y < 200.0:
+		return  # headless / degenerate viewport
+	var rect: Rect2 = vr.grow(-60.0)
+	var targets: Array = []
+	var en = _centroid_ids(false)
+	if en != null:
+		targets.append({"pos3": en, "col": HOSTILE_COLOR, "text": "ПРОТИВНИК"})
+	var ow = _centroid_ids(true)
+	if ow != null:
+		targets.append({"pos3": ow, "col": OWN_COLOR, "text": "ЭСКАДРА"})
+	var inc_n: int = 0
+	var inc_sum := Vector3.ZERO
+	for o in objs:
+		if o["kind"] == "missile" and not o["own"]:
+			inc_n += 1
+			inc_sum += o["pos3"]
+	if inc_n > 0:
+		targets.append({"pos3": inc_sum / float(inc_n), "col": HOSTILE_MISSILE_COLOR, "text": "ракеты: %d" % inc_n})
+	var center: Vector2 = get_viewport_rect().size * 0.5
+	var look: Vector3 = RenderOrigin.origin
+	for t in targets:
+		var r3: Vector3 = RenderOrigin.to_render(t["pos3"])
+		var behind: bool = camera.is_position_behind(r3)
+		var p: Vector2 = camera.unproject_position(r3)
+		if not behind and rect.has_point(p):
+			continue
+		var dir: Vector2 = (p - center)
+		if behind:
+			dir = -dir
+		if dir.length() < 1.0:
+			continue
+		dir = dir.normalized()
+		# Clamp to the inset rect edge.
+		var tmax: float = INF
+		if absf(dir.x) > 1e-4:
+			tmax = minf(tmax, ((rect.size.x * 0.5) / absf(dir.x)))
+		if absf(dir.y) > 1e-4:
+			tmax = minf(tmax, ((rect.size.y * 0.5) / absf(dir.y)))
+		var at: Vector2 = center + dir * tmax
+		var perp := Vector2(-dir.y, dir.x)
+		var tri := PackedVector2Array([at + dir * 12.0, at - dir * 6.0 + perp * 8.0, at - dir * 6.0 - perp * 8.0])
+		draw_colored_polygon(tri, t["col"])
+		var dist_m: float = (t["pos3"] as Vector3).distance_to(look)
+		var dtxt: String = ("%.2f млн км" % (dist_m / 1.0e9)) if dist_m >= 1.0e9 else ("%.0f тыс. км" % (dist_m / 1.0e6))
+		var label_at: Vector2 = at - dir * 30.0 + Vector2(-40, 4)
+		_outlined(font, label_at, "%s  %s" % [t["text"], dtxt], 12, t["col"])
+
+func _centroid_ids(own: bool):
+	var c := Vector3.ZERO
+	var n: int = 0
+	for sid in world.ships.keys():
+		if world.ships[sid].is_wreck:
+			continue
+		if (String(world.teams.get(sid, "")) == player_team) != own:
+			continue
+		c += world.ships[sid].position
+		n += 1
+	return c / float(n) if n > 0 else null
+
 func _ship_label(sid: String) -> String:
 	var h = world.hulls.get(sid)
 	if world.ships[sid].is_wreck:
-		return "%s  УНИЧТОЖЕН" % sid
+		return "%s  УНИЧТОЖЕН" % ShipNames.of(sid)
 	if h != null and h.max_integrity > 0.0:
-		return "%s  %d%%" % [sid, int(round(100.0 * h.integrity / h.max_integrity))]
-	return sid
+		return "%s  %d%%" % [ShipNames.of(sid), int(round(100.0 * h.integrity / h.max_integrity))]
+	return ShipNames.of(sid)
 
 func _draw_brackets(p: Vector2, r: float, col: Color) -> void:
 	var l: float = r * 0.45

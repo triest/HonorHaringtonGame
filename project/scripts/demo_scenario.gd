@@ -78,7 +78,33 @@ const BLUE_IDS: Array = ["beta", "beta_2", "beta_3", "beta_4"]
 static func _slot_x(i: int) -> float:
 	return (float(i) - 1.5) * LINE_SPACING_M
 
+## 2026-09-27 (user wants story/canon, "own scenario set in the canon"):
+## in-universe names and the mission briefing. Names are invented (no
+## book character/ship is used); ranks, navies, era and tactics follow
+## the setting: RMN heavy cruisers intercepting a People's Navy raid,
+## shortly before open war.
+const DISPLAY_NAMES: Dictionary = {
+	"alpha": "КЕВ «Непреклонный»", "alpha_2": "КЕВ «Отважный»",
+	"alpha_3": "КЕВ «Стойкий»", "alpha_4": "КЕВ «Бдительный»",
+	"beta": "НФ «Кондотьер»", "beta_2": "НФ «Гладиус»",
+	"beta_3": "НФ «Центурион»", "beta_4": "НФ «Гренадер»",
+}
+const MISSION_TITLE: String = "Перехват у Сент-Лорана"
+const MISSION_BRIEFING: String = """[b]1904 г. П.Д., система Сент-Лоран, граница Звёздного королевства Мантикора.[/b]
+
+Разведка засекла рейдовую эскадру Народного флота Хевена: четыре тяжёлых крейсера идут к транспортам, стоящим у местной станции. Официально войны нет, но «неопознанные» корабли уже дважды нападали на мантикорские конвои в этом секторе.
+
+[b]Ваши силы:[/b] 4-я эскадра тяжёлых крейсеров Королевского флота Мантикоры, флагман — [color=#8cf2ff]КЕВ «Непреклонный»[/color]. Строй — фронт, дистанция между кораблями 20 км.
+[b]Противник:[/b] 4 тяжёлых крейсера Народного флота, флагман — [color=#ff6a5a]НФ «Кондотьер»[/color]. Дистанция ~5,3 млн км, сближение ~600 км/с.
+
+[b]Задача:[/b] не допустить противника к транспортам — уничтожить эскадру или вынудить её отойти, сохранив как можно больше своих кораблей.
+
+[b]Обстановка боя:[/b] ракеты с лазерными боеголовками бьют с 5 млн км, подлёт около двух с половиной минут. Клин (импеллерное поле) над и под кораблём непробиваем — но пока корабль повёрнут к врагу клином, его собственные трубы молчат. Борт прикрыт боковой стеной, она ослабляет, но не останавливает лазерные головки. Лазерная ПРО сбивает часть залпа на последних секундах. Лучевое оружие вступит в дело, только если сойтись на 400 тыс. км.
+
+[b]Управление:[/b] ЛКМ — выделить (рамкой — несколько), ЛКМ по врагу — приказ, ПКМ — курс в точку. F — камера к кораблю, F2 — эскадра, F1 — весь бой, Esc — назад. Space — пауза, [ ] — скорость времени. Кнопки приказов — внизу."""
+
 static func build(world: SimulationWorld) -> void:
+	ShipNames.names = DISPLAY_NAMES.duplicate()
 	world.sensor_range_m = SENSOR_RANGE_M
 	world.player_controlled_teams["red"] = true
 	world.missile_sensor_update_interval_ticks = 6
@@ -88,7 +114,9 @@ static func build(world: SimulationWorld) -> void:
 	# Combat attitude (see SimulationWorld.ship_attitude): everyone starts
 	# on "auto" -- broadside to fire, rolling the wedge toward incoming
 	# salvos. The player can override per ship from the command bar.
-	var att: String = OS.get_environment("DEMO_ATTITUDE") if OS.get_environment("DEMO_ATTITUDE") != "" else "auto"
+	# Default "broadside" for both sides (the book's classic missile duel:
+	# broadside to broadside); "auto"/"wedge" are the player's choices.
+	var att: String = OS.get_environment("DEMO_ATTITUDE") if OS.get_environment("DEMO_ATTITUDE") != "" else "broadside"
 	for sid in RED_IDS + BLUE_IDS:
 		world.set_ship_attitude(sid, att)
 	# Player squadron starts at the world origin (not symmetric about it):

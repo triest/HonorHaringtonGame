@@ -133,6 +133,11 @@ func _ready() -> void:
 
 func _mk_label(parent: Node) -> Label:
 	var l := Label.new()
+	# Long status text must never widen the bar past the screen (it did,
+	# pushing the right-hand buttons off-screen).
+	l.clip_text = true
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.custom_minimum_size = Vector2(80, 0)
 	l.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR)
 	l.add_theme_font_size_override("font_size", 15)
 	parent.add_child(l)
@@ -221,7 +226,10 @@ func sync() -> void:
 		for sid in own:
 			sp += world.ships[sid].velocity.length()
 		sp /= float(own.size())
-		_sel_label.text = "Выделено: %s   скорость %.0f км/с" % [", ".join(own), sp / 1000.0]
+		var nm: Array = []
+		for sid in own:
+			nm.append(ShipNames.of(sid))
+		_sel_label.text = "Выделено: %s   скорость %.0f км/с" % [", ".join(nm), sp / 1000.0]
 	var tgt: String = selection.designated_target_id if selection != null else ""
 	var msl: int = 0
 	for mid in world.missiles.keys():
@@ -237,12 +245,15 @@ func sync() -> void:
 				ammo_own += tube.ammo_count
 			else:
 				ammo_en += tube.ammo_count
-	_fire_label.text = "Цель: %s   входящих ракет: %d   боезапас: %d (у врага ~%d)%s" % [tgt if tgt != "" else "—", msl, ammo_own, ammo_en, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
+	_fire_label.text = "Цель: %s   входящих ракет: %d   боезапас: %d (у врага ~%d)%s" % [ShipNames.of(tgt) if tgt != "" else "—", msl, ammo_own, ammo_en, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
 
 func _say(text: String) -> void:
 	if battle_log != null:
 		var who: Array = _own_selected()
-		battle_log.add_local("%s%s" % [text, (" (" + ", ".join(who) + ")") if not who.is_empty() else ""])
+		var wn: Array = []
+		for w in who:
+			wn.append(ShipNames.of(w))
+		battle_log.add_local("%s%s" % [text, (" (" + ", ".join(wn) + ")") if not wn.is_empty() else ""])
 	_status_text = text
 	_status_until_ms = Time.get_ticks_msec() + 4000
 
@@ -526,7 +537,7 @@ func _attack() -> void:
 	for sid in _own_selected():
 		world.transmit_ship_target(sid, tgt)
 		world.transmit_ship_weapons_free(sid, true)
-	_say("атаковать %s" % tgt)
+	_say("атаковать %s" % ShipNames.of(tgt))
 
 func _weapons_free(free: bool) -> void:
 	if not _need_selection():

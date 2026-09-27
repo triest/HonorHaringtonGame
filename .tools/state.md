@@ -312,6 +312,11 @@ ship combat attitude (course/broadside/wedge/auto) + laserhead sidewall floor.
 Remaining from the plan given to the user: counter-missiles (layered defense), smarter
 enemy AI (closing to energy range, target focus), formation choice (wall/column),
 nicer ship models/effects, reference-image layout polish.
+FOLLOW-UP #4 (user: "boring"; wants story/canon, own canon scenario): mission briefing/
+debrief + ship names (MissionPanel, ShipNames, DemoScenario.MISSION_*), formation lines,
+salvo labels with ETA, off-screen arrows, default attitude broadside. Ideas queued for
+"less boring": multiple missions/campaign, counter-missiles, enemy AI that maneuvers and
+retreats, captain/crew voice lines in the log, better models + explosions + sound.
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -338,6 +343,5 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-27 ~12:40 UTC (interactive session, feedback #3): cards/log/
-camera history/attitude, targeted tests green, Xvfb checked, .exe re-exported, pushed.
-§56.3 NOT closed; nothing live-confirmed yet.
+Last pass finished: 2026-09-27 ~13:30 UTC (interactive, feedback #4): mission framing,
+formation/salvo readability, balance; tests green, Xvfb checked, .exe exported, pushed.

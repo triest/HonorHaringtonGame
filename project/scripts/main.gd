@@ -88,6 +88,7 @@ var battle_overlay: BattleOverlay
 var command_bar: CommandBar
 var battle_log: BattleLogPanel
 var ship_cards: ShipCardsPanel
+var mission_panel: MissionPanel
 var win_lose_screen: WinLoseScreen
 
 ## ТЗ §56.1 item 4 (Minimal HUD): which ship the single HUD panel is a
@@ -280,6 +281,22 @@ func _ready() -> void:
 
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()
+
+	# 2026-09-27 (user: story/canon, "confusing view"): mission briefing
+	# (pauses until "К бою"), debrief with stats at the end (replaces the
+	# bare WinLoseScreen text, kept hidden), and the battle opens on our
+	# own squadron (the line and the direction of the enemy visible, the
+	# whole-battle view one keypress away: F1 / Esc).
+	win_lose_screen.visible = false
+	mission_panel = MissionPanel.new()
+	mission_panel.world = world
+	mission_panel.player_team = player_team
+	mission_panel.briefing_title = DemoScenario.MISSION_TITLE
+	mission_panel.briefing_bbcode = DemoScenario.MISSION_BRIEFING
+	add_child(mission_panel)
+	if OS.get_environment("SKIP_BRIEFING") != "1":
+		mission_panel.show_briefing()
+	camera_focus_controller.view_own_squadron()
 
 	# 2026-09-23 live bug report (§56.1 items 4/5, see .tools/state.md/
 	# CHANGELOG.md for that date): user ran the exported Windows .exe and

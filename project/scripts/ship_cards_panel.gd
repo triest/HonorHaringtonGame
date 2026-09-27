@@ -154,11 +154,11 @@ func _process(_d: float) -> void:
 		if sel:
 			sb.bg_color = Color(0.06, 0.16, 0.2, 0.9)
 		c["panel"].add_theme_stylebox_override("panel", sb)
-		var head: String = "[b]%s[/b]" % sid
+		var head: String = "[b]%s[/b]" % ShipNames.of(sid)
 		if _is_guide(sid) and not ship.is_wreck:
 			head += "  [color=#ffd24a]★ ФЛАГМАН[/color]"
 		if ship.is_wreck:
-			head = "[color=#888888][s]%s[/s]  УНИЧТОЖЕН[/color]" % sid
+			head = "[color=#888888][s]%s[/s]  УНИЧТОЖЕН[/color]" % ShipNames.of(sid)
 		else:
 			head += "   [color=%s]%d%%[/color]   %d км/с" % [_hex(UiTheme.condition_color(frac)), int(round(frac * 100.0)), int(ship.velocity.length() / 1000.0)]
 		c["name"].text = "[color=%s]%s[/color]" % [_hex(UiTheme.ACCENT_COLOR), head] if not ship.is_wreck else head
@@ -185,7 +185,7 @@ func _process(_d: float) -> void:
 			line += "\n[color=#9fd]положение: %s%s[/color]" % [att_ru.get(eff, eff), (" (авто)" if att == "auto" else "")]
 		var tgt: String = world.get_weapon_target_designation(sid)
 		if tgt != "":
-			line += "\n[color=#9fd]цель: [color=#ff6a5a]%s[/color][/color]" % tgt
+			line += "\n[color=#9fd]цель: [color=#ff6a5a]%s[/color][/color]" % ShipNames.of(tgt)
 		var dmg: Array = []
 		if ship.subsystems != null:
 			for tv in SubsystemType.Type.values():
@@ -208,13 +208,13 @@ func _process(_d: float) -> void:
 		if String(world.teams.get(sid, "")) == player_team:
 			continue
 		if not contacts.has(sid) or contacts[sid].state == ContactState.Type.UNKNOWN:
-			el.append("[color=#777]%s — не обнаружен[/color]" % sid)
+			el.append("[color=#777]%s — не обнаружен[/color]" % ShipNames.of(sid))
 			continue
 		var h = world.hulls.get(sid)
 		var f: float = 1.0 if h == null or h.max_integrity <= 0.0 else h.integrity / h.max_integrity
 		var mark: String = "◎ " if selection != null and selection.designated_target_id == sid else ""
 		if world.ships[sid].is_wreck:
-			el.append("[color=#888][s]%s[/s] уничтожен[/color]" % sid)
+			el.append("[color=#888][s]%s[/s] уничтожен[/color]" % ShipNames.of(sid))
 		else:
-			el.append("[color=#ff6a5a]%s%s[/color]  [color=%s]%d%%[/color]" % [mark, sid, _hex(UiTheme.condition_color(f)), int(round(f * 100.0))])
+			el.append("[color=#ff6a5a]%s%s[/color]  [color=%s]%d%%[/color]" % [mark, ShipNames.of(sid), _hex(UiTheme.condition_color(f)), int(round(f * 100.0))])
 	_enemy_label.text = "\n".join(el)

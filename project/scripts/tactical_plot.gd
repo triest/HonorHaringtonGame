@@ -291,7 +291,7 @@ func _draw() -> void:
 					break
 			if not overlaps:
 				label_positions.append(icon_pos)
-				var label: String = "%s  %s  %s" % [contact["id"], _format_range(projection["range_m"]), _format_bearing(projection["bearing_rad"])]
+				var label: String = "%s  %s  %s" % [ShipNames.of(contact["id"]), _format_range(projection["range_m"]), _format_bearing(projection["bearing_rad"])]
 				draw_string(ThemeDB.fallback_font, icon_pos + Vector2(8, 4), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, color)
 
 	_draw_move_orders(center, radius)

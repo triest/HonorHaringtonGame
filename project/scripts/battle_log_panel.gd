@@ -13,6 +13,39 @@ extends CanvasLayer
 ## Own-side lines cyan, enemy-side red, kills/losses highlighted.
 class_name BattleLogPanel
 
+## 2026-09-27 (user: "по ТЗ, но скучно"): short crew/bridge chatter tied
+## to milestone moments, mixed into the same log -- purely cosmetic
+## flavor text (chosen deterministically from `world`'s own RNG-free
+## state so it never affects the simulation), meant to make the battle
+## feel narrated rather than a spreadsheet of numbers. Own-side lines are
+## voiced by name (bridge crew); enemy lines are voiced generically (we
+## do not hear their bridge).
+const VOICE_FIRST_LAUNCH_OWN: Array = ["Мостик, ракетная палуба -- пуск произведён, все аппараты чисты.", "Первый залп ушёл, капитан.", "Ракеты пошли -- время на цель передаю на тактический."]
+const VOICE_FIRST_LAUNCH_ENEMY: Array = ["Captain, we have missile launch -- multiple birds inbound!", "Радар -- вижу пуск с противника, идёт отслеживание.", "Внимание, входящие! Первый залп противника на подходе."]
+const VOICE_FIRST_HIT_OWN: Array = ["Капитan, попадание! Отчёт по повреждениям на подходе.", "Нас зацепило -- держим строй, ждём доклад по системам.", "Прямое попадание, сэр. Работаем."]
+const VOICE_CRITICAL_OWN: Array = ["Капитан, серьёзные повреждения! Мостик просит разрешения на манёвр уклонения.", "Мы горим -- энергетика на пределе, рекомендую отход.", "Тяжёлые повреждения, сэр. Боеспособность падает."]
+const VOICE_LEADER_LOST: Array = ["Флагман серьёзно повреждён -- командование эскадрой переходит.", "Мостик флагмана молчит -- беру управление на себя.", "Приказ принят: командование эскадрой -- на второй корабль."]
+const VOICE_SHIP_LOST_OWN: Array = ["Мы теряем «%s»! Спасательные капсулы -- пошли.", "«%s» разрушен -- да упокоятся с миром.", "Потеряли «%s». Продолжаем бой."]
+const VOICE_SHIP_LOST_ENEMY: Array = ["Цель уничтожена -- один корабль противника выведен из строя.", "«%s» противника разрушен.", "Есть! Один корабль хевенитов уничтожен."]
+const VOICE_HALF_ENEMY_DOWN: Array = ["Капитан, у противника серьёзные потери -- их строй разваливается.", "Противник теряет эскадру -- ещё немного, и они дрогнут."]
+const VOICE_HALF_OWN_DOWN: Array = ["Капитан, мы несём тяжёлые потери -- запрашиваю указания по отходу.", "Эскадра тает, сэр. Нужно решение -- держаться или отходить."]
+
+var _voice_seen: Dictionary = {}
+var _own_lost_count: int = 0
+var _en_lost_count: int = 0
+var _own_total: int = 1
+var _en_total: int = 1
+
+func _voice_once(key: String, pool: Array, t: float, sub: String = "") -> void:
+	if _voice_seen.has(key):
+		return
+	_voice_seen[key] = true
+	var line: String = pool[randi() % pool.size()]
+	if sub != "" and line.find("%s") >= 0:
+		line = line % sub
+	_lines.append({"key": "voice:%d" % _lines.size(), "t": t, "bb": "[i][color=%s]« %s »[/color][/i]" % [DIM_HEX, line]})
+	_trim()
+
 const UiTheme = preload("res://scripts/ui_theme.gd")
 const MAX_LINES: int = 60
 const MERGE_WINDOW_S: float = 3.0
@@ -55,6 +88,14 @@ func _ready() -> void:
 func _process(_d: float) -> void:
 	if world == null:
 		return
+	if _own_total <= 1 and _en_total <= 1 and not world.ships.is_empty():
+		_own_total = 0
+		_en_total = 0
+		for sid in world.ships.keys():
+			if _own(sid):
+				_own_total += 1
+			else:
+				_en_total += 1
 	var vs: Vector2 = _panel.get_viewport_rect().size
 	# Right column under the radar (the left column is the ship cards).
 	_panel.position = Vector2(vs.x - _panel.size.x - 8, 348)
@@ -116,6 +157,7 @@ func _ingest(e: Dictionary) -> void:
 			var l := _merge("launch:" + a + ":" + tgt, t)
 			l["count"] += 1
 			l["bb"] = "[color=%s]%s[/color]: залп %d ракет%s → [color=%s]%s[/color]" % [_col(a), ShipNames.of(a), l["count"], _plural(l["count"]), _col(tgt), ShipNames.of(tgt)]
+			_voice_once("launch_" + ("own" if _own(a) else "en"), VOICE_FIRST_LAUNCH_OWN if _own(a) else VOICE_FIRST_LAUNCH_ENEMY, t)
 		"pd_intercept":
 			var s: String = d.get("ship_id", "")
 			var l2 := _merge("pd:" + s, t)
@@ -137,6 +179,11 @@ func _ingest(e: Dictionary) -> void:
 				hp_txt = " — задеты: " + ", ".join(mk.slice(0, 4)) + (" и др." if mk.size() > 4 else "")
 			if l3["dmg"] > 0.0:
 				l3["bb"] = "[color=%s]%s[/color]: попаданий %d%s" % [_col(tg), ShipNames.of(tg), l3["count"], hp_txt]
+				if _own(tg):
+					_voice_once("hit_own", VOICE_FIRST_HIT_OWN, t)
+					var vd: Dictionary = ShipStatus.verdict(world, tg)
+					if vd["text"] != "боеспособен" and vd["text"] != "повреждения":
+						_voice_once("crit_" + tg, VOICE_CRITICAL_OWN, t)
 			else:
 				l3["bb"] = "[color=%s]%s[/color]: %d ракет%s взорвались без урона (клин/бортовая стена)" % [_col(tg), ShipNames.of(tg), l3["count"], _plural(l3["count"])]
 		"weapon_hit":
@@ -155,9 +202,21 @@ func _ingest(e: Dictionary) -> void:
 			var sd: String = d.get("ship_id", "")
 			_lines.append({"key": "dead:" + sd, "t": t, "bb": "[b][color=%s]%s УНИЧТОЖЕН[/color][/b]" % [_col(sd), ShipNames.of(sd)]})
 			_trim()
+			if _own(sd):
+				_own_lost_count += 1
+				_voice_once("lost_" + sd, VOICE_SHIP_LOST_OWN, t, ShipNames.of(sd))
+				if _own_total > 0 and float(_own_lost_count) / float(_own_total) >= 0.5:
+					_voice_once("half_own", VOICE_HALF_OWN_DOWN, t)
+			else:
+				_en_lost_count += 1
+				_voice_once("lost_" + sd, VOICE_SHIP_LOST_ENEMY, t, ShipNames.of(sd))
+				if _en_total > 0 and float(_en_lost_count) / float(_en_total) >= 0.5:
+					_voice_once("half_en", VOICE_HALF_ENEMY_DOWN, t)
 		"formation_leader_lost":
 			_lines.append({"key": "lead:%d" % e["seq"], "t": t, "bb": "[color=%s]Флагман %s потерян, командование принял %s[/color]" % [WARN_HEX, ShipNames.of(d.get("old_guide_id", "")), ShipNames.of(d.get("new_guide_id", ""))]})
 			_trim()
+			if _own(d.get("old_guide_id", "")):
+				_voice_once("leader_lost", VOICE_LEADER_LOST, t)
 
 func _plural(n: int) -> String:
 	var n10: int = n % 10

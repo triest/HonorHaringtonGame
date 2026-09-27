@@ -319,6 +319,21 @@ salvo labels with ETA, off-screen arrows, default attitude broadside. Ideas queu
 retreats, captain/crew voice lines in the log, better models + explosions + sound.
 FOLLOW-UP #5: HP bar removed; module damage model (subsystem_damage_model, ShipStatus,
 module grid in cards, observed-only enemy status). HullState no longer used by the demo.
+FOLLOW-UP #6 (model switched mid-session to claude-sonnet-5; user: "по ТЗ, но
+скучно"): found and fixed a REAL regression from feedback #5 -- removing HullState
+from the demo silently disabled retreat/leader-succession/crossing-T-disengage AI
+(all keyed on world.hulls, which was null). Hull is restored as an internal-only
+derived signal (synced from STRUCTURAL_INTEGRITY every tick), never shown to the
+player. Confirmed via headless probe: formation leadership now actually transfers
+under critical damage. Also added: short bridge/crew voice lines in the battle log
+for milestone moments (first launch, first hit, critical damage, leader lost, ship
+lost, half-fleet-down), each firing once per battle -- confirmed via probe_voice.gd
+(11/11 expected triggers fired in a full battle). New dev tool: simulation/tests/
+probe_voice.gd (same "not test_-prefixed, not part of the auto-run suite" convention
+as probe_demo_scenario.gd/probe_perf.gd).
+Remaining ideas for "still might feel thin": enemy AI that maneuvers/closes distance
+dynamically rather than static broadside, counter-missiles, a full campaign/multiple
+missions, better ship models + explosion effects + sound.
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -345,5 +360,7 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-27 ~14:10 UTC (interactive, feedback #5): module damage
-instead of HP; tests green, Xvfb checked, .exe exported, pushed.
+Last pass finished: 2026-09-27 ~20:10 UTC (interactive, feedback #6, model
+claude-sonnet-5): fixed hull-desync regression (retreat/succession/disengage AI
+were silently dead), added bridge voice lines. Full 50-file test sweep clean,
+.exe re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet.

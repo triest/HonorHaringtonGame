@@ -18,6 +18,7 @@ func _init() -> void:
 	var intercepted := 0
 	var detonated := 0
 	var seen_state: Dictionary = {}
+	var last_seq: int = 0
 	var final_counts: Dictionary = {}
 	var total_s: float = float(OS.get_environment("PROBE_S")) if OS.get_environment("PROBE_S") != "" else 900.0
 	var steps: int = int(total_s / dt)
@@ -44,6 +45,11 @@ func _init() -> void:
 					intercepted += 1
 				elif st == MissileState.GuidanceState.DETONATED:
 					detonated += 1
+		for e in world.battle_events:
+			if e["seq"] > last_seq:
+				last_seq = e["seq"]
+				if e["type"] == "formation_leader_lost":
+					print("t=%.1f LEADER LOST %s -> %s" % [t, e["data"]["old_guide_id"], e["data"]["new_guide_id"]])
 		if i % int(15.0 / dt) == 0 or i == steps - 1:
 			var line := "t=%4.0f sep=%9.0f km msl_total=%d active=%d intercepted=%d detonated=%d |" % [t, world.ships["alpha"].position.distance_to(world.ships["beta"].position) / 1000.0, launched.size(), _active(world), intercepted, detonated]
 			for sid in ["alpha","alpha_2","alpha_3","alpha_4","beta","beta_2","beta_3","beta_4"]:

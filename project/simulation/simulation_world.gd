@@ -793,6 +793,9 @@ func _sync_subsystem_driven_conditions() -> void:
 			tube.condition = ship.subsystems.get_condition(SubsystemType.Type.MISSILE_SYSTEMS)
 		if subsystem_damage_model:
 			_apply_extended_subsystem_effects(ship_id, ship)
+			var hull_sync = hulls.get(ship_id)
+			if hull_sync != null:
+				hull_sync.integrity = ship.subsystems.get_condition(SubsystemType.Type.STRUCTURAL_INTEGRITY) * hull_sync.max_integrity
 
 func _apply_extended_subsystem_effects(ship_id: String, ship: ShipPhysicsState) -> void:
 	var subs = ship.subsystems

@@ -153,9 +153,31 @@ static func _build_side(world: SimulationWorld, ids: Array, team: String, z: flo
 		phys.defense = ShipDefenseState.new()
 		phys.defense.laserhead_sidewall_floor = LASERHEAD_SIDEWALL_FLOOR
 		phys.subsystems = ShipSubsystems.new()
-		# No hit-point pool (AGENTS.md §25.1): destruction and combat
-		# capability come from the ship's modules (subsystem_damage_model).
-		world.add_ship(ship_id, phys)
+		# 2026-09-27 fix (found while chasing "the battle feels static/
+		# boring"): a REAL bug, not a style nit. §25.1 says never show the
+		# player a hit-point bar -- it does NOT say the engine can't use one
+		# internally. Every "AI must ... respond to damage, retreat,
+		# disengage" (§26) call in simulation_world.gd/tactical_ai.gd
+		# (is_critically_damaged, is_guide_lost, select_formation_successor,
+		# select_retreat_vector_world's caller, the crossing-T maneuver's own
+		# critical-damage gate) reads `world.hulls[ship_id]`, not the
+		# subsystem model. Passing `null` here (removing HullState when
+		# subsystem_damage_model was added) made `hulls.get(ship_id)` null
+		# everywhere -- is_critically_damaged(null) short-circuits to
+		# `false` FOREVER, so under subsystem_damage_model no ship EVER
+		# retreated, no flagship ever handed off command when crippled, and
+		# the crossing-T maneuver never disengaged a wrecked ship. That is
+		# a large share of "nothing dynamic happens, everyone just sits
+		# there trading fire until someone dies" -- ships were fighting to
+		# the death in place because the disengage/retreat/succession logic
+		# was silently dead code for this scenario. Fix: still register a
+		# HullState (never read by the UI -- ShipStatus/ShipCardsPanel
+		# never touch world.hulls), kept in lockstep with the ship's own
+		# STRUCTURAL_INTEGRITY condition every tick (see
+		# _apply_extended_subsystem_effects in simulation_world.gd) so the
+		# existing hull-based AI has real data instead of null.
+		var hull := HullState.new()
+		world.add_ship(ship_id, phys, hull)
 		world.set_team(ship_id, team)
 
 		for _t in range(TUBES_PER_SHIP):

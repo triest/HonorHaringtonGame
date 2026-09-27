@@ -3200,3 +3200,15 @@ power factor 0.25+0.75*power, POWER/PROPULSION loss drops the wedge, DEFENSIVE_S
 drive sidewall condition, destruction at STRUCTURAL_INTEGRITY = 0: all ASSUMPTION
 (engineering/gameplay choices consistent with the books' "systems knocked out one by
 one" narrative, no canon figures). HullState stays in the codebase for old tests only.
+
+
+## Hull-as-internal-AI-signal, restored (2026-09-27, feedback #6)
+subsystem_damage_model removing HullState (feedback #5) silently broke every
+hull-keyed AI behavior (retreat, leader succession, crossing-T disengage) since
+they all read world.hulls[id] directly and null short-circuits to "not critical".
+Fix: DemoScenario still registers a HullState per ship; simulation_world.gd syncs
+its integrity from STRUCTURAL_INTEGRITY condition every tick under
+subsystem_damage_model. This hull object is NEVER read by the UI (ShipStatus/
+ShipCardsPanel/BattleOverlay all read subsystems directly) -- §25.1 compliance is
+unaffected, this is purely an internal derived value feeding pre-existing
+hull-based AI code that predates the module-damage model.

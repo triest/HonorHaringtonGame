@@ -19,21 +19,59 @@ extends CanvasLayer
 ## main.gd wires this to "alpha". A future pass can add a second panel
 ## or a POV switch once order input (item 5) gives the player an actual
 ## controlled ship to default the POV to.
+##
+## §56.3 item J (visual polish pass, see .tools/state.md): this panel was
+## bare unstyled text directly on the 3D viewport -- the user's explicit
+## complaint after live-testing items A-E ("debug text/dots on a black
+## screen"). This pass gives it a real styled background (UiTheme,
+## scripts/ui_theme.gd -- a small shared stylebox/color helper, new this
+## pass, meant to be reused by CommandGroupPanel/OrderMenu/WeaponPanel in
+## LATER J sub-passes, not applied to them yet -- see ASSUMPTIONS.md
+## "§56.3 item J" for the honest scope of what this one pass covers) and
+## an accent text color matching TacticalPlot's own-ship marker color, so
+## this panel reads as the same visual system as the tactical plot rather
+## than an unrelated debug overlay. The TEXT CONTENT/layout logic below
+## (_build_text) is completely unchanged -- this is a pure presentation
+## change, still §25.1-compliant (per-subsystem numeric %, no aggregate
+## health bar).
 class_name Hud
 
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
 const ContactState = preload("res://simulation/contact_state.gd")
+const UiTheme = preload("res://scripts/ui_theme.gd")
+
+## Gap (px) between the label's own text bounds and the drawn panel edge
+## around it -- purely a legibility/aesthetic choice (ASSUMPTION, same
+## status as e.g. TacticalPlot.PLOT_MARGIN_PX), not derived from anything.
+const PANEL_PADDING_PX: float = 10.0
 
 var _label: Label
+var _background: Panel
 var pov_ship_id: String = ""
 
 func _ready() -> void:
+	# Background added FIRST so it draws behind the label (CanvasLayer
+	# children render in the order they were added, same convention as
+	# every other layered draw in this codebase, e.g. TacticalPlot draws
+	# rim/rings before contacts before selection rings).
+	_background = Panel.new()
+	_background.name = "HudBackground"
+	_background.add_theme_stylebox_override("panel", UiTheme.panel_stylebox())
+	# Purely decorative chrome behind a text readout -- must never steal
+	# mouse events from whatever's underneath (the 3D viewport, and other
+	# input-consuming UI like TacticalPlot).
+	_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_background)
+
 	_label = Label.new()
 	_label.name = "HudLabel"
 	_label.position = Vector2(12, 12)
-	_label.add_theme_color_override("font_color", Color(0.85, 1.0, 0.85))
+	_label.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR)
+	_label.add_theme_color_override("font_outline_color", Color(0.0, 0.02, 0.02, 0.9))
+	_label.add_theme_constant_override("outline_size", 2)
 	_label.add_theme_font_size_override("font_size", 16)
 	add_child(_label)
+	_layout_background()
 
 ## Call once per simulation tick (same call site/order as WeaponFx.update,
 ## see main.gd._on_tick) with the world and which ship this HUD instance
@@ -41,6 +79,21 @@ func _ready() -> void:
 func update(world: SimulationWorld, ship_id: String) -> void:
 	pov_ship_id = ship_id
 	_label.text = _build_text(world, ship_id)
+	_layout_background()
+
+## §56.3 item J: resizes/repositions `_background` to hug `_label`'s
+## CURRENT real measured bounds (Label.get_minimum_size(), the same
+## "real measurement, not a guess" primitive get_bottom_y() below already
+## relied on pre-item-J) plus PANEL_PADDING_PX on every side. Called after
+## every text change so the panel never lags behind a line-count change
+## (fewer/more subsystems, fewer/more contacts).
+func _layout_background() -> void:
+	if _background == null or _label == null:
+		return
+	var content_size: Vector2 = _label.get_minimum_size()
+	var pad := Vector2(PANEL_PADDING_PX, PANEL_PADDING_PX)
+	_background.position = _label.position - pad
+	_background.size = content_size + pad * 2.0
 
 ## §56.3 item F ("first real shared UI-panel layout pass", §1.10.1's own
 ## note in .tools/state.md): this panel's CURRENT actual rendered bottom
@@ -50,13 +103,20 @@ func update(world: SimulationWorld, ship_id: String) -> void:
 ## "how tall is Hud usually" -- Hud's own line count varies with contact
 ## count/subsystem list, so a fixed guess drifts stale exactly the way
 ## CommandGroupPanel's PANEL_POSITION constant already admitted it might
-## (see that file's own doc comment, pre-item-F). Label.get_minimum_size()
-## reflects the CURRENTLY SET text's real measured size and, unlike a
-## live on-screen pixel readout, is safe to call even before this node
-## has ever been part of a rendered frame (confirmed headless via a
-## throwaway probe script before relying on it here) -- so this is a real
-## measurement, not another guess one layer removed.
+## (see that file's own doc comment, pre-item-F).
+##
+## §56.3 item J update: now returns the styled BACKGROUND panel's real
+## bottom edge (label bottom + PANEL_PADDING_PX), not the bare label's --
+## the background is the panel's actual visible extent now that one
+## exists, so a sibling stacking "below Hud" should stack below the drawn
+## panel, not below where the label would end if the panel weren't there
+## (which would visually clip into/overlap Hud's own border). Falls back
+## to the pre-item-J label-only measurement if _background somehow isn't
+## set (defensive -- _ready() always creates it, same guard style as
+## every other optional-collaborator null-check in this codebase).
 func get_bottom_y() -> float:
+	if _background != null:
+		return _background.position.y + _background.size.y
 	return _label.position.y + _label.get_minimum_size().y
 
 func _build_text(world: SimulationWorld, ship_id: String) -> String:

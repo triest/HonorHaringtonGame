@@ -3038,3 +3038,101 @@ this item fixes, was purely at the CONTROLLER/routing layer:
   baseline dummy-renderer errors as the previous pass (zero new error
   types -- expected, this pass touched routing logic only, not scenario
   data/ship count).
+
+
+## §56.3 item J -- visual polish pass, sub-piece 1: Hud panel styling (2026-09-27 scheduled dev pass)
+
+**Scope of this ONE sub-piece, not all of item J**: state.md's own plan for
+item J is "pick ONE concrete sub-piece to start... rather than trying all
+panels in one pass". This pass did exactly Hud (scripts/hud.gd) -- the
+single-Label §56.1-era readout the user explicitly called "debug text on a
+black screen" after live-testing items A-E. CommandGroupPanel, OrderMenu,
+WeaponPanel, and TacticalPlot's own rim/background chrome were NOT touched
+this pass and remain their pre-J visual style. Item J's checklist line in
+state.md stays UNCHECKED after this pass -- this is progress within it, not
+its closure.
+
+* **New shared helper: `scripts/ui_theme.gd` (`UiTheme`)** -- a small,
+  dependency-free style/color module: `panel_stylebox()` builds a
+  `StyleBoxFlat` (dark translucent fill, thin cyan border, rounded
+  corners -- the reference image's recurring "HUD glass panel" look),
+  and `ACCENT_COLOR` is the same cyan as `TacticalPlot.OWN_SHIP_COLOR`
+  (kept as an independent literal, not a cross-file reference, matching
+  this codebase's existing small-constant convention -- see e.g.
+  `MISSILE_COLOR`'s own doc comment in tactical_plot.gd). Meant to be
+  reused by CommandGroupPanel/OrderMenu/WeaponPanel in LATER J
+  sub-passes so every panel eventually shares one palette/stylebox
+  recipe instead of each hand-rolling its own -- **honest gap**: as of
+  this pass, Hud is the ONLY consumer; the other panels' styling is
+  unchanged and this reuse has not actually happened yet.
+* **`UiTheme.condition_color()`/`CONDITION_*_COLOR` also added but NOT
+  yet wired into Hud's text** -- built as forward-looking infrastructure
+  for a later sub-pass that colors each subsystem's % readout by its own
+  condition (allowed under §25.1, see that const's own doc comment for
+  the exact reasoning: per-subsystem number, not an aggregate health
+  bar). This pass's Hud change is a single flat accent color for the
+  whole label (a plain Godot `Label` can't do per-substring color; doing
+  real per-line color coding would mean switching to a BBCode
+  `RichTextLabel`, which changes the node's exposed type and was judged
+  too much surface area to also correctly verify headless in the same
+  pass as the background-panel change -- deferred, not forgotten, see
+  the "left for a later sub-pass" list below).
+* **Hud change, concretely**: a new `Panel` child (`HudBackground`,
+  added to the scene tree BEFORE the existing `HudLabel` so it draws
+  behind, not over, the text) styled via `UiTheme.panel_stylebox()`,
+  resized every `update()` to hug `HudLabel`'s real measured
+  `get_minimum_size()` plus a fixed padding constant
+  (`PANEL_PADDING_PX`) -- same "measure the real thing, don't guess"
+  principle `get_bottom_y()` already used pre-item-J. Label font color
+  switched from a plain pale green to `UiTheme.ACCENT_COLOR` (cyan,
+  matching the tactical plot's own-ship marker) plus a dark font outline
+  for legibility against the 3D viewport in the corner. `_build_text`'s
+  actual text content/section logic is completely untouched -- pure
+  presentation, still §25.1-compliant (per-subsystem numeric %, no
+  aggregate ship-health bar/color).
+* **`Hud.get_bottom_y()`'s meaning changed** (and its doc comment updated
+  in place, not just appended to): it now returns the styled
+  BACKGROUND panel's real bottom edge, not the bare label's -- the
+  background is what's actually visibly drawn now, and
+  `CommandGroupPanel` (which stacks below Hud via this exact return
+  value, unchanged call site in main.gd) should stack below the drawn
+  panel's border, not below where the label would end if there were no
+  panel (which would visually clip into Hud's own border). This is a
+  correctness fix enabled by the new panel existing, not a
+  behavior-preserving refactor -- `test_hud.gd`'s
+  `_test_get_bottom_y_reflects_real_label_height` was updated to assert
+  the NEW expected formula (background bottom, not label bottom),
+  matching this codebase's existing convention of rewriting a test whose
+  old assertion encoded since-superseded behavior (see §56.3 item I's
+  `test_move_order_controller.gd` rewrite for the precedent). A new test,
+  `_test_background_panel_is_styled_and_wraps_the_label`, checks the
+  background exists, is a real `StyleBoxFlat` (not the engine default),
+  draws behind the label (child-order index), and its rect actually
+  encloses the label's measured bounds with real padding.
+* **Explicitly left for a later J sub-pass** (not done this pass, listed
+  so nobody assumes silently): CommandGroupPanel/OrderMenu/WeaponPanel
+  still have zero background/border styling; TacticalPlot's own rim
+  (already a filled circle + rings, not literally "bare text", but not
+  yet using `UiTheme` either) was not touched or unified with the new
+  shared style; per-subsystem color-coded condition readout in Hud
+  (infrastructure built, not wired); the reference image's actual
+  panel LAYOUT (squadron list top-left / tactical-plot-minimap top-right
+  / ship-card + weapon-bar bottom) is still the pre-56.3 ad-hoc stacked
+  layout, this pass only restyled Hud's existing position, it did not
+  reflow the screen to match the reference composition.
+* **Live/visual confirmation: none** -- same standing limitation as
+  every other §56.3 item (no Vulkan/real display in this headless
+  environment to actually SEE the new panel rendered). Verified
+  headlessly only: `test_hud.gd` 21 checks (up from 16), all passing;
+  `godot --headless --import` clean; scene smoke run
+  (`scenes/main.tscn --quit-after 120`) exit 0, exactly the same 48
+  baseline dummy-renderer errors, zero new error types (expected --
+  this pass added a Panel/StyleBoxFlat and recolored a Label, neither of
+  which the dummy renderer's mesh-surface-count errors have anything to
+  do with). Windows `.exe` re-exported per the standing process rule
+  (AGENTS.md §56.3): `.pck` grew from 455,776B to 458,960B, confirming
+  the new code is actually in the build. Whether this genuinely reads as
+  a "styled glass panel" rather than "colored debug text with a gray box
+  behind it" on a real screen is exactly the kind of thing this
+  environment cannot judge -- needs the user's own live look, same as
+  every other honest gap logged in this file.

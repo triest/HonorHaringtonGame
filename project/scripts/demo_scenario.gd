@@ -37,7 +37,7 @@ const LINE_SPACING_M: float = 20_000.0       # 20 km between ships abreast
 const SENSOR_RANGE_M: float = 1.0e10         # 10 million km: gravitic detection of impeller wedges + missile telemetry link (ASSUMPTION)
 
 const TUBES_PER_SHIP: int = 4
-const MISSILE_ROUNDS_PER_TUBE: int = 12
+const MISSILE_ROUNDS_PER_TUBE: int = 40
 const MISSILE_RELOAD_S: float = 20.0
 const MISSILE_LAUNCH_RANGE_M: float = 5.0e9  # 5 million km
 
@@ -82,8 +82,11 @@ static func build(world: SimulationWorld) -> void:
 	world.missile_detonation_range_override_m = LASERHEAD_TERMINAL_RANGE_M
 	world.missile_max_lifetime_override_s = MISSILE_MAX_LIFETIME_S
 	world.missile_zem_guidance = true
-	_build_side(world, RED_IDS, "red", SEPARATION_M * 0.5, false)
-	_build_side(world, BLUE_IDS, "blue", -SEPARATION_M * 0.5, true)
+	# Player squadron starts at the world origin (not symmetric about it):
+	# float32 positions are most precise near 0, and the player zooms into
+	# their own ships far more than the enemy's (see RenderOrigin).
+	_build_side(world, RED_IDS, "red", 0.0, false)
+	_build_side(world, BLUE_IDS, "blue", -SEPARATION_M, true)
 	_make_formation(world, PLAYER_FORMATION_ID, RED_IDS)
 	_make_formation(world, ENEMY_FORMATION_ID, BLUE_IDS)
 	world.add_command_echelon(PLAYER_ECHELON_ID, "Squadron 1")

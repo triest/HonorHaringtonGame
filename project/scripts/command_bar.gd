@@ -25,6 +25,12 @@ class_name CommandBar
 
 const UiTheme = preload("res://scripts/ui_theme.gd")
 
+const TIME_SCALES: Array = [1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0]
+## Auto-slowdown: while any missile is within this distance of its target,
+## time is capped to SLOWDOWN_CAP so the terminal phase (PD, hits) can be
+## watched and the simulation keeps its fine tick there. Toggleable.
+const SLOWDOWN_RANGE_M: float = 1.5e9
+const SLOWDOWN_CAP: float = 10.0
 const TURN_STEP_RAD: float = deg_to_rad(15.0)
 const SPEED_STEP_MPS: float = 50_000.0      # 50 km/s per click
 const FULL_THRUST_FRACTION: float = 0.8     # same 80% margin DemoScenario uses
@@ -37,6 +43,9 @@ var command_group_controller: CommandGroupController
 var tactical_plot: TacticalPlot
 var camera_focus_controller: CameraFocusController
 
+var auto_slowdown: bool = true
+var _slow_btn: Button
+var _slowdown_active: bool = false
 var _clock_label: Label
 var _sel_label: Label
 var _fire_label: Label
@@ -75,16 +84,19 @@ func _ready() -> void:
 
 	_group_title(row, "ВРЕМЯ")
 	_time_buttons[0.0] = _btn(row, "Пауза", func(): _set_time(0.0), "Space")
-	for s in [1.0, 5.0, 25.0, 100.0]:
+	for s in TIME_SCALES:
 		var sc: float = s
 		_time_buttons[sc] = _btn(row, "x%d" % int(sc), func(): _set_time(sc))
+
+	_slow_btn = _btn(row, "Авто-замедл.: ВКЛ", _toggle_slowdown, "Замедлять до x10, пока ракеты подлетают к целям")
 
 	_group_title(row, "ВЫБОР")
 	_btn(row, "Эскадра", _select_squadron, "Выделить все свои корабли")
 	_btn(row, "Флагман", _select_flagship)
 	_btn(row, "Цель >", _cycle_target, "Следующая вражеская цель")
 	_btn(row, "Группа (G)", _make_group, "Сделать отряд из выделения")
-	_btn(row, "Центр (Home)", _focus, "Камера на выделение")
+	_btn(row, "Камера к выделению", _focus, "Home / двойной клик по кораблю: камера летит к кораблю и следует за ним")
+	_btn(row, "Общий вид", _overview, "Esc: отпустить камеру и показать весь бой")
 
 	_group_title(row, "МАНЕВР")
 	_btn(row, "< Курс 15°", func(): _turn(1.0))
@@ -160,10 +172,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_M:
 				_toggle_radar()
 				get_viewport().set_input_as_handled()
-			KEY_1: _set_time(1.0)
-			KEY_2: _set_time(5.0)
-			KEY_3: _set_time(25.0)
-			KEY_4: _set_time(100.0)
+			KEY_BRACKETRIGHT, KEY_PERIOD:
+				_step_time(1)
+			KEY_BRACKETLEFT, KEY_COMMA:
+				_step_time(-1)
+			KEY_ESCAPE:
+				if camera_focus_controller != null:
+					camera_focus_controller.stop_follow()
 
 # ---------------------------------------------------------------- status
 
@@ -175,7 +190,11 @@ func sync() -> void:
 		return
 	var clk: SimClock = world.clock
 	var t: int = int(world.world_sim_time)
+	_slowdown_active = auto_slowdown and _missiles_closing()
+	clk.scale_cap = SLOWDOWN_CAP if _slowdown_active else 0.0
 	var speed_txt: String = "ПАУЗА" if clk.paused else "x%d (факт x%.0f)" % [int(clk.time_scale), clk.effective_time_scale]
+	if _slowdown_active and not clk.paused and clk.time_scale > SLOWDOWN_CAP:
+		speed_txt += " [замедление: ракеты у целей]"
 	var sep_txt: String = ""
 	var d: float = _enemy_distance_m()
 	if d > 0.0:
@@ -199,7 +218,17 @@ func sync() -> void:
 	for mid in world.missiles.keys():
 		if world.missiles[mid].is_active() and String(world.teams.get(world.missile_owners.get(mid, ""), "")) != player_team:
 			msl += 1
-	_fire_label.text = "Цель: %s   входящих ракет: %d%s" % [tgt if tgt != "" else "—", msl, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
+	var ammo_own: int = 0
+	var ammo_en: int = 0
+	for sid in world.missile_tubes.keys():
+		if world.ships.has(sid) and world.ships[sid].is_wreck:
+			continue
+		for tube in world.missile_tubes[sid]:
+			if String(world.teams.get(sid, "")) == player_team:
+				ammo_own += tube.ammo_count
+			else:
+				ammo_en += tube.ammo_count
+	_fire_label.text = "Цель: %s   входящих ракет: %d   боезапас: %d (у врага ~%d)%s" % [tgt if tgt != "" else "—", msl, ammo_own, ammo_en, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
 
 func _say(text: String) -> void:
 	_status_text = text
@@ -244,6 +273,24 @@ func _own_selected() -> Array:
 
 # ---------------------------------------------------------------- time
 
+func _step_time(dir: int) -> void:
+	var cur: int = TIME_SCALES.find(world.clock.time_scale)
+	if cur < 0:
+		cur = 0
+	_set_time(TIME_SCALES[clampi(cur + dir, 0, TIME_SCALES.size() - 1)])
+
+func _toggle_slowdown() -> void:
+	auto_slowdown = not auto_slowdown
+	_slow_btn.text = "Авто-замедл.: %s" % ("ВКЛ" if auto_slowdown else "ВЫКЛ")
+
+## True if any active missile is within SLOWDOWN_RANGE_M of its target.
+func _missiles_closing() -> bool:
+	for mid in world.missiles.keys():
+		var m = world.missiles[mid]
+		if m.is_active() and m.target != null and m.position.distance_to(m.target.position) < SLOWDOWN_RANGE_M:
+			return true
+	return false
+
 func _set_time(scale: float) -> void:
 	if scale <= 0.0:
 		world.clock.paused = true
@@ -286,6 +333,22 @@ func _make_group() -> void:
 		return
 	var id: String = command_group_controller.make_group_from_selection()
 	_say("отряд создан" if id != "" else "нужно выделить 2+ своих корабля вне строя")
+
+func _overview() -> void:
+	if camera_focus_controller == null:
+		return
+	camera_focus_controller.stop_follow()
+	var cam = camera_focus_controller.camera
+	if cam == null:
+		return
+	var ids: Array = _alive_ids(true) + _alive_ids(false)
+	var c = _centroid(ids)
+	if c == null:
+		return
+	var spread: float = 1.0
+	for sid in ids:
+		spread = maxf(spread, (c as Vector3).distance_to(world.ships[sid].position))
+	cam.focus_on(c, spread)
 
 func _focus() -> void:
 	if camera_focus_controller != null:

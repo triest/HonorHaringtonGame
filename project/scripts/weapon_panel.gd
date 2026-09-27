@@ -71,7 +71,9 @@ func sync() -> void:
 		_entries = controller.rows
 		var box_size: Vector2 = _box_size()
 		var viewport_size: Vector2 = get_viewport_rect().size
-		position = Vector2(MARGIN_PX, maxf(MARGIN_PX, viewport_size.y - box_size.y - MARGIN_PX - bottom_reserved_px))
+		# 2026-09-27: bottom-RIGHT (was bottom-left, where it now collided
+		# with the command-group list stacked under the HUD).
+		position = Vector2(maxf(MARGIN_PX, viewport_size.x - box_size.x - MARGIN_PX), maxf(MARGIN_PX, viewport_size.y - box_size.y - MARGIN_PX - bottom_reserved_px))
 		size = box_size
 		visible = true
 		queue_redraw()

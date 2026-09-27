@@ -222,6 +222,7 @@ func _ready() -> void:
 	battle_overlay.player_team = player_team
 	battle_overlay.move_order_controller = move_order_controller
 	battle_overlay.order_menu_controller = order_menu_controller
+	battle_overlay.camera_focus_controller = camera_focus_controller
 	add_child(battle_overlay)
 	# Drawn under the other Controls (plot, menus): move to the front of
 	# the Control draw order, i.e. index right after the world node.
@@ -239,12 +240,24 @@ func _ready() -> void:
 	# Live-game clock tuning (defaults off for tests, see SimClock.advance):
 	# coarser ticks at high time scales + a per-frame CPU budget so 25x/100x
 	# stay responsive with hundreds of missiles in flight.
-	world.clock.max_dt_multiplier = 6
+	world.clock.max_dt_multiplier = 50
 	world.clock.frame_budget_ms = 10.0
 	# Start on the whole squadron selected, at 5x: the opening approach is
 	# minutes of sim time before missile range.
 	selection.select_only(DemoScenario.RED_IDS.duplicate())
 	world.clock.set_time_scale(5.0)
+
+	# Floating render origin + free zoom down to a single hull (see
+	# RenderOrigin / OrbitCamera.use_floating_origin). Camera runs after
+	# the simulation tick (world._process) and ship views after the camera,
+	# so a followed ship is drawn at this frame's position, not last frame's.
+	var cam := get_node_or_null("Camera3D") as OrbitCamera
+	if cam != null:
+		cam.use_floating_origin = true
+		cam.process_priority = 10
+	for child in get_children():
+		if child is ShipView:
+			child.process_priority = 20
 
 	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()

@@ -303,6 +303,9 @@ select/box/RMB course/LMB-enemy order menu over the 3D view), scripts/command_ba
 (bottom button bar: time, selection, maneuver, fire, radar), radar enlarge/zoom,
 plus sim fixes (swept missile arming, formation feedforward, ZEM guidance opt-in,
 perf knobs). NOT yet live-confirmed by the user.
+FOLLOW-UP same day (live feedback #2, see CHANGELOG "живой отзыв №2"): ammo 40/tube,
+time x1..x2000 + auto-slowdown, floating render origin + free zoom to a single hull +
+camera follow, per-ship labels in squadron clusters. Also not live-confirmed.
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -329,8 +332,6 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-27 ~11:30 UTC (interactive session with the user, not
-cron): canon-shaped scenario + BattleOverlay + CommandBar + radar enlarge + sim
-fixes, see "Next concrete step" above and CHANGELOG. 33 targeted test files green,
-headless battle probe and Xvfb screenshots checked, Windows .exe re-exported
-(.pck 754160 B), pushed. §56.3 NOT closed; nothing live-confirmed yet.
+Last pass finished: 2026-09-27 ~12:10 UTC (interactive session, live feedback #2):
+ammo/time-scale/zoom/individual-ship fixes, targeted tests green, Xvfb screenshots
+checked, .exe re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet.

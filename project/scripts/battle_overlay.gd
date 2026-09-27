@@ -41,6 +41,7 @@ const CLUSTER_PX: float = 16.0
 const PICK_RADIUS_PX: float = 14.0
 const DRAG_THRESHOLD_PX: float = 6.0
 const MISSILE_STREAK_S: float = 2.0
+const CLOSE_UP_M: float = 25_000.0
 
 var world: SimulationWorld
 var selection: SelectionState
@@ -48,6 +49,9 @@ var camera: Camera3D
 var player_team: String = ""
 var move_order_controller: MoveOrderController
 var order_menu_controller: OrderMenuController
+## Double-click on an own ship/squadron symbol: select it and fly the
+## camera to it (follows it; Esc releases). Set by main.gd.
+var camera_focus_controller: CameraFocusController
 
 var _icons: Array = []  # {id, pos: Vector2, own: bool, hostile: bool}
 var _lmb_down: bool = false
@@ -119,13 +123,13 @@ func _draw() -> void:
 	for o in objs:
 		if o["kind"] != "missile":
 			continue
-		if camera.is_position_behind(o["pos3"]):
+		if camera.is_position_behind(RenderOrigin.to_render(o["pos3"])):
 			continue
-		var p: Vector2 = camera.unproject_position(o["pos3"])
+		var p: Vector2 = camera.unproject_position(RenderOrigin.to_render(o["pos3"]))
 		var col: Color = OWN_MISSILE_COLOR if o["own"] else HOSTILE_MISSILE_COLOR
 		var tail3: Vector3 = o["pos3"] - o["vel3"] * MISSILE_STREAK_S
-		if not camera.is_position_behind(tail3):
-			var tp: Vector2 = camera.unproject_position(tail3)
+		if not camera.is_position_behind(RenderOrigin.to_render(tail3)):
+			var tp: Vector2 = camera.unproject_position(RenderOrigin.to_render(tail3))
 			draw_line(tp, p, Color(col, 0.45), 1.0)
 		draw_circle(p, 2.2, col)
 
@@ -136,10 +140,10 @@ func _draw() -> void:
 			if ship == null:
 				continue
 			var tgt: Vector3 = move_order_controller.active_move_orders[anchor_id]["target_point"]
-			if camera.is_position_behind(ship.position) or camera.is_position_behind(tgt):
+			if camera.is_position_behind(RenderOrigin.to_render(ship.position)) or camera.is_position_behind(RenderOrigin.to_render(tgt)):
 				continue
-			var a: Vector2 = camera.unproject_position(ship.position)
-			var b: Vector2 = camera.unproject_position(tgt)
+			var a: Vector2 = camera.unproject_position(RenderOrigin.to_render(ship.position))
+			var b: Vector2 = camera.unproject_position(RenderOrigin.to_render(tgt))
 			draw_dashed_line(a, b, MOVE_COLOR, 1.5, 8.0)
 			draw_arc(b, 6.0, 0.0, TAU, 16, MOVE_COLOR, 1.5)
 
@@ -149,10 +153,10 @@ func _draw() -> void:
 	for o in objs:
 		if o["kind"] != "ship":
 			continue
-		if camera.is_position_behind(o["pos3"]):
+		if camera.is_position_behind(RenderOrigin.to_render(o["pos3"])):
 			continue
-		var p: Vector2 = camera.unproject_position(o["pos3"])
-		_icons.append({"id": o["id"], "pos": p, "own": o["own"], "hostile": not o["own"], "wreck": o["wreck"]})
+		var p: Vector2 = camera.unproject_position(RenderOrigin.to_render(o["pos3"]))
+		_icons.append({"id": o["id"], "pos": p, "own": o["own"], "hostile": not o["own"], "wreck": o["wreck"], "cam_dist": camera.global_position.distance_to(RenderOrigin.to_render(o["pos3"]))})
 		var joined: bool = false
 		for c in clusters:
 			if c["own"] == o["own"] and c["pos"].distance_to(p) < CLUSTER_PX:
@@ -165,7 +169,12 @@ func _draw() -> void:
 	for ic in _icons:
 		var col: Color = WRECK_COLOR if ic["wreck"] else (OWN_COLOR if ic["own"] else HOSTILE_COLOR)
 		var p: Vector2 = ic["pos"]
-		if ic["wreck"]:
+		# Close enough to see the actual hull mesh: don't paint a symbol
+		# over it, just the selection brackets + label.
+		var close_up: bool = ic.get("cam_dist", INF) < CLOSE_UP_M
+		if close_up:
+			pass
+		elif ic["wreck"]:
 			draw_line(p + Vector2(-5, -5), p + Vector2(5, 5), col, 2.0)
 			draw_line(p + Vector2(-5, 5), p + Vector2(5, -5), col, 2.0)
 		elif ic["own"]:
@@ -181,25 +190,47 @@ func _draw() -> void:
 		if selection != null and selection.designated_target_id == ic["id"]:
 			_draw_brackets(p, 14.0, TARGET_COLOR)
 
+	# Labels: a lone ship gets "name hull%"; a stacked squadron gets a
+	# header plus ONE LINE PER SHIP (name + hull %), and every line is a
+	# click target selecting exactly that ship -- the user asked to see
+	# and pick individual ships even when the whole line is one dot.
+	_label_hits.clear()
 	for c in clusters:
 		var ids: Array = c["ids"]
-		var text: String
-		if ids.size() == 1:
-			text = _ship_label(ids[0])
-		else:
+		var col2: Color = OWN_COLOR if c["own"] else HOSTILE_COLOR
+		var at: Vector2 = c["pos"] + Vector2(12, -8)
+		if ids.size() > 1:
 			var alive: int = 0
 			for sid in ids:
 				if not world.ships[sid].is_wreck:
 					alive += 1
-			text = "%s  (%d/%d)" % ["ЭСКАДРА" if c["own"] else "ПРОТИВНИК", alive, ids.size()]
-		var col2: Color = OWN_COLOR if c["own"] else HOSTILE_COLOR
-		draw_string_outline(font, c["pos"] + Vector2(12, -8), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 3, Color(0, 0, 0, 0.9))
-		draw_string(font, c["pos"] + Vector2(12, -8), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col2)
+			_outlined(font, at, "%s  (%d/%d)" % ["ЭСКАДРА" if c["own"] else "ПРОТИВНИК", alive, ids.size()], 14, col2)
+			at.y += 16
+		for sid in ids:
+			var line: String = _ship_label(sid)
+			var lc: Color = WRECK_COLOR if world.ships[sid].is_wreck else col2
+			if selection != null and selection.is_selected(sid):
+				line = "> " + line
+				lc = SELECT_COLOR
+			elif selection != null and selection.designated_target_id == sid:
+				line = "◎ " + line
+				lc = TARGET_COLOR
+			var fs: int = 13 if ids.size() > 1 else 14
+			_outlined(font, at, line, fs, lc)
+			var w: float = font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			_label_hits.append({"rect": Rect2(at + Vector2(0, -fs), Vector2(w, fs + 3)), "id": sid, "own": c["own"], "wreck": world.ships[sid].is_wreck})
+			at.y += 15
 
 	if _dragging:
 		var r := Rect2(_lmb_start, _lmb_cur - _lmb_start).abs()
 		draw_rect(r, Color(0.6, 0.9, 1.0, 0.12), true)
 		draw_rect(r, Color(0.6, 0.9, 1.0, 0.8), false, 1.0)
+
+var _label_hits: Array = []
+
+func _outlined(font: Font, at: Vector2, text: String, fs: int, col: Color) -> void:
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color(0, 0, 0, 0.9))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 func _ship_label(sid: String) -> String:
 	var h = world.hulls.get(sid)
@@ -218,6 +249,14 @@ func _draw_brackets(p: Vector2, r: float, col: Color) -> void:
 			draw_line(corner, corner - Vector2(0, sy * l), col, 1.5)
 
 func _pick(pos: Vector2) -> Dictionary:
+	# Per-ship label lines first: exact single-ship pick.
+	for lh in _label_hits:
+		if not lh["wreck"] and lh["rect"].has_point(pos):
+			for ic in _icons:
+				if ic["id"] == lh["id"]:
+					var d: Dictionary = ic.duplicate()
+					d["from_label"] = true
+					return d
 	var best: Dictionary = {}
 	var best_d: float = PICK_RADIUS_PX
 	for ic in _icons:
@@ -269,6 +308,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_click(mb.position, mb.ctrl_pressed, mb.shift_pressed)
 				get_viewport().set_input_as_handled()
+			if mb.pressed and mb.double_click:
+				var hit: Dictionary = _pick(mb.position)
+				if not hit.is_empty() and camera_focus_controller != null:
+					if hit["own"]:
+						selection.select_only([hit["id"]])
+					else:
+						selection.designate_target(hit["id"])
+					camera_focus_controller.try_focus()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			if mb.pressed:
 				_rmb_down = true
@@ -299,7 +346,7 @@ func _click(pos: Vector2, ctrl: bool, shift: bool) -> void:
 		else:
 			selection.designate_target(hit["id"])
 		return
-	var ids: Array = _cluster_ids_at(hit["pos"], true)
+	var ids: Array = [] if hit.get("from_label", false) else _cluster_ids_at(hit["pos"], true)
 	if ids.size() > 1 and not ctrl:
 		# First click on a stacked squadron symbol selects the whole
 		# squadron; clicking again while it is already the full selection
@@ -346,7 +393,7 @@ func _move_order_at(pos: Vector2) -> void:
 			n += 1
 	if n > 0:
 		plane_y /= float(n)
-	var origin: Vector3 = camera.project_ray_origin(pos)
+	var origin: Vector3 = RenderOrigin.to_world(camera.project_ray_origin(pos))
 	var dir: Vector3 = camera.project_ray_normal(pos)
 	if absf(dir.y) < 1e-6:
 		return

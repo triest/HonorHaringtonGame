@@ -60,7 +60,7 @@ func _ready() -> void:
 ## this, see main.gd doc comment) with the same `world` main.gd owns.
 func update(world: SimulationWorld) -> void:
 	for shot in world.last_tick_weapon_shots:
-		_spawn_beam(shot["attacker_position"], shot["target_position"], shot["outcome"])
+		_spawn_beam(RenderOrigin.to_render(shot["attacker_position"]), RenderOrigin.to_render(shot["target_position"]), shot["outcome"])
 	_sync_missile_markers(world)
 
 func _spawn_beam(from: Vector3, to: Vector3, outcome: int) -> void:
@@ -125,7 +125,7 @@ func _sync_missile_markers(world: SimulationWorld) -> void:
 			marker.material_override = _missile_marker_material
 			add_child(marker)
 			_missile_markers[missile_id] = marker
-		marker.global_position = missile.position
+		marker.global_position = RenderOrigin.to_render(missile.position)
 
 	for missile_id in _missile_markers.keys().duplicate():
 		if not live_ids.has(missile_id):

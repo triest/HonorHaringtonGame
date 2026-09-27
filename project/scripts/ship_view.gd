@@ -149,7 +149,7 @@ static func _bow_stern_sidewall_visible(raised: bool, condition: float) -> bool:
 func _process(_delta: float) -> void:
 	if sim_state == null:
 		return
-	global_position = sim_state.position
+	global_position = RenderOrigin.to_render(sim_state.position)
 	global_basis = Basis(sim_state.orientation)
 
 	var defense: ShipDefenseState = sim_state.defense

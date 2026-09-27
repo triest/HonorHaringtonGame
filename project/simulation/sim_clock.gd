@@ -13,7 +13,7 @@ class_name SimClock
 const FIXED_DT: float = 1.0 / 60.0
 
 ## Time scale multipliers supported by the UI (ТЗ §44 Time Control).
-const ALLOWED_TIME_SCALES: Array[float] = [0.0, 1.0, 2.0, 5.0, 10.0, 25.0, 100.0]
+const ALLOWED_TIME_SCALES: Array[float] = [0.0, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0]
 
 var time_scale: float = 1.0
 var paused: bool = false
@@ -49,7 +49,12 @@ func advance(frame_delta: float) -> void:
 		single_step_requested = false
 		return
 
-	_accumulator += frame_delta * time_scale
+	# 2026-09-27: optional external cap (e.g. auto-slowdown while missiles
+	# are in their terminal approach), 0 = no cap.
+	var eff_scale: float = time_scale
+	if scale_cap > 0.0:
+		eff_scale = minf(eff_scale, scale_cap)
+	_accumulator += frame_delta * eff_scale
 	# 2026-09-27 (live demo at canon scale, hundreds of missiles in
 	# flight): optional adaptive coarsening + per-frame CPU budget. Both
 	# default OFF (max_dt_multiplier = 1, frame_budget_ms = 0) so every
@@ -62,8 +67,8 @@ func advance(frame_delta: float) -> void:
 	#    the sim then honestly runs slower than the requested scale, and
 	#    `effective_time_scale` reports what was actually achieved.
 	var m: int = 1
-	if max_dt_multiplier > 1 and time_scale > 1.0:
-		m = clampi(int(time_scale / 4.0), 1, max_dt_multiplier)
+	if max_dt_multiplier > 1 and eff_scale > 1.0:
+		m = clampi(int(eff_scale / 4.0), 1, max_dt_multiplier)
 	var step: float = FIXED_DT * float(m)
 	var max_ticks_per_frame := 100
 	var ticks_run := 0
@@ -82,6 +87,7 @@ func advance(frame_delta: float) -> void:
 
 ## See advance(): both default to the old exact behavior.
 var max_dt_multiplier: int = 1
+var scale_cap: float = 0.0
 var frame_budget_ms: float = 0.0
 ## Smoothed actually-achieved sim-seconds per real second (UI readout).
 var effective_time_scale: float = 1.0

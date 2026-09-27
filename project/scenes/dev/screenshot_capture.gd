@@ -37,6 +37,32 @@ func _presim() -> void:
 	world.clock.paused = true
 	if OS.get_environment("SCREENSHOT_RADAR_BIG") == "1":
 		main.get("tactical_plot").set_enlarged(true)
+	var focus_id: String = OS.get_environment("SCREENSHOT_FOCUS")
+	if focus_id != "":
+		main.get("selection").select_only([focus_id])
+		main.get("camera_focus_controller").try_focus()
+		var zd: String = OS.get_environment("SCREENSHOT_ZOOM_M")
+		if zd != "":
+			var cam = main.get_node("Camera3D")
+			cam.distance = float(zd)
+			cam._update_transform()
+	if OS.get_environment("SCREENSHOT_CUBE") == "1":
+		var cube := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(300, 300, 300)
+		cube.mesh = bm
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = Color(1, 0, 0)
+		cube.material_override = mat
+		add_child(cube)
+		cube.global_position = Vector3(600, 0, 0)
+	if OS.get_environment("SCREENSHOT_DEBUG") == "1":
+		var cam2 = main.get_node("Camera3D")
+		print("DEBUG origin=", RenderOrigin.origin, " cam pos=", cam2.global_position, " near=", cam2.near, " far=", cam2.far)
+		for ch in main.get_children():
+			if ch is ShipView:
+				print("DEBUG shipview ", ch.global_position, " vis=", ch.visible)
 	main.call("_on_tick", 0.0, 0, 0.0)
 
 func _process(_delta: float) -> void:
@@ -46,6 +72,13 @@ func _process(_delta: float) -> void:
 	if _frames_waited < FRAMES_TO_WAIT:
 		return
 
+	if OS.get_environment("SCREENSHOT_DEBUG") == "1":
+		var mainn: Node = get_child(0)
+		var camx = mainn.get_node("Camera3D")
+		print("DEBUG2 origin=", RenderOrigin.origin, " cam=", camx.global_position, " cur=", camx.current, " near=", camx.near, " far=", camx.far)
+		for ch in mainn.get_children():
+			if ch is ShipView:
+				print("DEBUG2 shipview ", ch.global_position, " hull=", ch.hull_mesh_instance.global_position, " ", ch.hull_mesh_instance.get_aabb())
 	var image: Image = get_viewport().get_texture().get_image()
 	var output_path: String = OS.get_environment("SCREENSHOT_OUTPUT_PATH")
 	if output_path.is_empty():

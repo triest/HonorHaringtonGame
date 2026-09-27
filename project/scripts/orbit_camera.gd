@@ -82,6 +82,8 @@ func frame_on(new_pivot: Vector3, spread: float) -> void:
 func focus_on(new_pivot: Vector3, spread: float) -> void:
 	pivot = new_pivot
 	var required_distance: float = _required_distance_for_spread(spread, fov)
+	if use_floating_origin:
+		required_distance = maxf(required_distance, 1500.0)
 	distance = required_distance
 	_base_distance = required_distance
 	far = maxf(far, _required_far_for_base_distance(required_distance))
@@ -127,7 +129,37 @@ static func _spherical_offset(yaw: float, pitch: float, distance: float) -> Vect
 	var horizontal: float = cos(pitch) * distance
 	return Vector3(sin(yaw) * horizontal, sin(pitch) * distance, cos(yaw) * horizontal)
 
+## 2026-09-27 live game only (main.gd turns it on; default off keeps every
+## existing test's pivot+offset expectations): floating render origin +
+## absolute zoom limits, so the player can zoom from the whole
+## multi-million-km battle down to a single 500 m hull. See RenderOrigin.
+var use_floating_origin: bool = false
+const ABS_MIN_DISTANCE_M: float = 350.0
+const ABS_MAX_DISTANCE_M: float = 4.0e10
+## Optional per-frame pivot provider (Callable returning Vector3 or null):
+## CameraFocusController sets it to "centroid of the followed ships" so the
+## camera stays on a ship moving at hundreds of km/s.
+var follow_provider: Callable = Callable()
+
+func _min_distance() -> float:
+	return ABS_MIN_DISTANCE_M if use_floating_origin else _base_distance * MIN_DISTANCE_SCALE
+
+func _max_distance() -> float:
+	return ABS_MAX_DISTANCE_M if use_floating_origin else _base_distance * MAX_DISTANCE_SCALE
+
 func _update_transform() -> void:
+	if use_floating_origin:
+		RenderOrigin.origin = pivot
+		# Depth range follows the zoom (near/far ratio ~1e5): a 500 m hull
+		# seen from 2 km must not share a depth buffer with a far plane at
+		# 1e11 m (that made hulls vanish entirely). Anything farther than
+		# `far` is sub-pixel anyway; BattleOverlay's screen-space symbols
+		# (which do not depend on the far plane) show it instead.
+		near = clampf(distance * 0.001, 0.5, 1.0e5)
+		far = clampf(distance * 100.0, 1.0e5, 1.0e10)
+		global_position = _spherical_offset(yaw, pitch, distance)
+		look_at(Vector3.ZERO, Vector3.UP)
+		return
 	global_position = pivot + _spherical_offset(yaw, pitch, distance)
 	look_at(pivot, Vector3.UP)
 
@@ -138,10 +170,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_update_transform()
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			distance = maxf(_base_distance * MIN_DISTANCE_SCALE, distance * MOUSE_ZOOM_STEP)
+			distance = maxf(_min_distance(), distance * (0.75 if use_floating_origin else MOUSE_ZOOM_STEP))
 			_update_transform()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			distance = minf(_base_distance * MAX_DISTANCE_SCALE, distance / MOUSE_ZOOM_STEP)
+			distance = minf(_max_distance(), distance / (0.75 if use_floating_origin else MOUSE_ZOOM_STEP))
 			_update_transform()
 
 func _process(delta: float) -> void:
@@ -162,11 +194,19 @@ func _process(delta: float) -> void:
 	if Input.is_key_pressed(KEY_MINUS) or Input.is_key_pressed(KEY_KP_SUBTRACT):
 		zoom_delta += 1.0
 
+	var following: bool = false
+	if follow_provider.is_valid():
+		var p = follow_provider.call()
+		if p != null:
+			pivot = p
+			following = true
 	if orbit_delta == 0.0 and pitch_delta == 0.0 and zoom_delta == 0.0:
+		if following or use_floating_origin:
+			_update_transform()
 		return
 
 	yaw += orbit_delta * KEY_ORBIT_SPEED * delta
 	pitch = clampf(pitch + pitch_delta * KEY_ORBIT_SPEED * delta, MIN_PITCH, MAX_PITCH)
 	if zoom_delta != 0.0:
-		distance = clampf(distance * (1.0 + zoom_delta * KEY_ZOOM_SPEED * delta), _base_distance * MIN_DISTANCE_SCALE, _base_distance * MAX_DISTANCE_SCALE)
+		distance = clampf(distance * (1.0 + zoom_delta * KEY_ZOOM_SPEED * delta), _min_distance(), _max_distance())
 	_update_transform()

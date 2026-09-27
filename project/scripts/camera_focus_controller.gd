@@ -41,6 +41,8 @@ var camera: OrbitCamera = null
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("camera_focus_selection"):
 		try_focus()
+	elif event is InputEventKey and event.pressed and event.physical_keycode == KEY_ESCAPE:
+		stop_follow()
 
 ## Returns true if a focus point was resolved and applied, false if
 ## there was nothing to focus on (no camera assigned, or CameraFocus.
@@ -54,4 +56,34 @@ func try_focus() -> bool:
 	if result.is_empty():
 		return false
 	camera.focus_on(result["pivot"], result["spread"])
+	# 2026-09-27: keep FOLLOWING what was focused (ships move hundreds of
+	# km/s -- a static pivot loses a zoomed-in ship within a second). Ids
+	# are captured now, so changing the selection later does not yank the
+	# camera; stop_follow() (Esc / command bar) releases it.
+	follow_ids = selection.selected_ids.duplicate() if not selection.selected_ids.is_empty() else [selection.designated_target_id]
+	camera.follow_provider = Callable(self, "_follow_pivot")
 	return true
+
+var follow_ids: Array = []
+
+func stop_follow() -> void:
+	follow_ids = []
+	if camera != null:
+		camera.follow_provider = Callable()
+
+## Centroid of the followed ids still alive (null = nothing to follow).
+func _follow_pivot():
+	if world == null or follow_ids.is_empty():
+		return null
+	var c := Vector3.ZERO
+	var n: int = 0
+	for id in follow_ids:
+		var s = world.ships.get(id)
+		if s == null:
+			s = world.missiles.get(id)
+		if s != null:
+			c += s.position
+			n += 1
+	if n == 0:
+		return null
+	return c / float(n)

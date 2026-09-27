@@ -42,6 +42,8 @@ var player_team: String = ""
 var command_group_controller: CommandGroupController
 var tactical_plot: TacticalPlot
 var camera_focus_controller: CameraFocusController
+## Order acknowledgements are also written to the battle log (set by main).
+var battle_log = null
 
 var auto_slowdown: bool = true
 var _slow_btn: Button
@@ -95,8 +97,11 @@ func _ready() -> void:
 	_btn(row, "Флагман", _select_flagship)
 	_btn(row, "Цель >", _cycle_target, "Следующая вражеская цель")
 	_btn(row, "Группа (G)", _make_group, "Сделать отряд из выделения")
-	_btn(row, "Камера к выделению", _focus, "Home / двойной клик по кораблю: камера летит к кораблю и следует за ним")
-	_btn(row, "Общий вид", _overview, "Esc: отпустить камеру и показать весь бой")
+	_group_title(row, "КАМЕРА")
+	_btn(row, "Крупно (F)", func(): _cam("close"), "Камера к выделенному кораблю вплотную (или двойной клик по кораблю)")
+	_btn(row, "Эскадра (F2)", func(): _cam("squadron"), "Вся своя эскадра")
+	_btn(row, "Весь бой (F1)", func(): _cam("all"), "Обе стороны целиком")
+	_btn(row, "← Назад (Esc)", func(): _cam("back"), "Вернуться к предыдущему виду")
 
 	_group_title(row, "МАНЕВР")
 	_btn(row, "< Курс 15°", func(): _turn(1.0))
@@ -106,6 +111,12 @@ func _ready() -> void:
 	_btn(row, "Полный ход", _full_thrust, "Разгон 80% по текущему курсу")
 	_btn(row, "Дрейф", _drift, "Двигатели на ноль, держать строй")
 	_btn(row, "Отход", _withdraw, "Развернуть от противника")
+
+	_group_title(row, "ПОЛОЖЕНИЕ")
+	_btn(row, "Авто-крен", func(): _attitude("auto"), "Бортом к врагу для стрельбы; при подлёте ракет — крен клином к залпу (успевает не всегда)")
+	_btn(row, "Бортом", func(): _attitude("broadside"), "Всегда бортом: максимум огня, но борт (боковая стена) под ударом")
+	_btn(row, "Клином", func(): _attitude("wedge"), "Клин к противнику: ракеты и лучи блокируются, но свои трубы и борт закрыты — огня нет")
+	_btn(row, "Нос по курсу", func(): _attitude("course"), "Походное положение")
 
 	_group_title(row, "ОГОНЬ")
 	_btn(row, "Атаковать цель", _attack, "Огонь по назначенной цели")
@@ -176,9 +187,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_step_time(1)
 			KEY_BRACKETLEFT, KEY_COMMA:
 				_step_time(-1)
-			KEY_ESCAPE:
-				if camera_focus_controller != null:
-					camera_focus_controller.stop_follow()
+
 
 # ---------------------------------------------------------------- status
 
@@ -231,6 +240,9 @@ func sync() -> void:
 	_fire_label.text = "Цель: %s   входящих ракет: %d   боезапас: %d (у врага ~%d)%s" % [tgt if tgt != "" else "—", msl, ammo_own, ammo_en, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
 
 func _say(text: String) -> void:
+	if battle_log != null:
+		var who: Array = _own_selected()
+		battle_log.add_local("%s%s" % [text, (" (" + ", ".join(who) + ")") if not who.is_empty() else ""])
 	_status_text = text
 	_status_until_ms = Time.get_ticks_msec() + 4000
 
@@ -333,6 +345,20 @@ func _make_group() -> void:
 		return
 	var id: String = command_group_controller.make_group_from_selection()
 	_say("отряд создан" if id != "" else "нужно выделить 2+ своих корабля вне строя")
+
+func _cam(kind: String) -> void:
+	if camera_focus_controller == null:
+		return
+	match kind:
+		"close":
+			if not camera_focus_controller.view_selection(true):
+				_say("выделите корабль")
+		"squadron":
+			camera_focus_controller.view_own_squadron()
+		"all":
+			camera_focus_controller.view_all()
+		"back":
+			camera_focus_controller.back()
 
 func _overview() -> void:
 	if camera_focus_controller == null:
@@ -480,6 +506,15 @@ func _withdraw() -> void:
 	_say("отход")
 
 # ---------------------------------------------------------------- fire
+
+const ATT_RU: Dictionary = {"auto": "авто-крен", "broadside": "бортом к врагу", "wedge": "клином к врагу", "course": "нос по курсу"}
+
+func _attitude(mode: String) -> void:
+	if not _need_selection():
+		return
+	for sid in _own_selected():
+		world.set_ship_attitude(sid, mode)
+	_say("положение: " + ATT_RU.get(mode, mode))
 
 func _attack() -> void:
 	if not _need_selection():

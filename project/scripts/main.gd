@@ -86,6 +86,8 @@ var player_input: PlayerInput
 ## selection/orders over the 3D view, and a bottom bar of real buttons.
 var battle_overlay: BattleOverlay
 var command_bar: CommandBar
+var battle_log: BattleLogPanel
+var ship_cards: ShipCardsPanel
 var win_lose_screen: WinLoseScreen
 
 ## ТЗ §56.1 item 4 (Minimal HUD): which ship the single HUD panel is a
@@ -237,6 +239,23 @@ func _ready() -> void:
 	command_bar.camera_focus_controller = camera_focus_controller
 	add_child(command_bar)
 
+	# 2026-09-27 (user feedback #3): the old debug text dumps (Hud, command
+	# group list) are replaced on screen by per-ship cards and a battle log.
+	# The old nodes stay in the tree (their tests/logic unchanged), hidden.
+	hud.visible = false
+	command_group_panel.visible = false
+	ship_cards = ShipCardsPanel.new()
+	ship_cards.world = world
+	ship_cards.selection = selection
+	ship_cards.player_team = player_team
+	ship_cards.camera_focus_controller = camera_focus_controller
+	add_child(ship_cards)
+	battle_log = BattleLogPanel.new()
+	battle_log.world = world
+	battle_log.player_team = player_team
+	add_child(battle_log)
+	command_bar.battle_log = battle_log
+
 	# Live-game clock tuning (defaults off for tests, see SimClock.advance):
 	# coarser ticks at high time scales + a per-frame CPU budget so 25x/100x
 	# stay responsive with hundreds of missiles in flight.
@@ -320,6 +339,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	order_menu.sync()
 	weapon_panel_controller.sync()
 	weapon_panel.bottom_reserved_px = command_bar.get_height()
+	battle_log.bottom_reserved_px = command_bar.get_height()
 	weapon_panel.sync()
 	win_lose_screen.update(world)
 

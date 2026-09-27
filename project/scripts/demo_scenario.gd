@@ -50,6 +50,9 @@ const LASERHEAD_TERMINAL_RANGE_M: float = 3.0e7
 ## Drive burn is 180 s; a missile still coasting a minute after burnout
 ## has missed and self-destructs rather than cluttering the plot.
 const MISSILE_MAX_LIFETIME_S: float = 240.0
+## Fraction of a laserhead that penetrates even an intact sidewall (books:
+## sidewalls degrade laserheads, they do not stop them). ASSUMPTION.
+const LASERHEAD_SIDEWALL_FLOOR: float = 0.35
 const PD_MOUNTS_PER_SHIP: int = 3
 const PD_RANGE_M: float = 2.0e8              # 200,000 km
 const PD_REACTION_S: float = 0.7
@@ -82,6 +85,12 @@ static func build(world: SimulationWorld) -> void:
 	world.missile_detonation_range_override_m = LASERHEAD_TERMINAL_RANGE_M
 	world.missile_max_lifetime_override_s = MISSILE_MAX_LIFETIME_S
 	world.missile_zem_guidance = true
+	# Combat attitude (see SimulationWorld.ship_attitude): everyone starts
+	# on "auto" -- broadside to fire, rolling the wedge toward incoming
+	# salvos. The player can override per ship from the command bar.
+	var att: String = OS.get_environment("DEMO_ATTITUDE") if OS.get_environment("DEMO_ATTITUDE") != "" else "auto"
+	for sid in RED_IDS + BLUE_IDS:
+		world.set_ship_attitude(sid, att)
 	# Player squadron starts at the world origin (not symmetric about it):
 	# float32 positions are most precise near 0, and the player zooms into
 	# their own ships far more than the enemy's (see RenderOrigin).
@@ -109,6 +118,7 @@ static func _build_side(world: SimulationWorld, ids: Array, team: String, z: flo
 		# members have thrust left over to keep station (ASSUMPTION).
 		phys.commanded_thrust_local = Vector3(0.0, 0.0, -0.8)
 		phys.defense = ShipDefenseState.new()
+		phys.defense.laserhead_sidewall_floor = LASERHEAD_SIDEWALL_FLOOR
 		phys.subsystems = ShipSubsystems.new()
 		var hull := HullState.new()
 		hull.max_integrity = HULL_INTEGRITY

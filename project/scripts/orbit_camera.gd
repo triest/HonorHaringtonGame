@@ -147,9 +147,39 @@ func _min_distance() -> float:
 func _max_distance() -> float:
 	return ABS_MAX_DISTANCE_M if use_floating_origin else _base_distance * MAX_DISTANCE_SCALE
 
+## 2026-09-27 (user: "zoom into a ship at any moment, then go back"):
+## smooth camera flights. fly_to() animates distance (log-space) and the
+## pivot (a decaying offset from the old look-at point) instead of
+## jumping, and the mouse wheel sets a smoothed target distance.
+var target_distance: float = -1.0
+var _pivot_offset: Vector3 = Vector3.ZERO
+## Fixed-duration eased flight (smoothstep), so a jump across millions of
+## km lands exactly, in the same time as a short one.
+const FLY_TIME_S: float = 0.9
+const WHEEL_TIME_S: float = 0.2
+var _fly_t: float = 1.0
+var _fly_dur: float = FLY_TIME_S
+var _fly_start_offset: Vector3 = Vector3.ZERO
+var _fly_start_dist: float = 1.0
+
+func fly_to(new_pivot: Vector3, new_distance: float) -> void:
+	_pivot_offset = (pivot + _pivot_offset) - new_pivot
+	pivot = new_pivot
+	_start_flight(clampf(new_distance, _min_distance(), _max_distance()), FLY_TIME_S)
+
+func _start_flight(new_target: float, dur: float) -> void:
+	target_distance = new_target
+	_fly_start_offset = _pivot_offset
+	_fly_start_dist = distance
+	_fly_t = 0.0
+	_fly_dur = dur
+
+func look_point() -> Vector3:
+	return pivot + _pivot_offset
+
 func _update_transform() -> void:
 	if use_floating_origin:
-		RenderOrigin.origin = pivot
+		RenderOrigin.origin = pivot + _pivot_offset
 		# Depth range follows the zoom (near/far ratio ~1e5): a 500 m hull
 		# seen from 2 km must not share a depth buffer with a far plane at
 		# 1e11 m (that made hulls vanish entirely). Anything farther than
@@ -169,11 +199,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		pitch = clampf(pitch + event.relative.y * MOUSE_ORBIT_SPEED, MIN_PITCH, MAX_PITCH)
 		_update_transform()
 	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			distance = maxf(_min_distance(), distance * (0.75 if use_floating_origin else MOUSE_ZOOM_STEP))
+		if use_floating_origin and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+			var base: float = target_distance if target_distance > 0.0 else distance
+			var f: float = 0.7 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 0.7
+			_start_flight(clampf(base * f, _min_distance(), _max_distance()), WHEEL_TIME_S)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			distance = maxf(_min_distance(), distance * MOUSE_ZOOM_STEP)
 			_update_transform()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			distance = minf(_max_distance(), distance / (0.75 if use_floating_origin else MOUSE_ZOOM_STEP))
+			distance = minf(_max_distance(), distance / MOUSE_ZOOM_STEP)
 			_update_transform()
 
 func _process(delta: float) -> void:
@@ -200,6 +234,23 @@ func _process(delta: float) -> void:
 		if p != null:
 			pivot = p
 			following = true
+	if use_floating_origin and _fly_t < 1.0:
+		_fly_t = minf(1.0, _fly_t + delta / maxf(_fly_dur, 0.001))
+		var e: float = smoothstep(0.0, 1.0, _fly_t)
+		if target_distance > 0.0:
+			distance = exp(lerpf(log(_fly_start_dist), log(target_distance), e))
+		# Offset shrinks on a log scale too, so a millions-of-km hop reads
+		# as a flight rather than an instant cut followed by a long crawl.
+		var start_len: float = _fly_start_offset.length()
+		if start_len > 1.0:
+			var end_len: float = 1.0
+			var cur_len: float = exp(lerpf(log(start_len), log(end_len), e))
+			_pivot_offset = _fly_start_offset / start_len * cur_len
+		if _fly_t >= 1.0:
+			_pivot_offset = Vector3.ZERO
+			if target_distance > 0.0:
+				distance = target_distance
+			target_distance = -1.0
 	if orbit_delta == 0.0 and pitch_delta == 0.0 and zoom_delta == 0.0:
 		if following or use_floating_origin:
 			_update_transform()

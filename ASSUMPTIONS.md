@@ -3183,3 +3183,12 @@ Engine changes this required (ENGINEERING CHOICES):
   meshes are sub-pixel at this scale, so the 3D view relies on the new screen-space
   BattleOverlay symbols; float32 positions at ~2.65e9 m give ~256 m precision
   (fine for these distances, origin rebasing still not done).
+
+
+## Combat attitude + laserhead sidewall floor (2026-09-27, feedback #3)
+* ship_attitude "wedge" masks the ship's own broadside tubes and broadside energy
+  mounts (INTERPRETATION of the books' "roll ship to interpose the wedge" vs "present
+  the broadside to fire" trade-off). Auto-roll trigger 210,000 km (tuned so the roll,
+  0.3 rad/s max, is sometimes too late -- a partial, not perfect, defense).
+* laserhead_sidewall_floor 0.35 in the demo: minimum laserhead transmission through an
+  intact sidewall (books: sidewalls degrade, do not stop, laserheads). Default 0.

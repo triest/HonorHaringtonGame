@@ -32,6 +32,7 @@ const DamageType = preload("res://simulation/damage_type.gd")
 ## strength scaling with propulsion damage is a later refinement, tracked
 ## in ASSUMPTIONS.md.
 var wedge_up: bool = true
+var laserhead_sidewall_floor: float = 0.0  # see _resolve_broadside
 
 ## Broadside sidewall condition in [0.0, 1.0]. 1.0 = fully functional.
 ## INTERPRETATION: modeled as an attenuation factor + a burnout threshold,
@@ -151,6 +152,14 @@ func _resolve_broadside(sector: AttackGeometry.Sector, condition: float, damage_
 	# UNKNOWN/not canonical; documented in ASSUMPTIONS.md), scaled by the
 	# attacker's damage-type penetration multiplier.
 	var transmitted: float = clampf((1.0 - condition) * _penetration_multiplier(damage_type), 0.0, 1.0)
+	# 2026-09-27 opt-in (default 0 = old behavior): minimum fraction of a
+	# laserhead that gets through even a fully intact sidewall. In the
+	# books sidewalls weaken bomb-pumped lasers but do not stop them --
+	# with the old curve an intact sidewall stopped 100%, so a broadside-on
+	# missile duel dealt almost no damage at all. ASSUMPTION (value set by
+	# the demo scenario), see ASSUMPTIONS.md.
+	if damage_type == DamageType.Type.LASERHEAD:
+		transmitted = maxf(transmitted, laserhead_sidewall_floor)
 	return AttackResolution.new(sector, ResolutionKind.SIDEWALL_ATTENUATED, transmitted)
 
 func _resolve_bow_stern(sector: AttackGeometry.Sector, attacker_position: Vector3, target_position: Vector3, target_orientation: Quaternion, raised: bool, condition: float, is_bow: bool, damage_type: int, formation_covered: bool = false) -> AttackResolution:

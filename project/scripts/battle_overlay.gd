@@ -311,11 +311,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			if mb.pressed and mb.double_click:
 				var hit: Dictionary = _pick(mb.position)
 				if not hit.is_empty() and camera_focus_controller != null:
-					if hit["own"]:
-						selection.select_only([hit["id"]])
+					# Double-click = fly the camera in: a single ship (or a
+					# per-ship label line) -> hull close-up; a stacked
+					# squadron symbol -> frame that squadron. Esc = back.
+					var ids: Array = [] if hit.get("from_label", false) else _cluster_ids_at(hit["pos"], hit["own"])
+					if ids.size() > 1:
+						camera_focus_controller.view_ids(ids, false)
 					else:
-						selection.designate_target(hit["id"])
-					camera_focus_controller.try_focus()
+						camera_focus_controller.view_ids([hit["id"]], true)
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			if mb.pressed:
 				_rmb_down = true

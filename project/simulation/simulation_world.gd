@@ -38,6 +38,7 @@ const SensorResolution = preload("res://simulation/sensor_resolution.gd")
 const MissileGuidance = preload("res://simulation/missile_guidance.gd")
 const MissileResolution = preload("res://simulation/missile_resolution.gd")
 const MissileState = preload("res://simulation/missile_state.gd")
+const ContactState = preload("res://simulation/contact_state.gd")
 const CounterMissileResolution = preload("res://simulation/counter_missile_resolution.gd")
 const PointDefenseResolution = preload("res://simulation/point_defense_resolution.gd")
 const WeaponResolution = preload("res://simulation/weapon_resolution.gd")
@@ -72,6 +73,23 @@ var sensor_range_m: float = SensorResolution.DEFAULT_SENSOR_RANGE_M
 ## report: "no control over the ship"). Weapons/PD/missile fire AI still
 ## runs for them (fire control, not helm). Empty by default = old behavior.
 var player_controlled_teams: Dictionary = {}
+## 2026-09-27 (user feedback #3: "not like the book"): combat ATTITUDE per
+## ship -- how the hull is turned relative to the threat, the core
+## Honorverse tactical trade-off. Opt-in: only ships with an entry here
+## are steered by _resolve_attitudes (default {} = old behavior).
+##   "course"    bow along the velocity vector (cruising/closing)
+##   "broadside" bow perpendicular to the enemy: broadside energy mounts
+##               bear and missile tubes can fire -- but the flank
+##               (sidewall) faces incoming fire
+##   "wedge"     rolled so the impeller wedge (top/bottom) faces the
+##               enemy: laserheads and beams from that side are blocked,
+##               but the ship's own broadside is masked -- NO missile
+##               launches and no broadside energy fire while wedged
+##   "auto"      broadside, rolling to wedge while hostile missiles aimed
+##               at this ship are within ATTITUDE_AUTO_WEDGE_RANGE_M
+var ship_attitude: Dictionary = {}
+var ship_effective_attitude: Dictionary = {}  # what _resolve_attitudes actually applied this tick (UI + launch gating)
+const ATTITUDE_AUTO_WEDGE_RANGE_M: float = 2.1e8  # 160,000 km: a few s warning at laserhead terminal speeds, about as long as a 90-degree roll takes -- a close call, not a guaranteed save
 ## 2026-09-27 canon-scale demo knobs (defaults = old behavior):
 ## see _update_sensors / _launch_missile_from_tube.
 var missile_sensor_update_interval_ticks: int = 1
@@ -527,7 +545,22 @@ func _record_command(command_name: String, args: Dictionary) -> void:
 		return
 	replay_log.record_command(_tick_index, world_sim_time, command_name, args)
 
+## 2026-09-27: UI-facing battle event feed (event log panel). Always on,
+## independent of replay_log (which is often null in the live game); a
+## ring buffer of {"seq", "t", "type", "data"}. Pure readout for the UI --
+## nothing in the simulation reads it back.
+var battle_events: Array = []
+var battle_event_seq: int = 0
+const BATTLE_EVENTS_MAX: int = 400
+
+func _battle_event(event_type: String, data: Dictionary) -> void:
+	battle_event_seq += 1
+	battle_events.append({"seq": battle_event_seq, "t": world_sim_time, "type": event_type, "data": data})
+	if battle_events.size() > BATTLE_EVENTS_MAX:
+		battle_events = battle_events.slice(battle_events.size() - BATTLE_EVENTS_MAX)
+
 func _record_event(event_type: String, data: Dictionary) -> void:
+	_battle_event(event_type, data)
 	if replay_log == null:
 		return
 	replay_log.record_event(_tick_index, world_sim_time, event_type, data)
@@ -705,6 +738,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
 	_resolve_crossing_t_maneuver(dt)
+	_resolve_attitudes(dt)
 	_integrate_ships(dt)
 
 ## ТЗ §25 Subsystem Damage: run once at the START of every tick, before
@@ -829,7 +863,14 @@ func _update_missiles(dt: float) -> void:
 					target_subsystems = ships[ship_id].subsystems
 					target_formation_coverage = _formation_bow_stern_coverage(ship_id)
 					break
-			MissileResolution.resolve_detonation(missile, target_hull, target_subsystems, target_formation_coverage.get("bow", false), target_formation_coverage.get("stern", false))
+			var det = MissileResolution.resolve_detonation(missile, target_hull, target_subsystems, target_formation_coverage.get("bow", false), target_formation_coverage.get("stern", false))
+			if det != null:
+				var tgt_id: String = ""
+				for sid in ships.keys():
+					if ships[sid] == target:
+						tgt_id = sid
+						break
+				_battle_event("missile_detonation", {"attacker_ship_id": missile_owners.get(missile_id, ""), "target_ship_id": tgt_id, "damage_dealt": det.damage_dealt, "outcome": det.outcome})
 
 ## ТЗ §20: any missile whose target is itself another (incoming) missile
 ## is a counter-missile -- check whether it has closed to kill radius.
@@ -875,7 +916,9 @@ func _resolve_point_defense(dt: float) -> void:
 		var target_contact = selection.get("contact")
 
 		for mount in mounts:
-			PointDefenseResolution.engage(mount, ship, target_missile, dt, target_contact)
+			var pd_res = PointDefenseResolution.engage(mount, ship, target_missile, dt, target_contact)
+			if pd_res != null and pd_res.outcome == PointDefenseResolution.Outcome.INTERCEPTED:
+				_battle_event("pd_intercept", {"ship_id": ship_id})
 
 ## §29 Formation Orders / §35 Command Queue (Milestone 10, this pass):
 ## translates a formation's active FormationOrder into the GUIDE ship's
@@ -1755,6 +1798,86 @@ func _steer_toward_world_facing(ship: ShipPhysicsState, target_facing_world: Vec
 ## usable hostile contact is left completely untouched -- nothing
 ## sensor-honest to maneuver against yet, same philosophy already used
 ## by `_resolve_damage_response` for the no-contact retreat case.
+func set_ship_attitude(ship_id: String, mode: String) -> void:
+	_record_command("set_ship_attitude", {"ship_id": ship_id, "mode": mode})
+	if mode == "":
+		ship_attitude.erase(ship_id)
+	else:
+		ship_attitude[ship_id] = mode
+
+## See ship_attitude's doc comment. Sensor-honest: the threat direction and
+## the "missiles incoming" check both come from this ship's own contacts.
+## Runs after every other steering system this tick, so for ships that
+## have an attitude it has the final word on angular velocity (course and
+## thrust are unaffected -- thrust is vectored in world terms by the
+## formation/individual order code every tick).
+func _resolve_attitudes(dt: float) -> void:
+	for ship_id in ship_attitude.keys():
+		var ship: ShipPhysicsState = ships.get(ship_id)
+		if ship == null or ship.is_wreck or dt <= 0.0:
+			continue
+		var mode: String = ship_attitude[ship_id]
+		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+		var threat: Vector3 = Vector3.ZERO
+		var best_d: float = INF
+		for other_id in _hostile_ship_ids(ship_id):
+			var c = contacts.get(other_id)
+			if c == null or c.state == ContactState.Type.UNKNOWN:
+				continue
+			var d: float = ship.position.distance_to(c.estimated_position)
+			if d < best_d:
+				best_d = d
+				threat = c.estimated_position - ship.position
+		if mode == "auto":
+			mode = "broadside"
+			for mid in missiles.keys():
+				var m = missiles[mid]
+				if not m.is_active() or m.target != ship:
+					continue
+				var mc = contacts.get(mid)
+				if mc == null or mc.state == ContactState.Type.UNKNOWN:
+					continue
+				if ship.position.distance_to(mc.estimated_position) < ATTITUDE_AUTO_WEDGE_RANGE_M:
+					mode = "wedge"
+					threat = mc.estimated_position - ship.position
+					break
+		if threat == Vector3.ZERO and mode != "course":
+			mode = "course"
+		ship_effective_attitude[ship_id] = mode
+
+		var fwd: Vector3
+		var up: Vector3 = Vector3.UP
+		var vel_dir: Vector3 = ship.velocity.normalized() if ship.velocity.length_squared() > 1.0 else ship.orientation * Vector3.FORWARD
+		if mode == "course":
+			fwd = vel_dir
+		else:
+			var t: Vector3 = threat.normalized()
+			fwd = vel_dir - t * vel_dir.dot(t)
+			if fwd.length_squared() < 1e-6:
+				fwd = t.cross(Vector3.UP)
+			fwd = fwd.normalized()
+			if mode == "wedge":
+				up = t
+		# Orthonormal basis with bow = -Z (AttackGeometry convention).
+		var z: Vector3 = -fwd
+		var y: Vector3 = up - z * up.dot(z)
+		if y.length_squared() < 1e-6:
+			y = Vector3.UP - z * Vector3.UP.dot(z)
+			if y.length_squared() < 1e-6:
+				y = Vector3.RIGHT
+		y = y.normalized()
+		var x: Vector3 = y.cross(z).normalized()
+		var target_q: Quaternion = Basis(x, y, z).get_rotation_quaternion()
+		var err: Quaternion = (ship.orientation.inverse() * target_q).normalized()
+		if err.w < 0.0:
+			err = -err
+		var angle: float = err.get_angle()
+		if angle < 1e-5:
+			ship.angular_velocity = Vector3.ZERO
+			continue
+		var rate: float = minf(ship.max_angular_speed_rad_s, angle / dt)
+		ship.angular_velocity = err.get_axis() * rate
+
 func _resolve_crossing_t_maneuver(dt: float) -> void:
 	for ship_id in ships.keys():
 		var ship: ShipPhysicsState = ships[ship_id]
@@ -2138,6 +2261,8 @@ func _resolve_weapons_ai(dt: float) -> void:
 		var directive = ship_combat_directives.get(ship_id)
 		if directive != null and not directive.weapons_free:
 			continue  # §30 "weapon mode": hold fire
+		if ship_effective_attitude.get(ship_id, "") == "wedge":
+			continue  # rolled wedge-on: own broadside tubes are masked (see ship_attitude)
 
 		var ship: ShipPhysicsState = ships[ship_id]
 		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
@@ -2184,6 +2309,8 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 		var directive = ship_combat_directives.get(ship_id)
 		if directive != null and not directive.weapons_free:
 			continue  # §30 "weapon mode": hold fire
+		if ship_effective_attitude.get(ship_id, "") == "wedge":
+			continue  # rolled wedge-on: own broadside tubes are masked (see ship_attitude)
 
 		var ship: ShipPhysicsState = ships[ship_id]
 		var contacts: Dictionary = sensor_contacts.get(ship_id, {})

@@ -44,6 +44,9 @@ func _presim() -> void:
 		var zd: String = OS.get_environment("SCREENSHOT_ZOOM_M")
 		if zd != "":
 			var cam = main.get_node("Camera3D")
+			cam._fly_t = 1.0
+			cam._pivot_offset = Vector3.ZERO
+			cam.target_distance = -1.0
 			cam.distance = float(zd)
 			cam._update_transform()
 	if OS.get_environment("SCREENSHOT_CUBE") == "1":

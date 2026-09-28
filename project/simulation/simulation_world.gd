@@ -96,6 +96,37 @@ var _disabled_seen: Dictionary = {}  # ship_id -> {type: true}
 ## side. Never un-fires (there is no repair mechanic yet to make that
 ## meaningful).
 var _disengage_seen: Dictionary = {}
+## 2026-09-28 (user: "но я же как адмирал могу приказать атаковать,
+## несмотря на повреждения!"): an explicit commander override of the
+## automatic §26 "disengage at 30% hull" behavior above. Opt-in per ship
+## (default false = every existing test's exact old behavior): a ship
+## with `ship_hold_the_line[id] == true` keeps firing (energy weapons,
+## AI missile launches, AND the manual order_missile_launch() API) and is
+## NOT pushed onto an automatic retreat course by _resolve_damage_response
+## even past CRITICAL_HULL_FRACTION -- the player accepted the risk this
+## specific ship keeps fighting critically damaged. Deliberately NOT
+## touched by this override: formation-guide succession (is_guide_lost/
+## select_formation_successor) -- a ship ordered to keep fighting can
+## still, separately, be too incapacitated to keep COMMANDING the
+## formation; those are different questions and this flag only answers
+## the first one.
+var ship_hold_the_line: Dictionary = {}
+
+func set_ship_hold_the_line(ship_id: String, hold: bool) -> void:
+	_record_command("set_ship_hold_the_line", {"ship_id": ship_id, "hold": hold})
+	if hold:
+		ship_hold_the_line[ship_id] = true
+	else:
+		ship_hold_the_line.erase(ship_id)
+
+## The one place that decides "is this ship disengaging" for every
+## firing/retreat gate below -- CRITICAL_HULL_FRACTION damage AND the
+## player hasn't overridden it for this specific ship via
+## set_ship_hold_the_line(). Formation-succession call sites deliberately
+## keep calling TacticalAI.is_critically_damaged()/is_guide_lost()
+## directly (see ship_hold_the_line's own doc comment for why).
+func _is_disengaging(ship_id: String) -> bool:
+	return TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION) and not ship_hold_the_line.get(ship_id, false)
 ## 2026-09-27 (user feedback #3: "not like the book"): combat ATTITUDE per
 ## ship -- how the hull is turned relative to the threat, the core
 ## Honorverse tactical trade-off. Opt-in: only ships with an entry here
@@ -615,6 +646,7 @@ func reset_ships() -> void:
 	_disabled_seen.clear()
 	ship_attitude.clear()
 	ship_effective_attitude.clear()
+	ship_hold_the_line.clear()
 	missile_sensor_update_interval_ticks = 1
 	_sensor_observer_index = 0
 	missile_detonation_range_override_m = -1.0
@@ -1672,8 +1704,8 @@ func order_missile_launch(ship_id: String, target_ship_id: String = "", max_laun
 	var tubes: Array = missile_tubes.get(ship_id, [])
 	if tubes.is_empty():
 		return 0
-	if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
-		return 0  # disengaging -- same gate as the automatic AI
+	if _is_disengaging(ship_id):
+		return 0  # disengaging -- same gate as the automatic AI (bypassed by set_ship_hold_the_line)
 	var directive = ship_combat_directives.get(ship_id)
 	if directive != null and not directive.weapons_free:
 		return 0  # §30 "weapon mode": hold fire, even for an explicit order
@@ -2159,8 +2191,7 @@ func _resolve_damage_response(dt: float) -> void:
 	for ship_id in ships.keys():
 		if ships[ship_id].is_wreck:
 			continue  # §63.1: a wreck does not retreat -- no crew left to order it, and it must keep obeying pure inertia, not manufactured "retreat" thrust
-		var hull = hulls.get(ship_id)
-		if not TacticalAI.is_critically_damaged(hull, CRITICAL_HULL_FRACTION):
+		if not _is_disengaging(ship_id):
 			continue
 
 		var ship: ShipPhysicsState = ships[ship_id]
@@ -2239,7 +2270,7 @@ func _resolve_formation_target_assignment(dt: float) -> void:
 				continue
 			if not teams.has(ship_id) or teams[ship_id] == "":
 				continue
-			if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
+			if _is_disengaging(ship_id):
 				continue
 			var directive = ship_combat_directives.get(ship_id)
 			if directive != null and not directive.weapons_free:
@@ -2380,8 +2411,8 @@ func _resolve_weapons_ai(dt: float) -> void:
 			continue
 		if not teams.has(ship_id) or teams[ship_id] == "":
 			continue
-		if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
-			continue  # disengaging -- see _resolve_damage_response
+		if _is_disengaging(ship_id):
+			continue  # disengaging -- see _resolve_damage_response (bypassed by set_ship_hold_the_line)
 		var directive = ship_combat_directives.get(ship_id)
 		if directive != null and not directive.weapons_free:
 			continue  # §30 "weapon mode": hold fire
@@ -2428,8 +2459,8 @@ func _resolve_missile_launch_ai(dt: float) -> void:
 
 		if not teams.has(ship_id) or teams[ship_id] == "":
 			continue
-		if TacticalAI.is_critically_damaged(hulls.get(ship_id), CRITICAL_HULL_FRACTION):
-			continue  # disengaging -- see _resolve_damage_response
+		if _is_disengaging(ship_id):
+			continue  # disengaging -- see _resolve_damage_response (bypassed by set_ship_hold_the_line)
 		var directive = ship_combat_directives.get(ship_id)
 		if directive != null and not directive.weapons_free:
 			continue  # §30 "weapon mode": hold fire

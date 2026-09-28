@@ -64,6 +64,12 @@ static func verdict(world: SimulationWorld, sid: String) -> Dictionary:
 	# "боеспособен" for a ship that has, in fact, gone quiet and turned
 	# to run -- confusing, looked like a bug. See CHANGELOG.md this date.
 	if subs.get_condition(T.STRUCTURAL_INTEGRITY) <= DISENGAGE_HULL_FRACTION:
+		if world.ship_hold_the_line.get(sid, false):
+			# 2026-09-28 (user: "но я же как адмирал могу приказать
+			# атаковать, несмотря на повреждения!"): the commander
+			# overrode the automatic disengage for this ship -- still
+			# critical, but still fighting on the player's own order.
+			return {"text": "ДЕРЖИТ СТРОЙ — критические повреждения, бой продолжается по приказу", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 		return {"text": "ОТСТУПАЕТ — критические повреждения корпуса", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 	if subs.is_disabled(T.POWER):
 		return {"text": "без энергии", "color": UiTheme.CONDITION_CRITICAL_COLOR}
@@ -100,6 +106,8 @@ static func verdict_observed(world: SimulationWorld, sid: String) -> Dictionary:
 	# firing and turns away -- this is externally observable behavior,
 	# not a peek at its internal module list.
 	if subs.get_condition(T.STRUCTURAL_INTEGRITY) <= DISENGAGE_HULL_FRACTION:
+		if world.ship_hold_the_line.get(sid, false):
+			return {"text": "тяжело повреждён, но продолжает бой", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 		return {"text": "выходит из боя", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 	if subs.is_disabled(T.POWER):
 		return {"text": "без признаков энергии", "color": UiTheme.CONDITION_CRITICAL_COLOR}

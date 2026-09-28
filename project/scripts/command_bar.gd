@@ -124,6 +124,8 @@ func _ready() -> void:
 	_btn(row, "Прекратить огонь", func(): _weapons_free(false))
 	_btn(row, "ПРО авто", func(): _pd_hold(false), "Противоракетная оборона: автоматически")
 	_btn(row, "ПРО стоп", func(): _pd_hold(true))
+	_btn(row, "Драться до конца", func(): _hold_the_line(true), "Приказ игнорировать критические повреждения корпуса: корабль продолжает стрелять и НЕ уходит на автоматический отход, пока экипаж может держать боевой пост")
+	_btn(row, "Разрешить отход", func(): _hold_the_line(false), "Вернуть автоматическое поведение: при критических повреждениях корпуса (<=30%) корабль сам замолкает и отходит")
 
 	_group_title(row, "РАДАР")
 	_btn(row, "Радар ⤢", _toggle_radar, "Увеличить/уменьшить радар (M)")
@@ -552,6 +554,13 @@ func _pd_hold(hold: bool) -> void:
 	for sid in _own_selected():
 		world.transmit_ship_pd_hold(sid, hold)
 	_say("ПРО: стоп" if hold else "ПРО: авто")
+
+func _hold_the_line(hold: bool) -> void:
+	if not _need_selection():
+		return
+	for sid in _own_selected():
+		world.set_ship_hold_the_line(sid, hold)
+	_say("драться до конца, невзирая на повреждения" if hold else "разрешён отход при критических повреждениях")
 
 # ---------------------------------------------------------------- radar
 

@@ -213,6 +213,11 @@ func _process(_d: float) -> void:
 		var tgt: String = world.get_weapon_target_designation(sid)
 		if tgt != "":
 			line += "\n[color=#9fd]цель: [color=#ff6a5a]%s[/color][/color]" % ShipNames.of(tgt)
+		# 2026-09-28: shown whenever the order is active, not only once the
+		# ship is actually critical -- so the player remembers which ships
+		# they've already told to ignore an eventual disengage.
+		if world.ship_hold_the_line.get(sid, false):
+			line += "\n[color=#ff6a5a]приказ: драться до конца[/color]"
 		c["info"].text = line
 	# Enemy roster (from own sensor picture: shown only once detected).
 	var pov: String = ""

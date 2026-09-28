@@ -362,6 +362,18 @@ threat vs. use them now); (d) smarter enemy AI that maneuvers/focuses fire/retre
 convincingly, so "read and react to the enemy" becomes its own skill. Pick ONE,
 budget real time, don't rush a shallow version just to check the box -- this is
 exactly the kind of thing that reads as fake depth if done sloppily.
+FOLLOW-UP #9 (same day, user: "но я же как адмирал могу приказать атаковать,
+несмотря на повреждения!"): world.set_ship_hold_the_line(id, bool) -- explicit
+per-ship override of the automatic hull<=30%-disengage silence/retreat added
+FOLLOW-UP #8. One shared _is_disengaging(ship_id) helper now gates all 5
+firing/retreat/formation-target-assignment call sites; formation-guide
+succession deliberately left on the OLD automatic check (separate question).
+CommandBar buttons "Драться до конца"/"Разрешить отход", card text reflects it.
+Confirmed via probe_hold_the_line.gd (184 checks). Full 50-file sweep green.
+"Мало простора" (from FOLLOW-UP #8) is STILL open and unaddressed -- this
+pass answered a specific, narrower ask (an override for one already-existing
+mechanic), not the broader depth request. Pick one of the FOLLOW-UP #8
+candidates next.
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -388,8 +400,7 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-28 ~05:50 UTC (interactive, feedback #8): disengage
-visibility (real bug in player-facing clarity, not the mechanic itself),
-dreadnought/superdreadnought classes; "мало простора" logged as an open item for
-next pass, not addressed yet. Full 50-file test sweep + 2 new probes green, .exe
-re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet.
+Last pass finished: 2026-09-28 ~06:05 UTC (interactive, feedback #9): hold-the-line
+override for the disengage mechanic. Full 50-file sweep + probe_hold_the_line.gd
+(184 checks) green, .exe re-exported, pushed. §56.3 NOT closed; nothing
+live-confirmed yet.

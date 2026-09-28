@@ -2275,13 +2275,41 @@ func _resolve_formation_target_assignment(dt: float) -> void:
 			var directive = ship_combat_directives.get(ship_id)
 			if directive != null and not directive.weapons_free:
 				continue
-			if directive != null and directive.manual_target_ship_id != "":
-				continue  # §30 commander override outranks automatic coordination, same precedence as everywhere else
-
 			var hostile_ids: Array = _hostile_ship_ids(ship_id)
 			if hostile_ids.is_empty():
 				continue
 			var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+
+			if directive != null and directive.manual_target_ship_id != "":
+				# 2026-09-28 (user: "от игрока мало что зависит" -- found
+				# by direct A/B measurement, probe_player_impact.gd: a
+				# player who manually focuses the whole squadron's fire on
+				# one enemy ship came out WORSE than doing nothing, because
+				# a manual §30 target designation used to `continue` here
+				# without ever writing `_formation_assigned_targets`,
+				# which is the ONLY thing `_resolve_missile_tot_
+				# coordination` below reads to decide who gets a
+				# synchronized, PD-saturating simultaneous salvo instead
+				# of missiles dribbling in one at a time. §30 "commander
+				# override outranks automatic coordination" is still true
+				# for WHO the ship shoots at -- `_resolve_weapon_target`
+				# always checks the manual directive FIRST, regardless of
+				# this dictionary -- but WHETHER a shared target gets
+				# time-on-target coordination should not depend on who
+				# picked it. A manually-focused squadron now gets the
+				# exact same salvo timing an AI-coordinated one already
+				# got, so "everyone attack that one" is a genuinely GOOD
+				# order, not a trap. `select_directed_weapon_target` reuses
+				# the same "detected and usable" validity check
+				# `_resolve_weapon_target` itself applies, so a stale/lost
+				# manual target does not poison the schedule with a
+				# contact nothing can currently see.
+				var directed: Dictionary = TacticalAI.select_directed_weapon_target(ship, contacts, hostile_ids, directive.manual_target_ship_id)
+				var manual_id = directed.get("ship_id")
+				if manual_id != null:
+					_formation_assigned_targets[ship_id] = manual_id
+				continue  # target choice itself is still the commander's alone -- no automatic (re)assignment below
+
 			var selection: Dictionary = TacticalAI.select_formation_target_for_member(ship, contacts, hostile_ids, hulls, assigned_counts, MAX_USEFUL_ATTACKERS_PER_TARGET, CRITICAL_HULL_FRACTION)
 			var target_id = selection.get("ship_id")
 			if target_id == null:

@@ -3237,3 +3237,15 @@ drift out of sync with the actual disengage gate in simulation_world.gd.
 Same status as the original four (ASSUMPTION/pacing, not canon tonnage data) --
 scaled up from battlecruiser by feel (more tubes/PD/energy mounts, heavier,
 slower turn rate), not derived from any canon per-class figure.
+
+
+## Methodology note: shared-seed A/B is not a valid comparison once behavior diverges (2026-09-28)
+Learned the hard way via probe_player_impact.gd's first version: reseeding
+SubsystemDamageResolution.spread_rng identically for two runs does NOT control
+for luck once the two runs' behavior differs at all -- the moment a different hit
+lands (different launch timing/order), the RNG draw SEQUENCE desyncs between the
+runs, and everything downstream is effectively a different, uncontrolled random
+draw. A single shared-seed run can show the OPPOSITE of a tactic's real effect.
+Averaging several independent seeds per condition is required for any headless
+"does tactic X help" comparison in this codebase going forward -- see
+probe_player_impact.gd for the pattern.

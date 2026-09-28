@@ -120,6 +120,7 @@ func _ready() -> void:
 
 	_group_title(row, "ОГОНЬ")
 	_btn(row, "Атаковать цель", _attack, "Огонь по назначенной цели")
+	_btn(row, "Добить слабейшего", _attack_weakest, "Все выделенные корабли переключаются на самый повреждённый обнаруженный корабль противника -- концентрация огня реально ускоряет уничтожение эскадры противника")
 	_btn(row, "Огонь свободный", func(): _weapons_free(true))
 	_btn(row, "Прекратить огонь", func(): _weapons_free(false))
 	_btn(row, "ПРО авто", func(): _pd_hold(false), "Противоракетная оборона: автоматически")
@@ -352,6 +353,7 @@ func _cycle_target() -> void:
 	selection.designate_target(enemies[(i + 1) % enemies.size()])
 
 const ContactStateRef = preload("res://simulation/contact_state.gd")
+const SubsystemTypeRef = preload("res://simulation/subsystem_type.gd")
 
 func _make_group() -> void:
 	if command_group_controller == null:
@@ -540,6 +542,44 @@ func _attack() -> void:
 		world.transmit_ship_target(sid, tgt)
 		world.transmit_ship_weapons_free(sid, true)
 	_say("атаковать %s" % ShipNames.of(tgt))
+
+## 2026-09-28 (user: "от игрока мало что зависит"): a one-click version
+## of the tactic that headless A/B testing (simulation/tests/
+## probe_player_impact.gd, averaged over several seeds) actually confirmed
+## works -- concentrating the whole selection's fire on the single most-
+## damaged DETECTED enemy ship kills the enemy squadron faster than
+## leaving every ship to its own AI-default nearest-target pick.
+## Sensor-honest: only looks at contacts this selection's ships can
+## currently see (own sensor_contacts, TRACKED/DETECTED/ESTIMATED), never
+## true enemy state -- same rule _attack()/the plot/the cards already
+## follow.
+func _attack_weakest() -> void:
+	if not _need_selection():
+		return
+	var weakest_id: String = ""
+	var weakest_cond: float = INF
+	for sid in _own_selected():
+		var contacts: Dictionary = world.sensor_contacts.get(sid, {})
+		for cid in contacts.keys():
+			if not world.ships.has(cid) or world.ships[cid].is_wreck:
+				continue
+			if String(world.teams.get(cid, "")) == player_team:
+				continue
+			var c = contacts[cid]
+			if c.state == ContactStateRef.Type.UNKNOWN:
+				continue
+			var cond: float = world.ships[cid].subsystems.get_condition(SubsystemTypeRef.Type.STRUCTURAL_INTEGRITY)
+			if cond < weakest_cond:
+				weakest_cond = cond
+				weakest_id = cid
+	if weakest_id == "":
+		_say("противник не обнаружен")
+		return
+	selection.designate_target(weakest_id)
+	for sid in _own_selected():
+		world.transmit_ship_target(sid, weakest_id)
+		world.transmit_ship_weapons_free(sid, true)
+	_say("добить %s (самый повреждённый из обнаруженных)" % ShipNames.of(weakest_id))
 
 func _weapons_free(free: bool) -> void:
 	if not _need_selection():

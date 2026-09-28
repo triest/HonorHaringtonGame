@@ -374,6 +374,26 @@ Confirmed via probe_hold_the_line.gd (184 checks). Full 50-file sweep green.
 pass answered a specific, narrower ask (an override for one already-existing
 mechanic), not the broader depth request. Pick one of the FOLLOW-UP #8
 candidates next.
+FOLLOW-UP #10 (same day, user: "от игрока мало что зависит"): measured it directly
+instead of guessing (probe_player_impact.gd) -- concentrating fire on the weakest
+DETECTED enemy IS a real, measurable win (kills one more enemy ship per battle,
+averaged over several independent RNG seeds -- a single shared-seed A/B run is
+NOT valid here, see ASSUMPTIONS.md, ran into that trap once already). Fixed a real
+gap found along the way: manual target designation used to skip §34.2 ToT salvo
+coordination entirely. Added a one-click "Добить слабейшего" command-bar button
+since the winning tactic existed but was tedious to execute by hand (hunting
+through cards for the weakest enemy). "Мало простора"/"на автомате" (FOLLOW-UP #8)
+is STILL the open, not-yet-addressed root complaint -- this pass answered "does
+player skill even matter" (yes, confirmed) and gave one concrete lever, but did
+not add NEW ongoing decisions (counter-missiles / smarter enemy AI / formation
+shape are all still just candidates, not done). If the user reports this still
+feels the same, the next honest move is probably one of: (a) make the effect of
+THIS tactic more visible/legible during play (a "critically damaged, kill now"
+highlight on the plot/overlay, not just cards); (b) actually implement one of the
+bigger candidates (counter-missiles is probably the highest-leverage remaining
+one: a real scarce resource, a real decision every salvo, not just at mission
+start). Don't add another small button and call it depth -- the user has now said
+some version of "not enough" four times.
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -400,7 +420,9 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-28 ~06:05 UTC (interactive, feedback #9): hold-the-line
-override for the disengage mechanic. Full 50-file sweep + probe_hold_the_line.gd
-(184 checks) green, .exe re-exported, pushed. §56.3 NOT closed; nothing
-live-confirmed yet.
+Last pass finished: 2026-09-28 ~08:00 UTC (interactive, feedback #10): measured
+player-skill impact empirically, fixed a real ToT-coordination gap for manual
+targeting, added "Добить слабейшего". Full 50-file sweep + probe_attack_weakest.gd
+(3 checks) green, .exe re-exported, pushed. §56.3 NOT closed; nothing
+live-confirmed yet. "Мало простора" still open -- see FOLLOW-UP #10 for the
+honest next-step options.

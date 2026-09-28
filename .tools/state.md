@@ -484,3 +484,60 @@ impeller visual-quality pass, new 128-error smoke baseline documented. §56.3 NO
 closed; nothing live-confirmed yet. "Мало простора" still open -- see FOLLOW-UP
 #10/#11 for the honest next-step options (this pass was visuals, not depth,
 same category note as #11).
+FOLLOW-UP #13 (same day, user dropped 3 externally-generated graphics plans into
+the repo root: "GRAPHICS.md — план модернизации графики HonorHaringtonGame.md",
+"GPAPHICS chatgpt.md" (near-duplicate of the same ChatGPT plan, cosmetic list-
+marker differences only), "GRAPHICS geminai.md" (a concrete Godot 4.3 spatial
+shader for the impeller wedge: Fresnel edge glow + screen-texture distortion +
+hit-flash uniform) -- user: "тубе в корень новых md поканикали. Что скажешь?").
+All three now `git add`-ed (not yet committed -- see next concrete step) at the
+user's explicit follow-up instruction ("и в гит добавь их"); the OTHER, older
+untracked root clutter (CHATGPT.md, "ChatGPT Image ....png", comfyui_nsfw_skill.md,
+istochniki_izmeneniy.docx) was NOT part of this and was deliberately left alone
+(not part of "их" in context, unrelated content, not mine to add/delete
+unprompted).
+
+Read the ChatGPT plan in full: solid, compatible with this project's existing
+architecture (keeps Godot not Unreal, keeps simulation/render separation ShipView
+already enforces, wants PBR via normal/roughness maps rather than pure geometry
+for panel detail, LOD by distance/screen-size, three camera tiers strategic/
+tactical/cinematic, explicitly hard-SF not Star-Wars-arcade). Its own first step
+is an audit (read all current rendering code -> GRAPHICS_AUDIT.md) before
+touching anything. Genuinely large scope (its own 10-phase plan) -- competes with
+the still-open "мало простора" depth thread (FOLLOW-UP #8/#10), not a quick pass.
+
+ONE DIRECT CONFLICT surfaced and put to the user: the ChatGPT plan's §12 wants the
+impeller wedge "очень тонким, почти незаметным... не энергощит" (thin, barely
+visible, NOT a bright energy-shield look) -- the exact OPPOSITE of what
+FOLLOW-UP #12 (this same day, a few messages earlier) just shipped (additive
+blend, bright ridge->edge glow) in response to the user's own "черновик"
+complaint. Asked via AskUserQuestion:
+  - Wedge style: user picked "дать оба режима (переключатель)" -- BOTH styles,
+    switchable. NOT YET IMPLEMENTED (user then said "сейчас ничего не делай,
+    только в файлах фиксируй" -- stop, just record for later).
+  - Whether to start the plan's own audit-first step now: user picked "сейчас
+    не начинать вовсе" -- explicitly NOT now.
+
+Next concrete step (when the user asks to resume this thread, not before):
+1. `git commit` + push the 3 now-staged GRAPHICS*.md files (staged, not yet
+   committed as of this note -- do that first, trivially, next time this repo is
+   touched, unless the user says otherwise).
+2. Implement the wedge bright/subtle toggle: a CommandBar toggle (global
+   rendering preference, NOT a per-selection order -- no _need_selection() gate)
+   flipping a `ShipView.subtle_wedge_style: bool` static var; ShipView keeps TWO
+   materials per wedge (the existing bright StandardMaterial3D + a new
+   ShaderMaterial using Fresnel-driven alpha over the SAME baked vertex-colour
+   geometry WedgeMeshBuilder already produces -- no geometry change needed, only
+   which material is applied each frame). Gemini's shader is a good reference for
+   the Fresnel term but its screen-texture distortion (gravitational lensing) is
+   extra scope beyond what was actually asked for (just the visibility/brightness
+   behavior) -- treat that piece as optional, not required.
+3. Only THEN, if/when the user actually asks for it, start the plan's own
+   audit-first step (GRAPHICS_AUDIT.md) -- do not preempt that ask.
+Last pass finished: 2026-09-28 ~09:20 UTC (interactive, feedback #13): reviewed
+3 externally-sourced graphics plans, surfaced the wedge-style conflict honestly,
+got explicit direction (both modes, implement later) via AskUserQuestion, staged
+the 3 files for git per the user's own follow-up instruction, then stopped work
+entirely per "сейчас ничего не делай, только в файлах фиксируй" -- no code
+changed this pass, no .exe rebuild needed. §56.3 unaffected. "Мало простора"
+still open.

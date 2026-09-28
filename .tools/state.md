@@ -345,6 +345,23 @@ restarting the .exe. Confirmed via new probe_mission_editor.gd (rebuild correctn
 and probe_mixed_battle.gd (a 3-destroyer vs 2-battlecruiser mismatch plays out
 sensibly). Also fixed a rebuild-only race in ShipCardsPanel (stale cached id
 accessed one frame after a queue_free()'d instance's world was already replaced).
+FOLLOW-UP #8 (same day): investigated "why do ships stop firing" -- found and
+visualized the existing (not new) hull<=30%-disengage silence (ShipStatus verdict,
+battle log event, voice line); added dreadnought/superdreadnought to ShipClasses.
+OPEN ITEM flagged by the user, NOT yet addressed: "мало простора, просто выбираешь
+приказ и всё" (not enough tactical depth -- picking an order and watching it play
+out is the whole interaction). Candidate next steps, roughly in order of expected
+impact vs effort: (a) formation SHAPE choice (wall/column/wedge -- currently only
+"front line" exists) with different defensive/offensive trade-offs; (b) a
+CONCRETE decision the player must make under time pressure more than once per
+battle (e.g. missile salvo timing / throttle -- WeaponPanel already has salvo
+size + FULL BURN/EXTENDED RANGE throttle, but it may be under-surfaced/underused --
+check whether the player actually has a reason to touch it); (c) counter-missiles
+(still not implemented -- a real second layer of decisions: hold them for a bigger
+threat vs. use them now); (d) smarter enemy AI that maneuvers/focuses fire/retreats
+convincingly, so "read and react to the enemy" becomes its own skill. Pick ONE,
+budget real time, don't rush a shallow version just to check the box -- this is
+exactly the kind of thing that reads as fake depth if done sloppily.
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -371,7 +388,8 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-28 ~05:20 UTC (interactive, feedback #7, mission editor):
-ShipClasses/MissionEditorPanel/_start_mission rebuild path added, full 50-file test
-sweep + 2 new probes green, screenshots checked (editor UI + rebuilt mixed battle),
-.exe re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet.
+Last pass finished: 2026-09-28 ~05:50 UTC (interactive, feedback #8): disengage
+visibility (real bug in player-facing clarity, not the mechanic itself),
+dreadnought/superdreadnought classes; "мало простора" logged as an open item for
+next pass, not addressed yet. Full 50-file test sweep + 2 new probes green, .exe
+re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet.

@@ -3225,3 +3225,15 @@ ShipFactory system (data/ships/*.tres, canon-sourced per AGENTS.md §8.4) -- tha
 system's tonnage is the wrong scale for this squadron demo (see state.md's item H
 note); a future pass could migrate this editor onto real ShipClassData resources if
 canon-scale forces are ever wanted here instead.
+
+
+## Disengage visibility (2026-09-28)
+CRITICAL_HULL_FRACTION (0.3, world) and ShipStatus.DISENGAGE_HULL_FRACTION (0.3,
+UI) are the SAME threshold kept as two literals (existing small-constant
+convention) -- if one is ever retuned, the other must move with it or the UI will
+drift out of sync with the actual disengage gate in simulation_world.gd.
+
+## New ship classes: dreadnought/superdreadnought (2026-09-28)
+Same status as the original four (ASSUMPTION/pacing, not canon tonnage data) --
+scaled up from battlecruiser by feel (more tubes/PD/energy mounts, heavier,
+slower turn rate), not derived from any canon per-class figure.

@@ -22,7 +22,7 @@ extends RefCounted
 class_name ShipClasses
 
 ## Canonical order for UI listings (lightest to heaviest).
-const ORDER: Array = ["destroyer", "light_cruiser", "heavy_cruiser", "battlecruiser"]
+const ORDER: Array = ["destroyer", "light_cruiser", "heavy_cruiser", "battlecruiser", "dreadnought", "superdreadnought"]
 
 const CLASSES: Dictionary = {
 	"destroyer": {
@@ -54,6 +54,20 @@ const CLASSES: Dictionary = {
 		"pd_mounts": 4,
 		"energy_broadside": 2, "energy_bow": 1,
 		"mass_kg": 1.6e9, "max_thrust_n": 7.0e11, "max_angular_speed_rad_s": 0.22,
+	},
+	"dreadnought": {
+		"label": "дредноут",
+		"tubes": 8, "rounds_per_tube": 50, "reload_s": 24.0,
+		"pd_mounts": 5,
+		"energy_broadside": 2, "energy_bow": 2,
+		"mass_kg": 2.4e9, "max_thrust_n": 9.5e11, "max_angular_speed_rad_s": 0.16,
+	},
+	"superdreadnought": {
+		"label": "супердредноут",
+		"tubes": 10, "rounds_per_tube": 55, "reload_s": 26.0,
+		"pd_mounts": 6,
+		"energy_broadside": 3, "energy_bow": 2,
+		"mass_kg": 3.5e9, "max_thrust_n": 1.3e12, "max_angular_speed_rad_s": 0.12,
 	},
 }
 

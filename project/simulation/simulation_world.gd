@@ -88,6 +88,14 @@ var player_controlled_teams: Dictionary = {}
 ##     event for the log.
 var subsystem_damage_model: bool = false
 var _disabled_seen: Dictionary = {}  # ship_id -> {type: true}
+## 2026-09-28 (user: "look into why ships sometimes stop firing"): fires
+## a UI-facing "ship_disengaging" battle_event exactly once, the tick a
+## ship's hull first crosses CRITICAL_HULL_FRACTION and
+## _resolve_weapons_ai/_resolve_missile_launch_ai start silencing it --
+## see ship_cards_panel/battle_log_panel/ScriptStatus for the reader
+## side. Never un-fires (there is no repair mechanic yet to make that
+## meaningful).
+var _disengage_seen: Dictionary = {}
 ## 2026-09-27 (user feedback #3: "not like the book"): combat ATTITUDE per
 ## ship -- how the hull is turned relative to the threat, the core
 ## Honorverse tactical trade-off. Opt-in: only ships with an entry here
@@ -615,6 +623,7 @@ func reset_ships() -> void:
 	sensor_range_m = SensorResolution.DEFAULT_SENSOR_RANGE_M
 	battle_events.clear()
 	battle_event_seq = 0
+	_disengage_seen.clear()
 	if clock != null:
 		clock.reset()
 
@@ -846,6 +855,9 @@ func _sync_subsystem_driven_conditions() -> void:
 			var hull_sync = hulls.get(ship_id)
 			if hull_sync != null:
 				hull_sync.integrity = ship.subsystems.get_condition(SubsystemType.Type.STRUCTURAL_INTEGRITY) * hull_sync.max_integrity
+				if not _disengage_seen.has(ship_id) and hull_sync.integrity / hull_sync.max_integrity <= CRITICAL_HULL_FRACTION:
+					_disengage_seen[ship_id] = true
+					_battle_event("ship_disengaging", {"ship_id": ship_id})
 
 func _apply_extended_subsystem_effects(ship_id: String, ship: ShipPhysicsState) -> void:
 	var subs = ship.subsystems

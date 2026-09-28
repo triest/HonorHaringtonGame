@@ -29,6 +29,8 @@ const VOICE_SHIP_LOST_OWN: Array = ["Мы теряем «%s»! Спасател�
 const VOICE_SHIP_LOST_ENEMY: Array = ["Цель уничтожена -- один корабль противника выведен из строя.", "«%s» противника разрушен.", "Есть! Один корабль хевенитов уничтожен."]
 const VOICE_HALF_ENEMY_DOWN: Array = ["Капитан, у противника серьёзные потери -- их строй разваливается.", "Противник теряет эскадру -- ещё немного, и они дрогнут."]
 const VOICE_HALF_OWN_DOWN: Array = ["Капитан, мы несём тяжёлые потери -- запрашиваю указания по отходу.", "Эскадра тает, сэр. Нужно решение -- держаться или отходить."]
+const VOICE_DISENGAGE_OWN: Array = ["Капитан, корпус критический -- разрешите выйти из линии.", "«%s» больше не может держать строй, выходит из боя.", "Мостик докладывает: «%s» разворачивается, бой продолжать не в состоянии."]
+const VOICE_DISENGAGE_ENEMY: Array = ["Один из кораблей противника выходит из боя -- видны серьёзные повреждения.", "Противник теряет ход -- «%s» разворачивается прочь."]
 
 var _voice_seen: Dictionary = {}
 var _own_lost_count: int = 0
@@ -217,6 +219,14 @@ func _ingest(e: Dictionary) -> void:
 			_trim()
 			if _own(d.get("old_guide_id", "")):
 				_voice_once("leader_lost", VOICE_LEADER_LOST, t)
+		"ship_disengaging":
+			var dsid: String = d.get("ship_id", "")
+			_lines.append({"key": "diseng:" + dsid, "t": t, "bb": "[color=%s]%s[/color]: [color=%s]выходит из боя -- критические повреждения корпуса[/color]" % [_col(dsid), ShipNames.of(dsid), WARN_HEX]})
+			_trim()
+			if _own(dsid):
+				_voice_once("disengage_" + dsid, VOICE_DISENGAGE_OWN, t, ShipNames.of(dsid))
+			else:
+				_voice_once("disengage_" + dsid, VOICE_DISENGAGE_ENEMY, t, ShipNames.of(dsid))
 
 func _plural(n: int) -> String:
 	var n10: int = n % 10

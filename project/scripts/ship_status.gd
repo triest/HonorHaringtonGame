@@ -38,6 +38,15 @@ static func module_color(cond: float) -> Color:
 	return UiTheme.condition_color(cond)
 
 ## {"text": String, "color": Color} -- the verdict for labels/cards.
+## Mirrors SimulationWorld.CRITICAL_HULL_FRACTION -- the threshold at
+## which _resolve_weapons_ai/_resolve_missile_launch_ai treat a ship as
+## "disengaging" and silence BOTH its energy weapons and missile tubes
+## entirely (see that const's own doc comment), regardless of whether any
+## individual weapon module is itself still intact. Kept as a local
+## literal (not a cross-file reference) per this codebase's existing
+## small-constant convention -- see UiTheme.ACCENT_COLOR's own doc.
+const DISENGAGE_HULL_FRACTION: float = 0.3
+
 static func verdict(world: SimulationWorld, sid: String) -> Dictionary:
 	var ship = world.ships.get(sid)
 	if ship == null or ship.is_wreck:
@@ -46,6 +55,16 @@ static func verdict(world: SimulationWorld, sid: String) -> Dictionary:
 	if subs == null:
 		return {"text": "", "color": UiTheme.ACCENT_COLOR}
 	var T = SubsystemType.Type
+	# 2026-09-28 (user: "посмотри, почему иногда корабли могут прекратить
+	# стрелять"): checked FIRST and takes priority over every other
+	# verdict below -- a ship can be sitting on 100% weapons/missiles and
+	# still be completely silent this instant because the hull itself
+	# crossed 30%, which is a DIFFERENT condition than any one module
+	# being knocked out. Without this check the card could say
+	# "боеспособен" for a ship that has, in fact, gone quiet and turned
+	# to run -- confusing, looked like a bug. See CHANGELOG.md this date.
+	if subs.get_condition(T.STRUCTURAL_INTEGRITY) <= DISENGAGE_HULL_FRACTION:
+		return {"text": "ОТСТУПАЕТ — критические повреждения корпуса", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 	if subs.is_disabled(T.POWER):
 		return {"text": "без энергии", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 	if subs.is_disabled(T.WEAPONS) and subs.is_disabled(T.MISSILE_SYSTEMS):
@@ -77,6 +96,11 @@ static func verdict_observed(world: SimulationWorld, sid: String) -> Dictionary:
 	if subs == null:
 		return {"text": "", "color": UiTheme.ACCENT_COLOR}
 	var T = SubsystemType.Type
+	# Sensor-honest, not cheat vision: a disengaging ship visibly stops
+	# firing and turns away -- this is externally observable behavior,
+	# not a peek at its internal module list.
+	if subs.get_condition(T.STRUCTURAL_INTEGRITY) <= DISENGAGE_HULL_FRACTION:
+		return {"text": "выходит из боя", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 	if subs.is_disabled(T.POWER):
 		return {"text": "без признаков энергии", "color": UiTheme.CONDITION_CRITICAL_COLOR}
 	if subs.is_disabled(T.PROPULSION):

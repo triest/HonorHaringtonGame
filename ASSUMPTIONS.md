@@ -3212,3 +3212,16 @@ subsystem_damage_model. This hull object is NEVER read by the UI (ShipStatus/
 ShipCardsPanel/BattleOverlay all read subsystems directly) -- §25.1 compliance is
 unaffected, this is purely an internal derived value feeding pre-existing
 hull-based AI code that predates the module-damage model.
+
+
+## Mission editor ship classes (2026-09-28)
+ShipClasses.CLASSES (destroyer/light_cruiser/heavy_cruiser/battlecruiser): all four
+are ENGINEERING/PACING placeholders, not canon-sourced tonnage data -- heavy_cruiser
+exactly reproduces the pre-editor fixed loadout (4 tubes/40 rounds/20s reload, 3 PD,
+1 broadside + 1 bow energy mount, ShipPhysicsState's own default mass/thrust/turn
+rate). The other three classes are scaled by feel around that baseline, not derived
+from any per-class canon figure. Distinct from the separate capital-ship ShipClassData/
+ShipFactory system (data/ships/*.tres, canon-sourced per AGENTS.md §8.4) -- that
+system's tonnage is the wrong scale for this squadron demo (see state.md's item H
+note); a future pass could migrate this editor onto real ShipClassData resources if
+canon-scale forces are ever wanted here instead.

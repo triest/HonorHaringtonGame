@@ -17,19 +17,22 @@ extends Node3D
 ## `world.weapon_mounts`/`world.teams`, and target SELECTION for both
 ## sides already goes through TacticalAI.select_weapon_target (see
 ## SimulationWorld._resolve_weapon_target) with no separate "AI class" to
-## instantiate here -- at the time item 6 landed there was no
-## player-controlled side yet, so this hardcoded scenario was then
-## effectively TacticalAI vs TacticalAI, exactly as the checklist title
-## says. (Items 5 and 7, added in later passes, now give alpha player
-## control and a win/lose screen -- see PlayerInput/WinLoseScreen below;
-## this paragraph is kept as-is for the historical "why" of the
-## teams/mount setup.) §56.3 item H (this pass) upgraded the scenario
-## itself from the original 1v1 (alpha vs beta) to a 3-vs-3 squadron and
-## gave red/alpha missile tubes (previously energy-only) -- see the
-## `ship_specs` table in _ready() below for the authoritative per-ship
-## layout/loadout; this paragraph is kept as-is for the historical "why"
-## of the team/mount wiring, not the current ship count.
-## See CHANGELOG.md for the authoritative "done vs not done" list.
+## instantiate here. See CHANGELOG.md for the authoritative "done vs not
+## done" list.
+##
+## 2026-09-28 (user: "редактор миссий, чтобы можно было соотношение и
+## типы кораблей сторон выбирать"): the whole "build a scenario + wire
+## every controller/panel to it" block used to live directly in _ready().
+## It is now `_start_mission(setup)`, callable more than once: _ready()
+## calls it once with ShipClasses.default_setup() (so every existing
+## headless caller -- probes, screenshots, tests -- sees the same 4x4
+## scenario immediately, unaffected by any of this), then shows
+## MissionEditorPanel on top; confirming a different composition there
+## calls `_start_mission(new_setup)` again, which tears down every node
+## `_start_mission` created last time (`_teardown_mission()`) and
+## `world.reset_ships()`s the simulation before rebuilding. See
+## scripts/demo_scenario.gd / scripts/ship_classes.gd / scripts/
+## mission_editor_panel.gd.
 ##
 ## WeaponFx (scripts/weapon_fx.gd, ТЗ §56.1 item 3) is wired into the
 ## per-tick loop below and now has something to actually draw: with teams
@@ -45,7 +48,9 @@ var tactical_plot: TacticalPlot
 ## §56.3 item A: single shared selection, injected into TacticalPlot (and
 ## future §56.3 UI -- squadron list, order menu) below -- see
 ## selection_state.gd's own doc comment for why this lives here rather
-## than inside any one view.
+## than inside any one view. Recreated fresh by every _start_mission()
+## call (old selected/designated ids would just point at a ship-less
+## world after a rebuild).
 var selection: SelectionState
 ## §56.3 item B: translates the group hotkey (G) into real
 ## FormationState/CommandEchelon structure from `selection` -- see that
@@ -90,28 +95,115 @@ var battle_log: BattleLogPanel
 var ship_cards: ShipCardsPanel
 var mission_panel: MissionPanel
 var win_lose_screen: WinLoseScreen
+## 2026-09-28: the mission-editor overlay (see class doc above) and the
+## composition it last confirmed -- kept around so a later pass could read
+## "what's actually in play" without re-deriving it from world.teams.
+var mission_editor: MissionEditorPanel
+var current_setup: Dictionary = {}
 
 ## ТЗ §56.1 item 4 (Minimal HUD): which ship the single HUD panel is a
-## point of view for. Alpha, arbitrarily -- no player-controlled side
-## existed yet when item 4 was built; item 5 (PlayerInput,
-## scripts/player_input.gd) has since made "alpha" the actual
-## player-controlled ship (see that script's own doc comment for the
-## decision), so this constant and PlayerInput's default
-## `selected_ship_id` are intentionally the same ship -- the HUD shows
-## exactly the ship the player commands, not an arbitrary/independent
-## choice anymore.
+## point of view for. "alpha" is always the RED side's flagship/guide --
+## DemoScenario._make_ids() guarantees this regardless of composition
+## (HUD_POV_SHIP_ID, PlayerInput's default, and several unit tests' doc
+## comments all still refer to exactly this id).
 const HUD_POV_SHIP_ID: String = "alpha"
 
 func _ready() -> void:
 	world = SimulationWorld.new()
 	add_child(world)
+	world.clock.simulation_tick.connect(_on_tick)
 
-	# 2026-09-27: canon-shaped squadron engagement (two 4-ship line-abreast
-	# squadrons, bow-on approach from ~5.3M km, missile broadsides + PD +
-	# energy mounts on both sides, real HullState so ships can die) --
-	# replaces the old 10 km point-blank 3v3 laser brawl the user rejected
-	# live. See scripts/demo_scenario.gd's doc comment for the full why.
-	DemoScenario.build(world)
+	_start_mission(ShipClasses.default_setup())
+
+	# 2026-09-28: the mission editor shows ON TOP of the mission
+	# `_start_mission()` above already built and paused (via its own
+	## briefing pause) -- every existing headless caller that never
+	# interacts with UI (probes, screenshot_capture.gd, test_camera_views.
+	# gd) sees exactly the same ships/state it always did, one frame in.
+	# A live player sees the editor first, adjusts composition, and
+	# confirming rebuilds via _start_mission() again.
+	mission_editor = MissionEditorPanel.new()
+	mission_editor.on_confirm = Callable(self, "_start_mission")
+	add_child(mission_editor)
+
+	# 2026-09-23 live bug report (§56.1 items 4/5, see .tools/state.md/
+	# CHANGELOG.md for that date): user ran the exported Windows .exe and
+	# got a rendered 3D scene with ships firing on each other, but NO HUD
+	# text and NO keys/mouse doing anything at all. Investigation that
+	# pass found Hud/PlayerInput's own scripting logic correct -- reproduced
+	# both in pure --headless (simulation/tests/test_hud.gd,
+	# simulation/tests/test_player_input.gd) and in an actual Xvfb-rendered
+	# run (real OpenGL display: HudLabel came up visible with real text,
+	# and an injected keypress DID reach PlayerInput and change ship
+	# state) -- so nothing in this file or Hud/PlayerInput was actually
+	# broken. The leading remaining hypothesis for what a live user would
+	# see as "nothing responds" is the OS-level game window simply not
+	# having input focus when it first opens (a known category of
+	# Godot/Windows export quirk -- e.g. a SmartScreen prompt or the
+	# console wizard window stealing focus at launch); that can only be
+	# observed live, never from this headless-only environment, so this
+	# call is a defensive best-effort fix, not a confirmed root-cause fix.
+	# Harmless everywhere else (a no-op if the window already has focus,
+	# and both calls are silently safe under --headless/dummy display --
+	# see simulation/tests -- so this does not risk breaking the existing
+	# headless smoke checks).
+	get_window().grab_focus()
+	DisplayServer.window_move_to_foreground()
+
+## Frees every node the LAST _start_mission() call created (ships views +
+## every controller/panel below) and wipes the simulation itself
+## (world.reset_ships()) so the next _start_mission() call rebuilds onto
+## a genuinely clean slate. A no-op the very first time (nothing to tear
+## down yet) -- guarded by `weapon_fx == null`, the first field this
+## block ever sets, at the caller.
+func _teardown_mission() -> void:
+	for child in get_children():
+		if child is ShipView:
+			child.queue_free()
+	for n in [weapon_fx, hud, tactical_plot, command_group_controller, command_group_panel,
+			move_order_controller, order_menu, order_menu_controller, weapon_panel_controller,
+			weapon_panel, camera_focus_controller, player_input, win_lose_screen, battle_overlay,
+			command_bar, ship_cards, battle_log, mission_panel]:
+		if n != null:
+			n.queue_free()
+	hulls.clear()
+	weapon_fx = null
+	hud = null
+	tactical_plot = null
+	command_group_controller = null
+	command_group_panel = null
+	move_order_controller = null
+	order_menu = null
+	order_menu_controller = null
+	weapon_panel_controller = null
+	weapon_panel = null
+	camera_focus_controller = null
+	player_input = null
+	win_lose_screen = null
+	battle_overlay = null
+	command_bar = null
+	ship_cards = null
+	battle_log = null
+	mission_panel = null
+	world.reset_ships()
+
+## Builds `setup` into `world` (DemoScenario.build) and (re)creates every
+## ship view + controller/panel wired to it. This IS the body of the old
+## _ready() from "DemoScenario.build(world)" onward, parameterized by
+## `setup` and made re-entrant (see _teardown_mission() above) so the
+## mission editor can call it again with a different composition.
+func _start_mission(setup: Dictionary) -> void:
+	if weapon_fx != null:
+		_teardown_mission()
+	current_setup = setup
+
+	# 2026-09-27: canon-shaped squadron engagement (line-abreast squadrons,
+	# bow-on approach from ~5.3M km, missile broadsides + PD + energy
+	# mounts on both sides, real HullState so ships can die) -- see
+	# scripts/demo_scenario.gd's doc comment for the full why.
+	var ids: Dictionary = DemoScenario.build(world, setup)
+	var red_ids: Array = ids["red_ids"]
+	var blue_ids: Array = ids["blue_ids"]
 
 	for ship_id in world.ships.keys():
 		var view := ShipView.new()
@@ -144,15 +236,17 @@ func _ready() -> void:
 	command_group_panel = CommandGroupPanel.new()
 	add_child(command_group_panel)
 
+	# The player always commands "red" (Manticore) regardless of chosen
+	# composition -- the editor only varies ship counts/types per side,
+	# never which side the player is on.
+	var player_team: String = "red"
+
 	# §56.3 item C: same shared world/selection as command_group_controller
-	# above. player_team is world.teams.get(HUD_POV_SHIP_ID) rather than a
-	# separately hardcoded "red" literal, so this stays correct if the
-	# player-controlled ship/team ever changes without anyone remembering
-	# to update a second copy of the same fact.
+	# above.
 	move_order_controller = MoveOrderController.new()
 	move_order_controller.world = world
 	move_order_controller.selection = selection
-	move_order_controller.player_team = String(world.teams.get(HUD_POV_SHIP_ID, ""))
+	move_order_controller.player_team = player_team
 	add_child(move_order_controller)
 	tactical_plot.move_order_controller = move_order_controller
 
@@ -167,7 +261,7 @@ func _ready() -> void:
 	order_menu_controller = OrderMenuController.new()
 	order_menu_controller.world = world
 	order_menu_controller.selection = selection
-	order_menu_controller.player_team = String(world.teams.get(HUD_POV_SHIP_ID, ""))
+	order_menu_controller.player_team = player_team
 	order_menu_controller.move_order_controller = move_order_controller
 	add_child(order_menu_controller)
 	tactical_plot.order_menu_controller = order_menu_controller
@@ -176,14 +270,10 @@ func _ready() -> void:
 	# §56.3 item E: weapon-type selection panel for the currently
 	# (singly-)selected own ship -- same shared world/selection/
 	# player_team as move_order_controller/order_menu_controller above.
-	# Non-modal (see weapon_panel.gd's own doc comment), so tree order
-	# relative to tactical_plot/order_menu does not matter for input
-	# priority the way it did for order_menu -- added after them purely
-	# to keep related §56.3 controllers/panels grouped together.
 	weapon_panel_controller = WeaponPanelController.new()
 	weapon_panel_controller.world = world
 	weapon_panel_controller.selection = selection
-	weapon_panel_controller.player_team = String(world.teams.get(HUD_POV_SHIP_ID, ""))
+	weapon_panel_controller.player_team = player_team
 	add_child(weapon_panel_controller)
 
 	weapon_panel = WeaponPanel.new()
@@ -191,11 +281,7 @@ func _ready() -> void:
 	add_child(weapon_panel)
 
 	# §56.3 item F: quick-center hotkey -- same shared world/selection as
-	# every other §56.3 controller above. `camera` is looked up here
-	# (get_node_or_null("Camera3D"), same node _frame_camera_on_ships
-	# already targets below) rather than passed in from outside, since
-	# main.gd is the one place that already owns both the scene's single
-	# OrbitCamera and the single shared `selection`.
+	# every other §56.3 controller above.
 	camera_focus_controller = CameraFocusController.new()
 	camera_focus_controller.world = world
 	camera_focus_controller.selection = selection
@@ -204,20 +290,19 @@ func _ready() -> void:
 
 	# ТЗ §56.1 item 5 (Order input wiring): translates hotkeys (project.
 	# godot [input], see PlayerInput's own doc comment) into calls on
-	# `world`'s existing transmit_*/order APIs. Given `world` directly
-	# (not looked up) since main.gd already owns the one SimulationWorld
-	# instance for this scene.
+	# `world`'s existing transmit_*/order APIs.
 	player_input = PlayerInput.new()
 	player_input.world = world
 	add_child(player_input)
 
 	# ТЗ §56.1 item 7 (Win/lose screen): same per-tick pure-readout
 	# convention as WeaponFx/Hud above (§42, ready before the tick-signal
-	# connect below so it exists before the first _on_tick call).
+	# connect below so it exists before the first _on_tick call). Kept
+	# hidden (see below) -- superseded on-screen by MissionPanel's debrief.
 	win_lose_screen = WinLoseScreen.new()
 	add_child(win_lose_screen)
+	win_lose_screen.visible = false
 
-	var player_team: String = String(world.teams.get(HUD_POV_SHIP_ID, ""))
 	battle_overlay = BattleOverlay.new()
 	battle_overlay.world = world
 	battle_overlay.selection = selection
@@ -264,7 +349,7 @@ func _ready() -> void:
 	world.clock.frame_budget_ms = 10.0
 	# Start on the whole squadron selected, at 5x: the opening approach is
 	# minutes of sim time before missile range.
-	selection.select_only(DemoScenario.RED_IDS.duplicate())
+	selection.select_only(red_ids.duplicate())
 	world.clock.set_time_scale(5.0)
 
 	# Floating render origin + free zoom down to a single hull (see
@@ -279,58 +364,34 @@ func _ready() -> void:
 		if child is ShipView:
 			child.process_priority = 20
 
-	world.clock.simulation_tick.connect(_on_tick)
 	_frame_camera_on_ships()
 
 	# 2026-09-27 (user: story/canon, "confusing view"): mission briefing
-	# (pauses until "К бою"), debrief with stats at the end (replaces the
-	# bare WinLoseScreen text, kept hidden), and the battle opens on our
-	# own squadron (the line and the direction of the enemy visible, the
-	# whole-battle view one keypress away: F1 / Esc).
-	win_lose_screen.visible = false
+	# (pauses until "К бою"), debrief with stats at the end, and the
+	# battle opens on our own squadron (the line and the direction of the
+	# enemy visible, the whole-battle view one keypress away: F1 / Esc).
 	mission_panel = MissionPanel.new()
 	mission_panel.world = world
 	mission_panel.player_team = player_team
 	mission_panel.briefing_title = DemoScenario.MISSION_TITLE
-	mission_panel.briefing_bbcode = DemoScenario.MISSION_BRIEFING
+	mission_panel.briefing_bbcode = DemoScenario.mission_briefing(setup, red_ids, blue_ids)
 	add_child(mission_panel)
 	if OS.get_environment("SKIP_BRIEFING") != "1":
 		mission_panel.show_briefing()
 	camera_focus_controller.view_own_squadron()
 
-	# 2026-09-23 live bug report (§56.1 items 4/5, see .tools/state.md/
-	# CHANGELOG.md for that date): user ran the exported Windows .exe and
-	# got a rendered 3D scene with ships firing on each other, but NO HUD
-	# text and NO keys/mouse doing anything at all. Investigation that
-	# pass found Hud/PlayerInput's own scripting logic correct -- reproduced
-	# both in pure --headless (simulation/tests/test_hud.gd,
-	# simulation/tests/test_player_input.gd) and in an actual Xvfb-rendered
-	# run (real OpenGL display: HudLabel came up visible with real text,
-	# and an injected keypress DID reach PlayerInput and change ship
-	# state) -- so nothing in this file or Hud/PlayerInput was actually
-	# broken. The leading remaining hypothesis for what a live user would
-	# see as "nothing responds" is the OS-level game window simply not
-	# having input focus when it first opens (a known category of
-	# Godot/Windows export quirk -- e.g. a SmartScreen prompt or the
-	# console wizard window stealing focus at launch); that can only be
-	# observed live, never from this headless-only environment, so this
-	# call is a defensive best-effort fix, not a confirmed root-cause fix.
-	# Harmless everywhere else (a no-op if the window already has focus,
-	# and both calls are silently safe under --headless/dummy display --
-	# see simulation/tests -- so this does not risk breaking the existing
-	# headless smoke checks).
-	get_window().grab_focus()
-	DisplayServer.window_move_to_foreground()
-
 ## NOTE on ordering: SimulationWorld itself connects to `world.clock.
 ## simulation_tick` in ITS OWN _ready() (simulation_world.gd), which runs
-## synchronously during `add_child(world)` above -- BEFORE this method's
-## own connect() call a few lines later in this file's _ready(). Godot
-## calls a signal's listeners in connection order, so world.tick_
-## simulation() (which rebuilds last_tick_weapon_shots for this tick, AND
-## advances world.weapon_mounts' condition sync) has already run by the
-## time this handler fires, and weapon_fx.update() below is reading this
-## tick's fresh data, not last tick's.
+## synchronously during `add_child(world)` in _ready() above -- BEFORE
+## this file's own connect() call a few lines later. Godot calls a
+## signal's listeners in connection order, so world.tick_simulation()
+## (which rebuilds last_tick_weapon_shots for this tick, AND advances
+## world.weapon_mounts' condition sync) has already run by the time this
+## handler fires, and weapon_fx.update() below is reading this tick's
+## fresh data, not last tick's. Every field read here is reassigned by
+## _start_mission(), never by _ready() directly, so a mission rebuild is
+## always atomic from this handler's point of view (see _start_mission's
+## own doc comment).
 ##
 ## Cooldown advance for `world.weapon_mounts` (WeaponMount.tick(dt)) is
 ## deliberately still done HERE, not inside SimulationWorld.

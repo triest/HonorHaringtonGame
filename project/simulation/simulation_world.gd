@@ -568,6 +568,56 @@ var battle_events: Array = []
 var battle_event_seq: int = 0
 const BATTLE_EVENTS_MAX: int = 400
 
+## 2026-09-28 (mission editor: pick a new force composition mid-session
+## without restarting the .exe): wipes every ship/mission-scoped
+## dictionary back to empty so DemoScenario.build() can populate a fresh
+## roster into the SAME SimulationWorld/SimClock instance (the clock
+## object itself is kept, only its counters reset via SimClock.reset(),
+## so main.gd's one-time `simulation_tick` signal connection stays valid
+## across a rebuild). Scenario-level tuning flags (sensor_range_m,
+## subsystem_damage_model, missile_* overrides, player_controlled_teams)
+## are intentionally ALSO cleared here since DemoScenario.build() always
+## re-sets every one of them itself at the top of build() -- leaving a
+## stale flag from a previous mission around would be the actual bug.
+func reset_ships() -> void:
+	ships.clear()
+	hulls.clear()
+	weapon_mounts.clear()
+	missile_tubes.clear()
+	pd_mounts.clear()
+	ecm_states.clear()
+	sensor_contacts.clear()
+	teams.clear()
+	formations.clear()
+	command_echelons.clear()
+	individual_orders.clear()
+	ship_combat_directives.clear()
+	ship_pd_hold.clear()
+	_formation_assigned_targets.clear()
+	_missile_salvo_fire_at.clear()
+	_pending_command_transmissions.clear()
+	missiles.clear()
+	missile_owners.clear()
+	_next_ai_missile_id = 0
+	last_tick_weapon_shots.clear()
+	_tick_index = 0
+	world_sim_time = 0.0
+	player_controlled_teams.clear()
+	subsystem_damage_model = false
+	_disabled_seen.clear()
+	ship_attitude.clear()
+	ship_effective_attitude.clear()
+	missile_sensor_update_interval_ticks = 1
+	_sensor_observer_index = 0
+	missile_detonation_range_override_m = -1.0
+	missile_max_lifetime_override_s = -1.0
+	missile_zem_guidance = false
+	sensor_range_m = SensorResolution.DEFAULT_SENSOR_RANGE_M
+	battle_events.clear()
+	battle_event_seq = 0
+	if clock != null:
+		clock.reset()
+
 func _battle_event(event_type: String, data: Dictionary) -> void:
 	battle_event_seq += 1
 	battle_events.append({"seq": battle_event_seq, "t": world_sim_time, "type": event_type, "data": data})

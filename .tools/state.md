@@ -334,6 +334,17 @@ as probe_demo_scenario.gd/probe_perf.gd).
 Remaining ideas for "still might feel thin": enemy AI that maneuvers/closes distance
 dynamically rather than static broadside, counter-missiles, a full campaign/multiple
 missions, better ship models + explosion effects + sound.
+FOLLOW-UP #7 (user: "редактор миссий сделай, чтобы можно было соотношение и типы
+кораблей сторон выбирать"): MissionEditorPanel (pre-battle, own force/enemy force,
+per-class -/+ steppers, live summary, randomize/default/"В бой"), ShipClasses (4
+demo-scale classes), DemoScenario.build(world, setup) parameterized (default = old
+fixed 4x4, every existing headless caller unaffected), main.gd's scenario-build code
+extracted into re-entrant _start_mission(setup) + _teardown_mission() +
+world.reset_ships()/SimClock.reset() so the editor can rebuild mid-session without
+restarting the .exe. Confirmed via new probe_mission_editor.gd (rebuild correctness)
+and probe_mixed_battle.gd (a 3-destroyer vs 2-battlecruiser mismatch plays out
+sensibly). Also fixed a rebuild-only race in ShipCardsPanel (stale cached id
+accessed one frame after a queue_free()'d instance's world was already replaced).
 Next pass: (1) if the user has reported on the new build (check CHANGELOG/commits
 newer than this), fix what they report FIRST; (2) otherwise, improve along the same
 line, in this order: ships should visibly turn their bow toward their thrust/course
@@ -360,7 +371,7 @@ has explicitly confirmed it live, walking through (or at least trying) the 15 st
 Blockers: none currently. This is a large scope -- if it starts feeling too big for one
 pass's time budget, that's expected; just make honest incremental progress on the
 checklist rather than declaring victory early (that's exactly what went wrong twice now).
-Last pass finished: 2026-09-27 ~20:10 UTC (interactive, feedback #6, model
-claude-sonnet-5): fixed hull-desync regression (retreat/succession/disengage AI
-were silently dead), added bridge voice lines. Full 50-file test sweep clean,
+Last pass finished: 2026-09-28 ~05:20 UTC (interactive, feedback #7, mission editor):
+ShipClasses/MissionEditorPanel/_start_mission rebuild path added, full 50-file test
+sweep + 2 new probes green, screenshots checked (editor UI + rebuilt mixed battle),
 .exe re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet.

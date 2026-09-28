@@ -147,6 +147,18 @@ func _process(_d: float) -> void:
 	if not _built:
 		_build()
 	for sid in _cards.keys():
+		if not world.ships.has(sid):
+			# 2026-09-28: guards a real one-frame race during a mission
+			# editor rebuild -- this (old) ShipCardsPanel instance's
+			# queue_free() from _teardown_mission() hasn't taken effect
+			# yet when _start_mission() immediately repopulates `world`
+			# with a NEW roster in the same frame, so `_cards` (built once
+			# in _build(), keyed by the OLD roster's ids) can briefly hold
+			# an id `world.ships` no longer has. Skipping it here is
+			# harmless -- the freshly-created ShipCardsPanel instance
+			# takes over with a correct, freshly-built `_cards` dict the
+			# very next frame.
+			continue
 		var c: Dictionary = _cards[sid]
 		var ship: ShipPhysicsState = world.ships[sid]
 		var sel: bool = selection != null and selection.is_selected(sid)

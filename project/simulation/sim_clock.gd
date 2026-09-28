@@ -92,6 +92,21 @@ var frame_budget_ms: float = 0.0
 ## Smoothed actually-achieved sim-seconds per real second (UI readout).
 var effective_time_scale: float = 1.0
 
+## 2026-09-28 (mission rebuild via the mission editor): puts every
+## counter back to a fresh clock's state WITHOUT dropping this object's
+## identity, so a signal already connected to `simulation_tick` (main.gd
+## connects once, in _ready()) keeps working across a rebuild. Tuning
+## fields the caller explicitly configured (time_scale, max_dt_multiplier,
+## frame_budget_ms) are left alone -- only the run's own progress resets.
+func reset() -> void:
+	paused = false
+	single_step_requested = false
+	sim_time = 0.0
+	tick_count = 0
+	_accumulator = 0.0
+	scale_cap = 0.0
+	effective_time_scale = 1.0
+
 func _run_tick(step: float = FIXED_DT) -> void:
 	tick_count += 1
 	sim_time += step

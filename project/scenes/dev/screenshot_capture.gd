@@ -37,6 +37,21 @@ func _presim() -> void:
 	world.clock.paused = true
 	if OS.get_environment("SCREENSHOT_KEEP_BRIEFING") != "1" and main.get("mission_panel") != null:
 		main.get("mission_panel").visible = false
+	# 2026-09-28: the mission editor overlay (shown on top of the already-
+	# built default mission, see main.gd's own doc comment) would otherwise
+	# obscure every capture below it -- same hide as mission_panel above.
+	if OS.get_environment("SCREENSHOT_KEEP_BRIEFING") != "1" and main.get("mission_editor") != null:
+		main.get("mission_editor").visible = false
+	if OS.get_environment("SCREENSHOT_KEEP_EDITOR") == "1" and main.get("mission_editor") != null:
+		main.get("mission_editor").visible = true
+		main.get("mission_panel").visible = false
+	if OS.get_environment("SCREENSHOT_MIXED_SETUP") == "1":
+		var setup := {
+			"red": [{"class_id": "destroyer", "count": 2}, {"class_id": "battlecruiser", "count": 1}],
+			"blue": [{"class_id": "light_cruiser", "count": 3}],
+		}
+		main.mission_editor.on_confirm.call(setup)
+		main.get("mission_panel").visible = false
 	var cfc0 = main.get("camera_focus_controller")
 	var cam0 = main.get_node("Camera3D")
 	if OS.get_environment("SCREENSHOT_VIEW") == "squadron":

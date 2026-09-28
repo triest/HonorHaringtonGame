@@ -335,6 +335,7 @@ func _start_mission(setup: Dictionary) -> void:
 	ship_cards.selection = selection
 	ship_cards.player_team = player_team
 	ship_cards.camera_focus_controller = camera_focus_controller
+	ship_cards.command_bar = command_bar
 	add_child(ship_cards)
 	battle_log = BattleLogPanel.new()
 	battle_log.world = world
@@ -418,6 +419,7 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 	weapon_panel_controller.sync()
 	weapon_panel.bottom_reserved_px = command_bar.get_height()
 	battle_log.bottom_reserved_px = command_bar.get_height()
+	ship_cards.bottom_reserved_px = command_bar.get_height()
 	weapon_panel.sync()
 	win_lose_screen.update(world)
 

@@ -3249,3 +3249,26 @@ draw. A single shared-seed run can show the OPPOSITE of a tactic's real effect.
 Averaging several independent seeds per condition is required for any headless
 "does tactic X help" comparison in this codebase going forward -- see
 probe_player_impact.gd for the pattern.
+
+
+## UI panels sized from CommandBar.get_height(): don't rely solely on the tick-pushed value (2026-09-28)
+main.gd pushes `command_bar.get_height()` into WeaponPanel/BattleLogPanel/
+ShipCardsPanel's `bottom_reserved_px` from `_on_tick`, which is only called via
+`world.clock.simulation_tick` -- a signal SimClock.advance() never emits while
+`paused` is true. Any screen that can be visible while the clock is paused (the
+mission editor, the briefing, right after a manual pause) can end up sizing itself
+against a stale/default reserved-height estimate. Went unnoticed while CommandBar
+was short (~130px); became visibly wrong once it was reorganized into 7 labelled
+rows (~380px+). Fixed for ShipCardsPanel by giving it a direct `command_bar`
+reference and reading `get_height()` every `_process()` instead of only trusting
+the pushed value. WeaponPanel/BattleLogPanel still use the old tick-pushed pattern
+and were NOT touched this pass (out of scope) -- if either is ever visible while
+paused with a wrong size, this is the same root cause and the same fix applies.
+
+## Dev-only screenshot env var: SCREENSHOT_BIG_SETUP=1 (2026-09-28)
+Added to scenes/dev/screenshot_capture.gd alongside the existing
+SCREENSHOT_MIXED_SETUP, for visually verifying UI that only becomes relevant with
+a full 8-ships-a-side roster (e.g. ShipCardsPanel scrolling) -- builds 4
+dreadnoughts + 4 superdreadnoughts per side via the same
+`mission_editor.on_confirm.call(setup)` path the mission editor itself uses. Dev
+tool only, no effect on shipped game behavior.

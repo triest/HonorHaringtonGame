@@ -21,6 +21,25 @@ extends CanvasLayer
 ## any other own ship gets its own IndividualOrder via the comm-delayed
 ## transmit_individual_order_now. Nothing here invents new simulation
 ## mechanics -- every button maps onto an existing world API.
+##
+## 2026-09-28 (user: "наведи порядок с панелью приказов, упорядочи,
+## сделай переключателями"): the bar was one long wrapping row of ~35
+## individual buttons with a group label wedged inline before each
+## cluster -- hard to scan, and several genuinely ON/OFF settings (PD
+## hold, weapons free, hold-the-line, ship attitude, time scale, radar
+## enlarge) were pairs/sets of one-shot buttons with no visible "which
+## one is active now" state (time scale faked it with a manual .modulate
+## tint). Reorganized into one row PER GROUP (a small dim title above its
+## own HFlowContainer, so groups are visually separated instead of
+## running together) and every mutually-exclusive/ON-OFF control is now a
+## real Godot toggle button (toggle_mode = true, using the SAME
+## normal/hover/pressed styleboxes _btn() already had -- the "pressed"
+## stylebox was defined from the start but never visible before because
+## nothing had toggle_mode on). sync() now drives every toggle's visual
+## state from the actual world/selection state each frame, via
+## set_pressed_no_signal() so refreshing the display never re-fires the
+## order it displays. Every callback, hotkey and order-routing function
+## below is UNCHANGED -- this is a UI/structure pass, not a logic change.
 class_name CommandBar
 
 const UiTheme = preload("res://scripts/ui_theme.gd")
@@ -52,6 +71,11 @@ var _clock_label: Label
 var _sel_label: Label
 var _fire_label: Label
 var _time_buttons: Dictionary = {}  # scale -> Button
+var _attitude_buttons: Dictionary = {}  # mode -> Button
+var _pd_btn: Button
+var _fire_btn: Button
+var _hold_btn: Button
+var _radar_btn: Button
 var _panel: PanelContainer
 var _status_text: String = ""
 var _status_until_ms: int = 0
@@ -79,60 +103,59 @@ func _ready() -> void:
 	_sel_label = _mk_label(status_row)
 	_fire_label = _mk_label(status_row)
 
-	var row := HFlowContainer.new()
-	row.add_theme_constant_override("h_separation", 4)
-	row.add_theme_constant_override("v_separation", 4)
-	root.add_child(row)
+	var groups := VBoxContainer.new()
+	groups.add_theme_constant_override("separation", 3)
+	root.add_child(groups)
 
-	_group_title(row, "ВРЕМЯ")
-	_time_buttons[0.0] = _btn(row, "Пауза", func(): _set_time(0.0), "Space")
+	var time_row := _group_row(groups, "ВРЕМЯ")
+	var time_group := ButtonGroup.new()
+	_time_buttons[0.0] = _toggle_btn(time_row, "Пауза", Callable(self, "_on_time_toggled").bind(0.0), "Space", time_group)
 	for s in TIME_SCALES:
 		var sc: float = s
-		_time_buttons[sc] = _btn(row, "x%d" % int(sc), func(): _set_time(sc))
+		_time_buttons[sc] = _toggle_btn(time_row, "x%d" % int(sc), Callable(self, "_on_time_toggled").bind(sc), "", time_group)
+	_slow_btn = _toggle_btn(time_row, "Авто-замедл.: ВКЛ", _on_slowdown_toggled, "Замедлять до x10, пока ракеты подлетают к целям")
+	_slow_btn.set_pressed_no_signal(auto_slowdown)
 
-	_slow_btn = _btn(row, "Авто-замедл.: ВКЛ", _toggle_slowdown, "Замедлять до x10, пока ракеты подлетают к целям")
+	var select_row := _group_row(groups, "ВЫБОР")
+	_btn(select_row, "Эскадра", _select_squadron, "Выделить все свои корабли")
+	_btn(select_row, "Флагман", _select_flagship)
+	_btn(select_row, "Цель >", _cycle_target, "Следующая вражеская цель")
+	_btn(select_row, "Группа (G)", _make_group, "Сделать отряд из выделения")
 
-	_group_title(row, "ВЫБОР")
-	_btn(row, "Эскадра", _select_squadron, "Выделить все свои корабли")
-	_btn(row, "Флагман", _select_flagship)
-	_btn(row, "Цель >", _cycle_target, "Следующая вражеская цель")
-	_btn(row, "Группа (G)", _make_group, "Сделать отряд из выделения")
-	_group_title(row, "КАМЕРА")
-	_btn(row, "Крупно (F)", func(): _cam("close"), "Камера к выделенному кораблю вплотную (или двойной клик по кораблю)")
-	_btn(row, "Эскадра (F2)", func(): _cam("squadron"), "Вся своя эскадра")
-	_btn(row, "Весь бой (F1)", func(): _cam("all"), "Обе стороны целиком")
-	_btn(row, "← Назад (Esc)", func(): _cam("back"), "Вернуться к предыдущему виду")
+	var camera_row := _group_row(groups, "КАМЕРА")
+	_btn(camera_row, "Крупно (F)", func(): _cam("close"), "Камера к выделенному кораблю вплотную (или двойной клик по кораблю)")
+	_btn(camera_row, "Эскадра (F2)", func(): _cam("squadron"), "Вся своя эскадра")
+	_btn(camera_row, "Весь бой (F1)", func(): _cam("all"), "Обе стороны целиком")
+	_btn(camera_row, "← Назад (Esc)", func(): _cam("back"), "Вернуться к предыдущему виду")
 
-	_group_title(row, "МАНЕВР")
-	_btn(row, "< Курс 15°", func(): _turn(1.0))
-	_btn(row, "Курс 15° >", func(): _turn(-1.0))
-	_btn(row, "Скорость +", func(): _change_speed(SPEED_STEP_MPS), "+50 км/с")
-	_btn(row, "Скорость -", func(): _change_speed(-SPEED_STEP_MPS), "-50 км/с")
-	_btn(row, "Полный ход", _full_thrust, "Разгон 80% по текущему курсу")
-	_btn(row, "Дрейф", _drift, "Двигатели на ноль, держать строй")
-	_btn(row, "Отход", _withdraw, "Развернуть от противника")
+	var maneuver_row := _group_row(groups, "МАНЕВР")
+	_btn(maneuver_row, "< Курс 15°", func(): _turn(1.0))
+	_btn(maneuver_row, "Курс 15° >", func(): _turn(-1.0))
+	_btn(maneuver_row, "Скорость +", func(): _change_speed(SPEED_STEP_MPS), "+50 км/с")
+	_btn(maneuver_row, "Скорость -", func(): _change_speed(-SPEED_STEP_MPS), "-50 км/с")
+	_btn(maneuver_row, "Полный ход", _full_thrust, "Разгон 80% по текущему курсу")
+	_btn(maneuver_row, "Дрейф", _drift, "Двигатели на ноль, держать строй")
+	_btn(maneuver_row, "Отход", _withdraw, "Развернуть от противника")
 
-	_group_title(row, "ПОЛОЖЕНИЕ")
-	_btn(row, "Авто-крен", func(): _attitude("auto"), "Бортом к врагу для стрельбы; при подлёте ракет — крен клином к залпу (успевает не всегда)")
-	_btn(row, "Бортом", func(): _attitude("broadside"), "Всегда бортом: максимум огня, но борт (боковая стена) под ударом")
-	_btn(row, "Клином", func(): _attitude("wedge"), "Клин к противнику: ракеты и лучи блокируются, но свои трубы и борт закрыты — огня нет")
-	_btn(row, "Нос по курсу", func(): _attitude("course"), "Походное положение")
+	var attitude_row := _group_row(groups, "ПОЛОЖЕНИЕ")
+	var attitude_group := ButtonGroup.new()
+	_attitude_buttons["auto"] = _toggle_btn(attitude_row, "Авто-крен", Callable(self, "_on_attitude_toggled").bind("auto"), "Бортом к врагу для стрельбы; при подлёте ракет — крен клином к залпу (успевает не всегда)", attitude_group)
+	_attitude_buttons["broadside"] = _toggle_btn(attitude_row, "Бортом", Callable(self, "_on_attitude_toggled").bind("broadside"), "Всегда бортом: максимум огня, но борт (боковая стена) под ударом", attitude_group)
+	_attitude_buttons["wedge"] = _toggle_btn(attitude_row, "Клином", Callable(self, "_on_attitude_toggled").bind("wedge"), "Клин к противнику: ракеты и лучи блокируются, но свои трубы и борт закрыты — огня нет", attitude_group)
+	_attitude_buttons["course"] = _toggle_btn(attitude_row, "Нос по курсу", Callable(self, "_on_attitude_toggled").bind("course"), "Походное положение", attitude_group)
 
-	_group_title(row, "ОГОНЬ")
-	_btn(row, "Атаковать цель", _attack, "Огонь по назначенной цели")
-	_btn(row, "Добить слабейшего", _attack_weakest, "Все выделенные корабли переключаются на самый повреждённый обнаруженный корабль противника -- концентрация огня реально ускоряет уничтожение эскадры противника")
-	_btn(row, "Огонь свободный", func(): _weapons_free(true))
-	_btn(row, "Прекратить огонь", func(): _weapons_free(false))
-	_btn(row, "ПРО авто", func(): _pd_hold(false), "Противоракетная оборона: автоматически")
-	_btn(row, "ПРО стоп", func(): _pd_hold(true))
-	_btn(row, "Драться до конца", func(): _hold_the_line(true), "Приказ игнорировать критические повреждения корпуса: корабль продолжает стрелять и НЕ уходит на автоматический отход, пока экипаж может держать боевой пост")
-	_btn(row, "Разрешить отход", func(): _hold_the_line(false), "Вернуть автоматическое поведение: при критических повреждениях корпуса (<=30%) корабль сам замолкает и отходит")
+	var fire_row := _group_row(groups, "ОГОНЬ")
+	_btn(fire_row, "Атаковать цель", _attack, "Огонь по назначенной цели")
+	_btn(fire_row, "Добить слабейшего", _attack_weakest, "Все выделенные корабли переключаются на самый повреждённый обнаруженный корабль противника -- концентрация огня реально ускоряет уничтожение эскадры противника")
+	_fire_btn = _toggle_btn(fire_row, "Огонь: свободный", _on_fire_toggled, "Переключатель: свободный огонь / прекратить огонь")
+	_pd_btn = _toggle_btn(fire_row, "ПРО: авто", _on_pd_toggled, "Переключатель: ПРО автоматически / ПРО стоп")
+	_hold_btn = _toggle_btn(fire_row, "Драться до конца: выкл", _on_hold_toggled, "Приказ игнорировать критические повреждения корпуса: корабль продолжает стрелять и НЕ уходит на автоматический отход, пока экипаж может держать боевой пост")
 
-	_group_title(row, "РАДАР")
-	_btn(row, "Радар ⤢", _toggle_radar, "Увеличить/уменьшить радар (M)")
-	_btn(row, "Радар +", func(): _radar_zoom(1.6), "Приблизить (колесо над радаром)")
-	_btn(row, "Радар -", func(): _radar_zoom(1.0 / 1.6))
-	_btn(row, "Радар авто", func(): _radar_zoom(0.0), "Автомасштаб")
+	var radar_row := _group_row(groups, "РАДАР")
+	_radar_btn = _toggle_btn(radar_row, "Радар ⤢", func(_p): _toggle_radar(), "Увеличить/уменьшить радар (M)")
+	_btn(radar_row, "Радар +", func(): _radar_zoom(1.6), "Приблизить (колесо над радаром)")
+	_btn(radar_row, "Радар -", func(): _radar_zoom(1.0 / 1.6))
+	_btn(radar_row, "Радар авто", func(): _radar_zoom(0.0), "Автомасштаб")
 
 func _mk_label(parent: Node) -> Label:
 	var l := Label.new()
@@ -146,13 +169,25 @@ func _mk_label(parent: Node) -> Label:
 	parent.add_child(l)
 	return l
 
-func _group_title(parent: Node, text: String) -> void:
+## One row PER GROUP: a small dim title above its own HFlowContainer, so
+## the bar reads as clearly separated clusters (Наведи порядок) instead
+## of one long inline-labelled row. Still an HFlowContainer per row, so a
+## group with many buttons (ВРЕМЯ) still wraps gracefully on a narrow
+## window instead of being clipped.
+func _group_row(parent: Node, title: String) -> HFlowContainer:
+	var wrap := VBoxContainer.new()
+	wrap.add_theme_constant_override("separation", 1)
+	parent.add_child(wrap)
 	var l := Label.new()
-	l.text = "  " + text + ":"
+	l.text = title
 	l.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR_DIM)
-	l.add_theme_font_size_override("font_size", 13)
-	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	parent.add_child(l)
+	l.add_theme_font_size_override("font_size", 11)
+	wrap.add_child(l)
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 4)
+	row.add_theme_constant_override("v_separation", 4)
+	wrap.add_child(row)
+	return row
 
 func _btn(parent: Node, text: String, cb: Callable, tip: String = "") -> Button:
 	var b := Button.new()
@@ -174,6 +209,45 @@ func _btn(parent: Node, text: String, cb: Callable, tip: String = "") -> Button:
 	b.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR)
 	b.add_theme_color_override("font_hover_color", Color.WHITE)
 	b.pressed.connect(cb)
+	parent.add_child(b)
+	return b
+
+## Same look as _btn(), but a real toggle: `cb` receives the button's new
+## pressed state on every click (toggle_mode buttons still fire once per
+## click). Active state reads from the SAME "pressed" stylebox _btn()
+## already defined -- toggle_mode is what makes Godot actually show it
+## while button_pressed is true, instead of only flashing on mouse-down.
+## `group`, when given, makes Godot itself keep exactly one button in the
+## group pressed (used for ВРЕМЯ/ПОЛОЖЕНИЕ, which are mutually exclusive
+## by nature) instead of relying on the next sync() tick to correct it.
+func _toggle_btn(parent: Node, text: String, cb: Callable, tip: String = "", group: ButtonGroup = null) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.tooltip_text = tip
+	b.focus_mode = Control.FOCUS_NONE
+	b.toggle_mode = true
+	if group != null:
+		b.button_group = group
+	b.add_theme_font_size_override("font_size", 14)
+	var normal := UiTheme.panel_stylebox(UiTheme.ACCENT_COLOR_DIM)
+	normal.set_content_margin_all(5)
+	var hover := UiTheme.panel_stylebox(UiTheme.ACCENT_COLOR)
+	hover.set_content_margin_all(5)
+	hover.bg_color = Color(0.08, 0.2, 0.25, 0.95)
+	var pressed := UiTheme.panel_stylebox(UiTheme.ACCENT_COLOR)
+	pressed.set_content_margin_all(5)
+	pressed.bg_color = Color(0.15, 0.35, 0.4, 0.95)
+	var hover_pressed := UiTheme.panel_stylebox(UiTheme.ACCENT_COLOR)
+	hover_pressed.set_content_margin_all(5)
+	hover_pressed.bg_color = Color(0.2, 0.42, 0.48, 0.95)
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("hover_pressed", hover_pressed)
+	b.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR)
+	b.add_theme_color_override("font_hover_color", Color.WHITE)
+	b.add_theme_color_override("font_pressed_color", Color.WHITE)
+	b.toggled.connect(cb)
 	parent.add_child(b)
 	return b
 
@@ -219,7 +293,7 @@ func sync() -> void:
 	_clock_label.text = "T+%02d:%02d:%02d   %s%s" % [t / 3600, (t / 60) % 60, t % 60, speed_txt, sep_txt]
 	for k in _time_buttons.keys():
 		var active: bool = (k == 0.0 and clk.paused) or (not clk.paused and is_equal_approx(k, clk.time_scale))
-		_time_buttons[k].modulate = Color(1.3, 1.3, 1.3) if active else Color(0.8, 0.8, 0.8)
+		_time_buttons[k].set_pressed_no_signal(active)
 
 	var own: Array = _own_selected()
 	if own.is_empty():
@@ -249,6 +323,31 @@ func sync() -> void:
 			else:
 				ammo_en += tube.ammo_count
 	_fire_label.text = "Цель: %s   входящих ракет: %d   боезапас: %d (у врага ~%d)%s" % [ShipNames.of(tgt) if tgt != "" else "—", msl, ammo_own, ammo_en, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
+
+	# ОГОНЬ / ПОЛОЖЕНИЕ toggles mirror the first own selected ship's
+	# CURRENT order state (a group order still applies to the whole
+	# selection when clicked -- these three just show what's in effect
+	# for it right now). With nothing selected there is no state to show,
+	# so they're left as-is rather than guessed.
+	if not own.is_empty():
+		var rep: String = own[0]
+		var directive = world.ship_combat_directives.get(rep)
+		var rep_free: bool = directive == null or directive.weapons_free
+		_fire_btn.set_pressed_no_signal(rep_free)
+		_fire_btn.text = "Огонь: свободный" if rep_free else "Огонь: СТОП"
+		var rep_pd: bool = world.ship_pd_hold.get(rep, false)
+		_pd_btn.set_pressed_no_signal(rep_pd)
+		_pd_btn.text = "ПРО: СТОП" if rep_pd else "ПРО: авто"
+		var rep_hold: bool = world.ship_hold_the_line.get(rep, false)
+		_hold_btn.set_pressed_no_signal(rep_hold)
+		_hold_btn.text = "Драться до конца: ВКЛ" if rep_hold else "Драться до конца: выкл"
+		var rep_att: String = String(world.ship_attitude.get(rep, "auto"))
+		if rep_att == "":
+			rep_att = "auto"
+		for k in _attitude_buttons.keys():
+			_attitude_buttons[k].set_pressed_no_signal(k == rep_att)
+	if tactical_plot != null:
+		_radar_btn.set_pressed_no_signal(tactical_plot.enlarged)
 
 func _say(text: String) -> void:
 	if battle_log != null:
@@ -305,8 +404,8 @@ func _step_time(dir: int) -> void:
 		cur = 0
 	_set_time(TIME_SCALES[clampi(cur + dir, 0, TIME_SCALES.size() - 1)])
 
-func _toggle_slowdown() -> void:
-	auto_slowdown = not auto_slowdown
+func _on_slowdown_toggled(pressed: bool) -> void:
+	auto_slowdown = pressed
 	_slow_btn.text = "Авто-замедл.: %s" % ("ВКЛ" if auto_slowdown else "ВЫКЛ")
 
 ## True if any active missile is within SLOWDOWN_RANGE_M of its target.
@@ -323,6 +422,13 @@ func _set_time(scale: float) -> void:
 		return
 	world.clock.paused = false
 	world.clock.set_time_scale(scale)
+
+## Bound to each ВРЕМЯ toggle button via Callable.bind(scale) -- only
+## acts on the press that turns a button ON (the click that turns one
+## off is the OTHER button's own press, handled by ITS bound call).
+func _on_time_toggled(pressed: bool, scale: float) -> void:
+	if pressed:
+		_set_time(scale)
 
 # ---------------------------------------------------------------- selection
 
@@ -531,6 +637,12 @@ func _attitude(mode: String) -> void:
 		world.set_ship_attitude(sid, mode)
 	_say("положение: " + ATT_RU.get(mode, mode))
 
+## Bound to each ПОЛОЖЕНИЕ toggle button via Callable.bind(mode) -- same
+## "only act on the press that turns ON" rule as _on_time_toggled.
+func _on_attitude_toggled(pressed: bool, mode: String) -> void:
+	if pressed:
+		_attitude(mode)
+
 func _attack() -> void:
 	if not _need_selection():
 		return
@@ -601,6 +713,30 @@ func _hold_the_line(hold: bool) -> void:
 	for sid in _own_selected():
 		world.set_ship_hold_the_line(sid, hold)
 	_say("драться до конца, невзирая на повреждения" if hold else "разрешён отход при критических повреждениях")
+
+## Toggle handlers for the merged ОГОНЬ switches: if nothing's selected,
+## the underlying order call bails out via _need_selection() (with its
+## own status message) and never applies -- revert the button's visual
+## state right back so it doesn't silently claim an order that never
+## went out. sync() takes over the visual state again the moment there
+## IS a selection.
+func _on_fire_toggled(pressed: bool) -> void:
+	if not _need_selection():
+		_fire_btn.set_pressed_no_signal(not pressed)
+		return
+	_weapons_free(pressed)
+
+func _on_pd_toggled(pressed: bool) -> void:
+	if not _need_selection():
+		_pd_btn.set_pressed_no_signal(not pressed)
+		return
+	_pd_hold(pressed)
+
+func _on_hold_toggled(pressed: bool) -> void:
+	if not _need_selection():
+		_hold_btn.set_pressed_no_signal(not pressed)
+		return
+	_hold_the_line(pressed)
 
 # ---------------------------------------------------------------- radar
 

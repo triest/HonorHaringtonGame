@@ -10,6 +10,15 @@ extends CanvasLayer
 ##   = add, double-click = camera to it. Below: a short enemy roster.
 ## Pure readout of SimulationWorld + SelectionState (§42); selection goes
 ## through the one shared SelectionState.
+##
+## 2026-09-28 (user: "прокрутку у левого меню со статусами кораблей"):
+## the mission editor now allows up to 8 ships a side (incl. bigger
+## dreadnought/superdreadnought module grids), so the card list can be
+## taller than the screen. Wrapped in a real ScrollContainer, sized every
+## tick to the space actually available between the top of the screen and
+## CommandBar's bottom bar (bottom_reserved_px, set by main.gd exactly
+## like WeaponPanel/BattleLogPanel already do) -- it scrolls instead of
+## running under the command bar or off the bottom of the screen.
 class_name ShipCardsPanel
 
 const UiTheme = preload("res://scripts/ui_theme.gd")
@@ -27,22 +36,42 @@ var world: SimulationWorld
 var selection: SelectionState
 var player_team: String = ""
 var camera_focus_controller: CameraFocusController
+## Set by main.gd. Read directly every frame (see _process) rather than
+## only mirrored via bottom_reserved_px below -- CommandBar.get_height()
+## is driven by world.clock.simulation_tick (main.gd's _on_tick), which
+## does NOT fire while the clock is paused (SimClock.advance() returns
+## early). The mission editor / briefing screens start paused, and this
+## reorganized (much taller) bar made that stale-default gap visible as
+## real overlap between the card list and the bar. Reading command_bar's
+## height straight from the node itself instead makes the scroll area
+## correct on its own, independent of whether the simulation is ticking.
+var command_bar: CommandBar
+## Fallback only, used the few frames before command_bar is assigned or
+## while it's null (e.g. a headless caller that never sets one).
+var bottom_reserved_px: float = 160.0
 
+var _scroll: ScrollContainer
 var _root: VBoxContainer
 var _cards: Dictionary = {}  # ship_id -> {panel, name, bar, info, dmg}
 var _enemy_label: RichTextLabel
 var _built: bool = false
 
+const TOP_MARGIN_PX: float = 8.0
+const CARD_LIST_WIDTH_PX: float = 300.0
+const MIN_SCROLL_HEIGHT_PX: float = 120.0
+
 func _ready() -> void:
 	layer = 4
-	var scroll := PanelContainer.new()
-	scroll.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	scroll.position = Vector2(8, 8)
-	add_child(scroll)
+	_scroll = ScrollContainer.new()
+	_scroll.position = Vector2(TOP_MARGIN_PX, TOP_MARGIN_PX)
+	_scroll.size = Vector2(CARD_LIST_WIDTH_PX + 16.0, MIN_SCROLL_HEIGHT_PX)
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	add_child(_scroll)
 	_root = VBoxContainer.new()
 	_root.add_theme_constant_override("separation", 4)
-	_root.custom_minimum_size = Vector2(300, 0)
-	scroll.add_child(_root)
+	_root.custom_minimum_size = Vector2(CARD_LIST_WIDTH_PX, 0)
+	_scroll.add_child(_root)
 
 func _build() -> void:
 	_built = true
@@ -146,6 +175,12 @@ func _process(_d: float) -> void:
 		return
 	if not _built:
 		_build()
+	# Bound the scroll area to whatever room is actually free between the
+	# top of the screen and CommandBar's bar (bottom_reserved_px) -- the
+	# card list scrolls inside that instead of overflowing under the bar.
+	var reserved: float = command_bar.get_height() if command_bar != null else bottom_reserved_px
+	var avail_h: float = get_viewport().get_visible_rect().size.y - TOP_MARGIN_PX * 2.0 - reserved
+	_scroll.size = Vector2(CARD_LIST_WIDTH_PX + 16.0, maxf(MIN_SCROLL_HEIGHT_PX, avail_h))
 	for sid in _cards.keys():
 		if not world.ships.has(sid):
 			# 2026-09-28: guards a real one-frame race during a mission

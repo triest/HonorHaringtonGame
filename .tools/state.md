@@ -426,3 +426,35 @@ targeting, added "Добить слабейшего". Full 50-file sweep + probe
 (3 checks) green, .exe re-exported, pushed. §56.3 NOT closed; nothing
 live-confirmed yet. "Мало простора" still open -- see FOLLOW-UP #10 for the
 honest next-step options.
+FOLLOW-UP #11 (same day, user: "наведи порядок с панелью приказов, упорядочи, сделай
+переключателями" + mid-turn "прокрутку у левого меню со статусами кораблей"): pure
+UI-polish pass, NOT an answer to "мало простора" (FOLLOW-UP #8/#10 -- that root
+complaint is still open, see below). CommandBar reorganized into one labelled row per
+group instead of one long inline-labelled flow row; ON/OFF pairs (ПРО, огонь
+свободный/стоп, драться до конца/отход) merged into single toggle_mode buttons;
+ВРЕМЯ/ПОЛОЖЕНИЕ converted to ButtonGroup-based exclusive toggles with real pressed-state
+styling (replacing the old .modulate hack for time scale). ShipCardsPanel wrapped in a
+real ScrollContainer (needed now that the mission editor allows up to 8 ships/side).
+Found and fixed a real bug along the way: bottom_reserved_px (WeaponPanel/BattleLogPanel's
+existing pattern) only updates from world.clock.simulation_tick, which does not fire while
+paused -- with the new, much taller CommandBar this made the stale default estimate
+visibly overlap the card list during the (paused) mission editor/briefing screens. Fixed
+by giving ShipCardsPanel a direct command_bar reference read every _process(), independent
+of clock state. Every underlying order-issuing function (_weapons_free/_pd_hold/
+_hold_the_line/_attitude/_attack_weakest/etc.) is byte-for-byte unchanged -- only how the
+UI invokes them changed. Verified: full 50-file test sweep green, probe_hold_the_line
+(184)/probe_attack_weakest(3)/probe_mission_editor(14) green, smoke test exit 0 at the
+same 56-error baseline, Xvfb screenshot with a new dev-only SCREENSHOT_BIG_SETUP=1 env var
+(8 dreadnoughts/superdreadnoughts a side) confirms the scroll clips correctly and the bar
+reads as organized groups with correct active-toggle highlighting. .exe re-exported,
+pushed. "Мало простора" (FOLLOW-UP #8/#10) is STILL the open, not-yet-addressed root
+complaint -- this pass was purely about legibility/organization of controls that already
+existed, not about adding new ongoing decisions. Next honest step is still one of:
+counter-missiles as a real scarce resource, formation shape choice, or smarter/more
+readable enemy AI behavior -- see FOLLOW-UP #10 for the fuller reasoning. Don't mistake
+this UI cleanup pass for progress on that item when reporting to the user next time.
+Last pass finished: 2026-09-28 ~08:50 UTC (interactive, feedback #11): CommandBar
+reorganized + real toggles, ShipCardsPanel scrolling added, a real bottom_reserved_px
+staleness bug fixed along the way. Full 50-file sweep + 3 targeted probes green, .exe
+re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet. "Мало простора" still
+open -- see FOLLOW-UP #10/#11 for the honest next-step options.

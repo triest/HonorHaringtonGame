@@ -52,6 +52,16 @@ func _presim() -> void:
 		}
 		main.mission_editor.on_confirm.call(setup)
 		main.get("mission_panel").visible = false
+	# 2026-09-28 (dev-only, for verifying ShipCardsPanel scrolling with a
+	# full 8-ship roster incl. the biggest module grids): SCREENSHOT_BIG_SETUP=1
+	# builds the max-size mission (8 dreadnoughts a side).
+	if OS.get_environment("SCREENSHOT_BIG_SETUP") == "1":
+		var big_setup := {
+			"red": [{"class_id": "dreadnought", "count": 4}, {"class_id": "superdreadnought", "count": 4}],
+			"blue": [{"class_id": "dreadnought", "count": 4}, {"class_id": "superdreadnought", "count": 4}],
+		}
+		main.mission_editor.on_confirm.call(big_setup)
+		main.get("mission_panel").visible = false
 	var cfc0 = main.get("camera_focus_controller")
 	var cam0 = main.get_node("Camera3D")
 	if OS.get_environment("SCREENSHOT_VIEW") == "squadron":

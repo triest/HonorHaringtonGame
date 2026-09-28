@@ -19,6 +19,9 @@ func _init() -> void:
 	failures += _test_bow_stern_hidden_when_not_raised_even_at_full_condition()
 	failures += _test_bow_stern_visible_when_raised_and_undamaged()
 	failures += _test_bow_stern_hidden_when_raised_but_burned_out()
+	failures += _test_impeller_glow_bright_cyan_when_healthy()
+	failures += _test_impeller_glow_reddens_and_dims_when_damaged()
+	failures += _test_impeller_glow_nearly_dark_when_propulsion_disabled()
 
 	if failures == 0:
 		print("ALL TESTS PASSED")
@@ -73,5 +76,39 @@ func _test_bow_stern_hidden_when_raised_but_burned_out() -> int:
 	var ok: bool = ShipView._bow_stern_sidewall_visible(true, 0.0) == false
 	if not ok:
 		printerr("FAIL bow_stern_hidden_when_raised_but_burned_out")
+		return 1
+	return 0
+
+## 2026-09-28 (user: "модели кораблей и импеллеров то улучши"): the
+## impeller-ring glow colour is PROPULSION-condition -> Color, the same
+## kind of pure, scene-tree-free static helper as the sidewall-visibility
+## functions above -- see ship_view.gd's own doc comment on
+## _impeller_glow_color for the CANON_RULES.md basis.
+func _test_impeller_glow_bright_cyan_when_healthy() -> int:
+	var c: Color = ShipView._impeller_glow_color(1.0)
+	# Healthy: bright and blue/cyan-leaning (b/g channels clearly above r).
+	var ok: bool = c.b > 0.5 and c.b >= c.r and c.g >= c.r
+	if not ok:
+		printerr("FAIL impeller_glow_bright_cyan_when_healthy: %s" % c)
+		return 1
+	return 0
+
+func _test_impeller_glow_reddens_and_dims_when_damaged() -> int:
+	var healthy: Color = ShipView._impeller_glow_color(1.0)
+	var damaged: Color = ShipView._impeller_glow_color(0.3)
+	# Damaged: red channel relatively stronger than at full health, and
+	# overall dimmer (sum of channels lower).
+	var ok: bool = (damaged.r / maxf(damaged.b, 0.001)) > (healthy.r / maxf(healthy.b, 0.001))
+	ok = ok and (damaged.r + damaged.g + damaged.b) < (healthy.r + healthy.g + healthy.b)
+	if not ok:
+		printerr("FAIL impeller_glow_reddens_and_dims_when_damaged: healthy=%s damaged=%s" % [healthy, damaged])
+		return 1
+	return 0
+
+func _test_impeller_glow_nearly_dark_when_propulsion_disabled() -> int:
+	var c: Color = ShipView._impeller_glow_color(0.0)
+	var ok: bool = (c.r + c.g + c.b) < 0.3
+	if not ok:
+		printerr("FAIL impeller_glow_nearly_dark_when_propulsion_disabled: %s" % c)
 		return 1
 	return 0

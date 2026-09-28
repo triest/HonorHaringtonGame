@@ -13,6 +13,7 @@ func _init() -> void:
 	failures += _test_mesh_builds_with_plausible_geometry()
 	failures += _test_radius_profile_is_narrow_at_ends_wide_in_middle()
 	failures += _test_radius_profile_never_fully_degenerate()
+	failures += _test_cross_section_cardinal_points_stay_on_unit_bounds()
 
 	if failures == 0:
 		print("ALL TESTS PASSED")
@@ -56,5 +57,26 @@ func _test_radius_profile_never_fully_degenerate() -> int:
 			break
 	if not ok:
 		printerr("FAIL radius_profile_never_fully_degenerate")
+		return 1
+	return 0
+
+## 2026-09-28 (user: "модели кораблей и импеллеров то улучши"): the new
+## superellipse cross-section (_cross_section_unit, CROSS_SECTION_
+## EXPONENT) must still land EXACTLY on the unit circle's cardinal points
+## for any exponent -- that's what keeps the mesh's overall bounding box
+## identical to the old pure-circle version (see
+## _test_mesh_builds_with_plausible_geometry's aabb.size checks above,
+## which this guards the precondition for).
+func _test_cross_section_cardinal_points_stay_on_unit_bounds() -> int:
+	var right: Vector2 = HullMeshBuilder._cross_section_unit(0.0)
+	var top: Vector2 = HullMeshBuilder._cross_section_unit(PI * 0.5)
+	var left: Vector2 = HullMeshBuilder._cross_section_unit(PI)
+	var bottom: Vector2 = HullMeshBuilder._cross_section_unit(PI * 1.5)
+	var ok: bool = right.is_equal_approx(Vector2(1.0, 0.0))
+	ok = ok and top.is_equal_approx(Vector2(0.0, 1.0))
+	ok = ok and left.is_equal_approx(Vector2(-1.0, 0.0))
+	ok = ok and bottom.is_equal_approx(Vector2(0.0, -1.0))
+	if not ok:
+		printerr("FAIL cross_section_cardinal_points_stay_on_unit_bounds: right=%s top=%s left=%s bottom=%s" % [right, top, left, bottom])
 		return 1
 	return 0

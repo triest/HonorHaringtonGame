@@ -3272,3 +3272,25 @@ a full 8-ships-a-side roster (e.g. ShipCardsPanel scrolling) -- builds 4
 dreadnoughts + 4 superdreadnoughts per side via the same
 `mission_editor.on_confirm.call(setup)` path the mission editor itself uses. Dev
 tool only, no effect on shipped game behavior.
+
+
+## Ship greebles (bridge mast, flank blisters) and impeller-ring geometry: illustrative, not per-class (2026-09-28)
+Same placeholder status as the hull/wedge/sidewall shapes they sit on: a fixed
+small count/size, scaled only from the ship's own length_m/max_width_m/
+max_height_m, NOT derived from that class's actual weapon-mount count or
+positions (weapon_fx.gd remains the sole source of truth for real fire-effect
+origins). The impeller ring's radius/z-position is likewise a fixed fraction of
+the hull envelope (matched to HullMeshBuilder's flare_center=0.82 so it visually
+lines up with the hull's own hammerhead flare, not derived from any canon ring
+diameter). If a real per-class model pipeline is ever built (§7/§51 Assets), none
+of this geometry should be treated as a source to preserve.
+
+## Baseline dummy-renderer error count scales with MeshInstance3D count per ship (2026-09-28)
+Reconfirmed (see CHANGELOG's own prior note on this scaling with ship count): the
+"Parameter \"m\" is null" smoke-test baseline is per-MeshInstance3D under the
+headless dummy renderer, not a fixed constant. Went from 56 (7 instances/ship:
+hull + 2 wedge planes + 4 sidewalls) to 128 (16 instances/ship, +bridge +6
+blisters +2 impeller rings) at the default 4v4/8-ship mission, purely from adding
+more (working) geometry this pass. Any future pass that adds new per-ship
+MeshInstance3D nodes should expect and document the same proportional baseline
+shift -- it is not evidence of a bug on its own.

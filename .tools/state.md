@@ -458,3 +458,29 @@ reorganized + real toggles, ShipCardsPanel scrolling added, a real bottom_reserv
 staleness bug fixed along the way. Full 50-file sweep + 3 targeted probes green, .exe
 re-exported, pushed. §56.3 NOT closed; nothing live-confirmed yet. "Мало простора" still
 open -- see FOLLOW-UP #10/#11 for the honest next-step options.
+FOLLOW-UP #12 (same day, user: "Модели кораблей и импеллеров то улучши. А то
+совсем черновик"): visual-quality pass on the procedural hull/wedge meshes and
+ShipView materials -- NOT the "мало простора" thread either (FOLLOW-UP #8/#10
+still open). Hull: superellipse cross-section (squarer/more mechanical than the
+old perfect ellipse, cardinal points unchanged so AABB/tests unaffected), baked
+vertex-colour shading (dorsal brighter/ventral darker + seam banding) picked up
+via vertex_color_use_as_albedo, rim/fresnel highlight, plus small static greebles
+(bridge mast, flank blisters) for silhouette breakup. Wedge: baked ridge->edge +
+lengthwise brightness gradient instead of a flat single-alpha fill, additive
+blending so it reads as a glowing field over space instead of a translucent card.
+New: a visible impeller-ring glow at the bow/stern flare position, colour/
+brightness driven every frame by that ship's own PROPULSION subsystem condition
+(CANON_RULES.md already lists impeller rings as a real damage-model component --
+this only makes the existing state visible in the 3D view, not a new mechanic).
+Verified: godot --import clean, full 50-file test sweep green (incl. 4 new pure-
+function tests: hull cross-section cardinal-point exactness + 3 impeller-glow-
+color tests), smoke test exit 0 at a NEW baseline of 128 dummy-renderer errors
+(was 56 -- expected, documented in ASSUMPTIONS.md: proportional to the 7->16
+MeshInstance3D/ship added this pass, not a new error type). Xvfb close-up
+screenshots before/after confirm the hull no longer reads as a smooth blob and
+the wedge no longer reads as a flat solid triangle. .exe re-exported, pushed.
+Last pass finished: 2026-09-28 ~09:10 UTC (interactive, feedback #12): hull/wedge/
+impeller visual-quality pass, new 128-error smoke baseline documented. §56.3 NOT
+closed; nothing live-confirmed yet. "Мало простора" still open -- see FOLLOW-UP
+#10/#11 for the honest next-step options (this pass was visuals, not depth,
+same category note as #11).

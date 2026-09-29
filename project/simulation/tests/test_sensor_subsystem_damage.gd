@@ -27,6 +27,13 @@ func _make_ship(pos: Vector3) -> ShipPhysicsState:
 	s.velocity = Vector3.ZERO
 	s.defense = ShipDefenseState.new()
 	s.defense.wedge_up = true
+	# Full current thrust (signature_strength == 1.0, see
+	# sensor_resolution.gd's ТЗ §23 thrust-scaling slice) -- this file
+	# is testing OBSERVER sensor damage/ECM, not the target's own
+	# thrust-based signature, so hold that variable at its legacy-
+	# equivalent "no reduction" value to keep every base-range figure
+	# below meaning what its own comment says.
+	s.acceleration = Vector3(s.effective_max_acceleration(), 0, 0)
 	return s
 
 func _test_undamaged_sensors_detect_normally() -> void:

@@ -557,3 +557,26 @@ graphics plans still deferred (FOLLOW-UP #13: wedge bright/subtle toggle, audit 
 shape choice. No player has confirmed any of this live yet.
 Last pass finished: 2026-09-29 ~11:00 UTC (interactive, feedback #14): counter-missiles + stock + 6 scenarios, editor
 centred with scenario picker, 52 tests + probe_mission_editor green, smoke 128, .exe re-exported.
+FOLLOW-UP #15 (2026-09-29, autonomous/scheduled pass, no live user -- resumed via honorverse-dev-pass skill +
+TODO.md instead of re-deriving from AGENTS.md milestones): closed TODO.md "Обнаружение и ведение огня" items 1+2
+(target visibility scales with current thrust/acceleration, both directions -- one symmetric implementation
+closes both). sensor_resolution.gd: new `_signature_strength(entity)` scales effective detection range
+0.35x (MIN_SIGNATURE_FRACTION, ASSUMPTION)..1.0x by acceleration/effective_max_acceleration() for ships,
+drive_max_acceleration_mps2/_base_drive_max_acceleration_mps2 for missiles (so EXTENDED RANGE throttle now also
+reduces signature -- a real trade-off, not a free bonus). Binary gate (_is_emitting_signature: wedge down / missile
+coasting = fully invisible) untouched, still the cited-canon piece; this is a new multiplier on TOP of it, applied
+inside update_contact() with no public signature change (simulation_world.gd needed zero edits). Full 52-file
+test sweep caught a REAL regression in test_sensor_subsystem_damage.gd/test_ecm.gd (both built test ships with
+zero acceleration, so the new thrust variable silently confounded what those files actually test -- sensor
+damage/ECM) -- fixed by giving their _make_ship() full thrust, isolating the variable each file is actually
+about; 3 new tests added to test_sensor_resolution.gd (13->19 checks). probe_demo_scenario.gd (PROBE_SHIFT_KM=310000,
+420s) confirms the live battle is unaffected in practice (missiles/maneuvering ships rarely sit at the zero-thrust
+floor). See ASSUMPTIONS.md "Заметность от тяги" and CHANGELOG.md 2026-09-29 (second same-day entry) for full detail.
+NOT done (remaining TODO.md items in the same section, honestly next): tracking-quality-from-distance
+(DETECTED->TRACKED chance/time), fire-accuracy-from-range/target-speed/track-quality, and a rebalance pass across
+all 6 scenarios once those land (probe_counter_missiles.gd per scenario/seed, not a single-seed A/B). §56.3's own
+"мало простора" thread (FOLLOW-UP #8/#10) is a separate, still-open question from this TODO.md detection/accuracy
+thread -- not addressed this pass, not claimed as addressed.
+Last pass finished: 2026-09-29 ~14:20 UTC (autonomous/scheduled, no live user, feedback #15): thrust-based
+detection signature (TODO items 1+2 closed together), 2 pre-existing test files fixed for a real confound the
+change exposed, 3 new sensor tests, full 52-file sweep + probe_demo_scenario green, pushed.

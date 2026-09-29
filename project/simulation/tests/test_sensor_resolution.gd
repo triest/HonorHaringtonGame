@@ -104,6 +104,70 @@ func _test_contact_resumes_detection_after_reappearing() -> void:
 	SensorResolution.update_contact(contact, Vector3.ZERO, 1.0, 1_000_000.0)
 	_assert(contact.state == ContactState.Type.DETECTED, "reappearing target should re-detect as DETECTED")
 
+
+func _test_coasting_ship_has_shorter_effective_range_than_burning_ship() -> void:
+	# ТЗ §23 next slice (ASSUMPTIONS.md "Заметность от тяги"): a ship
+	# with wedge up but zero current thrust is only detectable within
+	# MIN_SIGNATURE_FRACTION (0.35) of the base range; a ship burning at
+	# its full rated acceleration is detectable at the full base range.
+	# Distance chosen (500,000 of a 1,000,000 base range) sits strictly
+	# between 0.35x and 1.0x, so this is a real range difference, not a
+	# coincidence of the two test setups' own math.
+	var coasting := _make_ship(Vector3(500_000, 0, 0), true)
+	# acceleration left at its default Vector3.ZERO -- genuinely
+	# coasting, not just "not integrated yet".
+	var coasting_contact := SensorContact.new(coasting)
+	SensorResolution.update_contact(coasting_contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(coasting_contact.state == ContactState.Type.UNKNOWN, "coasting ship (wedge up, zero thrust) beyond 0.35x range should NOT be freshly detected")
+
+	var burning := _make_ship(Vector3(500_000, 0, 0), true)
+	burning.acceleration = Vector3(burning.effective_max_acceleration(), 0, 0)
+	var burning_contact := SensorContact.new(burning)
+	SensorResolution.update_contact(burning_contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(burning_contact.state == ContactState.Type.DETECTED, "ship burning at full rated thrust should be detected at the same distance a coasting ship is not")
+
+
+func _test_signature_strength_scales_continuously_with_thrust_ratio() -> void:
+	# Half-thrust should land strictly between the coasting floor and the
+	# full-thrust ceiling -- catches a regression to a binary on/off
+	# implementation disguised as "scaling".
+	var half_thrust := _make_ship(Vector3(675_000, 0, 0), true)
+	half_thrust.acceleration = Vector3(half_thrust.effective_max_acceleration() * 0.5, 0, 0)
+	# expected effective range = 1,000,000 * (0.35 + 0.5*0.65) = 675,000
+	var contact := SensorContact.new(half_thrust)
+	SensorResolution.update_contact(contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(contact.state == ContactState.Type.DETECTED, "half-thrust ship exactly at its own effective range boundary should still be detected (<=, not <)")
+
+	var half_thrust_just_beyond := _make_ship(Vector3(676_000, 0, 0), true)
+	half_thrust_just_beyond.acceleration = Vector3(half_thrust_just_beyond.effective_max_acceleration() * 0.5, 0, 0)
+	var contact2 := SensorContact.new(half_thrust_just_beyond)
+	SensorResolution.update_contact(contact2, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(contact2.state == ContactState.Type.UNKNOWN, "half-thrust ship just beyond its own effective range should not be detected")
+
+
+func _test_full_burn_missile_detectable_farther_than_extended_range_missile() -> void:
+	# Same idea for missiles: MissileState.set_throttle() (ТЗ §56.3 item
+	# E "EXTENDED RANGE") throttles down drive_max_acceleration_mps2,
+	# which should also shrink the missile's own detection signature --
+	# a quieter burn is a fair trade for extended range, not a free
+	# stealth bonus AND free range with no downside.
+	var full_burn := MissileState.new()
+	full_burn.position = Vector3(500_000, 0, 0)
+	full_burn.velocity = Vector3.ZERO
+	full_burn.drive_burn_remaining_s = 10.0
+	var full_contact := SensorContact.new(full_burn)
+	SensorResolution.update_contact(full_contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(full_contact.state == ContactState.Type.DETECTED, "un-throttled (full burn) missile should be detected at 0.5x base range")
+
+	var extended_range := MissileState.new()
+	extended_range.position = Vector3(500_000, 0, 0)
+	extended_range.velocity = Vector3.ZERO
+	extended_range.set_throttle(0.05)
+	extended_range.drive_burn_remaining_s = 10.0
+	var extended_contact := SensorContact.new(extended_range)
+	SensorResolution.update_contact(extended_contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(extended_contact.state == ContactState.Type.UNKNOWN, "min-throttle (extended range) missile should NOT be detected at the same 0.5x base range distance")
+
 func _init() -> void:
 	_test_detection_when_in_range_and_emitting()
 	_test_no_detection_when_wedge_down()
@@ -113,6 +177,9 @@ func _init() -> void:
 	_test_loss_of_detection_goes_to_estimated_then_lost()
 	_test_estimated_dead_reckons_position()
 	_test_contact_resumes_detection_after_reappearing()
+	_test_coasting_ship_has_shorter_effective_range_than_burning_ship()
+	_test_signature_strength_scales_continuously_with_thrust_ratio()
+	_test_full_burn_missile_detectable_farther_than_extended_range_missile()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

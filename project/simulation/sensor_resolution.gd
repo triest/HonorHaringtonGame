@@ -84,6 +84,49 @@ static func _is_emitting_signature(entity) -> bool:
 	return true
 
 
+## ASSUMPTION, not canon (see ASSUMPTIONS.md "Заметность от тяги (§23,
+## следующий срез)"): a unit that already presents a signature per
+## _is_emitting_signature() above (wedge up / missile drive burning) is
+## not equally visible at all thrust levels -- coasting at low/no thrust
+## is harder to pick out at range than burning hard. This does NOT gate
+## detectability on/off (that stays _is_emitting_signature's job, the
+## canon-cited mechanism); it only scales the EFFECTIVE range at which an
+## already-present signature can still be resolved. MIN_SIGNATURE_FRACTION
+## is the floor at zero current thrust; 1.0 is the ceiling at full rated
+## thrust.
+const MIN_SIGNATURE_FRACTION: float = 0.35
+
+
+## Returns a 0..1 multiplier on the base sensor range. Duck-typed like
+## _is_emitting_signature: ships expose `.acceleration` (this tick's true
+## acceleration, Vector3) and `.effective_max_acceleration()`
+## (damage-aware rated max -- ShipPhysicsState); missiles expose
+## `.drive_max_acceleration_mps2` (current, throttle-adjusted) and
+## `._base_drive_max_acceleration_mps2` (this missile's own un-throttled
+## rating -- MissileState.set_throttle() scales the former, ТЗ §56.3 item
+## E "EXTENDED RANGE" throttle). An entity shape this function doesn't
+## recognize (e.g. a lightweight test double exposing only position/
+## velocity/defense) fails open at 1.0 -- full range, unchanged from the
+## pre-signature-scaling model -- rather than silently shrinking detection
+## for an entity type nobody accounted for.
+static func _signature_strength(entity) -> float:
+	if entity == null:
+		return 1.0
+	if "acceleration" in entity and entity.has_method("effective_max_acceleration"):
+		var max_accel: float = entity.effective_max_acceleration()
+		if max_accel <= 0.0:
+			return MIN_SIGNATURE_FRACTION
+		var ratio: float = clampf(entity.acceleration.length() / max_accel, 0.0, 1.0)
+		return MIN_SIGNATURE_FRACTION + (1.0 - MIN_SIGNATURE_FRACTION) * ratio
+	if "drive_max_acceleration_mps2" in entity and "_base_drive_max_acceleration_mps2" in entity:
+		var base_accel: float = entity._base_drive_max_acceleration_mps2
+		if base_accel <= 0.0:
+			return MIN_SIGNATURE_FRACTION
+		var ratio2: float = clampf(entity.drive_max_acceleration_mps2 / base_accel, 0.0, 1.0)
+		return MIN_SIGNATURE_FRACTION + (1.0 - MIN_SIGNATURE_FRACTION) * ratio2
+	return 1.0
+
+
 ## ТЗ §24: jamming shrinks the effective range at which a lock can be
 ## held. `target_ecm` is the TARGET's own ECMState (its jammers work
 ## against whoever is trying to detect IT), or null for no ECM effect.
@@ -91,8 +134,17 @@ static func _is_emitting_signature(entity) -> bool:
 ## ТЗ §25: `observer_subsystems` is the OBSERVER's own ShipSubsystems --
 ## its SENSORS condition further scales the range it can achieve, on top
 ## of (not instead of) any jamming penalty against the target.
-static func _effective_sensor_range_m(base_range_m: float, target_ecm, observer_subsystems) -> float:
-	var range_m: float = base_range_m
+##
+## `target_signature_strength` (default 1.0, ТЗ §23 next slice): the
+## TARGET's own current 0..1 signature strength from _signature_strength()
+## above -- a coasting/low-thrust target shrinks the range at which it can
+## still be picked out, on top of (not instead of) ECM/observer-damage
+## scaling. Omitting it keeps pre-signature-scaling behavior exactly
+## (every existing caller of update_contact/update_contacts computes it
+## automatically now, but this private helper itself defaults to no
+## change for any other/future caller).
+static func _effective_sensor_range_m(base_range_m: float, target_ecm, observer_subsystems, target_signature_strength: float = 1.0) -> float:
+	var range_m: float = base_range_m * target_signature_strength
 	if target_ecm != null and target_ecm.jamming_active:
 		range_m *= target_ecm.jamming_range_multiplier
 	if observer_subsystems != null:
@@ -147,7 +199,7 @@ static func update_contact(contact: SensorContact, observer_position: Vector3, d
 	var true_velocity: Vector3 = target.velocity if "velocity" in target else Vector3.ZERO
 
 	var sensors_disabled: bool = observer_subsystems != null and observer_subsystems.is_disabled(SubsystemType.Type.SENSORS)
-	var effective_range_m: float = _effective_sensor_range_m(sensor_range_m, target_ecm, observer_subsystems)
+	var effective_range_m: float = _effective_sensor_range_m(sensor_range_m, target_ecm, observer_subsystems, _signature_strength(target))
 	var in_range: bool = (not sensors_disabled) and observer_position.distance_to(true_position) <= effective_range_m
 	var emitting: bool = _is_emitting_signature(target)
 	var detected_this_tick: bool = in_range and emitting

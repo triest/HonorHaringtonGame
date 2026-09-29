@@ -580,3 +580,42 @@ thread -- not addressed this pass, not claimed as addressed.
 Last pass finished: 2026-09-29 ~14:20 UTC (autonomous/scheduled, no live user, feedback #15): thrust-based
 detection signature (TODO items 1+2 closed together), 2 pre-existing test files fixed for a real confound the
 change exposed, 3 new sensor tests, full 52-file sweep + probe_demo_scenario green, pushed.
+FOLLOW-UP #16 (2026-09-29, autonomous/scheduled pass, no live user -- resumed via honorverse-dev-pass skill +
+TODO.md "Обнаружение и ведение огня", continuing right after FOLLOW-UP #15's thrust-signature work same day): closed
+the "time-to-track" half of TODO.md's "Качество сопровождения от расстояния" -- DETECTED -> TRACKED time now scales
+with distance instead of a flat 6s. sensor_resolution.gd: new `_required_track_time_s(distance_m, effective_range_m)`
+-- inside CONFIDENT_TRACK_RANGE_FRACTION (0.6) of the effective sensor range, required time scales linearly from
+DETECTED_TO_TRACKED_TIME_S (6s, at distance 0) to TRACK_TIME_FAR_MULTIPLIER x that (4x = 24s, at the confident-radius
+edge); beyond the confident radius it's INF -- the contact can never resolve past DETECTED no matter how long it's
+watched, matching TODO's "contact stays only rough beyond the confident radius". Also: a contact already TRACKED
+that stays detected every tick but drifts back out past the confident radius now soft-degrades to DETECTED (used to
+be a fully sticky `TRACKED: pass` match arm regardless of range) and must re-earn TRACKED from scratch if it closes
+again. NOT done (separate, explicitly deferred TODO sub-item, not a time-shortage cut corner): position/velocity
+ESTIMATE ERROR growing with distance -- every DETECTED/TRACKED contact still reads exact position/velocity
+(`_resolve_apparent_return`); adding noise needs a DETERMINISTIC source (ТЗ §43 forbids unseeded RNG), which is a
+separate, larger task, see ASSUMPTIONS.md "Время захвата от дистанции" for the full reasoning. Also honestly noted:
+nothing in combat reads DETECTED-vs-TRACKED today for accuracy/rate-of-fire/PD (point_defense_resolution.gd/
+tactical_ai.gd/missile_guidance.gd already lump all three as equally "usable", weapon_resolution.gd doesn't look at
+sensor state at all) -- this pass is not player-visible in battle by itself, it's groundwork for the next TODO
+sub-item ("Точность огня от дистанции...", which is explicitly meant to read TRACKED as an accuracy/rate bonus).
+Verified: test_sensor_resolution.gd 19->25 checks (3 new tests: time-scaling inside the confident radius, permanent
+DETECTED-cap beyond it, TRACKED->DETECTED soft-downgrade on drift-out), godot --headless --import clean, scene smoke
+(main.tscn --quit-after 120) exit 0 at the same 128-error dummy-renderer baseline (no new error types), partial
+probe_demo_scenario.gd run (PROBE_SHIFT_KM=310000, ~270 of 420s -- hit this environment's single-tool-call time
+budget) shows the battle playing out normally (launches/intercepts/hits/hull damage progressing sanely), no new
+anomalies. Full 50+-file sweep NOT run (§56.3 still fast-visible-result mode, headless import/smoke only until it
+closes -- unchanged policy, not a shortcut taken this pass). TODO.md updated: split the old single checkbox into the
+now-closed time-to-track item and a new, explicitly still-open "Ошибка оценки положения/скорости от расстояния" item.
+Committed and pushed.
+Next honest step on this thread (same TODO.md section, still open, in the order the TODO itself lists them):
+(1) position/velocity estimate error/noise from distance (needs a deterministic noise source, ТЗ §43 -- design this
+deliberately, don't rush it into a single pass); (2) fire accuracy from range/target speed/track quality (reads
+TRACKED as a real bonus for the first time -- coordinate with PD reaction and counter-missile near-100%-hit rate per
+ASSUMPTIONS.md "Контрракеты"); (3) a rebalance pass across all 6 scenarios once (1)/(2) land, via
+probe_counter_missiles.gd per scenario/seed (not a single-seed A/B, see the earlier methodology note in
+ASSUMPTIONS.md). §56.3's own "мало простора" thread (FOLLOW-UP #8/#10) remains separate and still open -- not
+addressed this pass.
+Last pass finished: 2026-09-29 ~17:40 UTC (autonomous/scheduled, no live user, feedback #16): DETECTED->TRACKED time
+now scales with distance + a hard confident-radius cap (contact stays rough beyond it) + soft downgrade on drift-out;
+3 new sensor tests (19->25), headless import/smoke clean at the 128-error baseline, partial live-battle probe shows
+no anomalies, pushed. Position/velocity estimate-error-from-distance is the next honest step on this same TODO item.

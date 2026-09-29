@@ -61,8 +61,50 @@ const SubsystemType = preload("res://simulation/subsystem_type.gd")
 const DEFAULT_SENSOR_RANGE_M: float = 2_000_000_000.0 # 2,000,000 km
 
 ## ASSUMPTION: continuous detection time required before DETECTED upgrades
-## to TRACKED (a firm, weapons-quality lock vs. a fleeting return).
+## to TRACKED (a firm, weapons-quality lock vs. a fleeting return), AT ZERO
+## RANGE. See _required_track_time_s() below (ТЗ §23 next slice, TODO.md
+## "Качество сопровождения от расстояния"): the actual required time scales
+## up with distance, and beyond CONFIDENT_TRACK_RANGE_FRACTION of the
+## effective sensor range a lock cannot be achieved at all -- the contact
+## stays a "rough" DETECTED-only return no matter how long it is watched.
 const DETECTED_TO_TRACKED_TIME_S: float = 6.0
+
+## ASSUMPTION, not canon (TODO.md "Качество сопровождения от расстояния"):
+## fraction of the effective sensor range within which a firm TRACKED lock
+## can be achieved at all. Beyond this "confident radius" the target may
+## still be DETECTED (a rough return -- position/velocity from
+## _resolve_apparent_return are still read as exact, ТЗ §23 next slice
+## again: no estimate-error/noise model exists yet for ANY contact field,
+## see the class doc comment) but can never upgrade to TRACKED, and an
+## already-TRACKED contact that drifts back out past this radius degrades
+## back to DETECTED (see update_contact()'s TRACKED match arm below) --
+## sustained raw detection alone is no longer enough once the target is
+## this far out.
+const CONFIDENT_TRACK_RANGE_FRACTION: float = 0.6
+
+## ASSUMPTION: multiplier applied to DETECTED_TO_TRACKED_TIME_S at the
+## outer edge of the confident radius (distance == confident radius),
+## linearly interpolated from 1.0x at distance == 0. A target sitting right
+## at the edge of a firm lock's reach takes this many times longer to
+## resolve into TRACKED than one close aboard.
+const TRACK_TIME_FAR_MULTIPLIER: float = 4.0
+
+
+## Required continuous-detection time (seconds) before a DETECTED contact
+## at `distance_m` from the observer can upgrade to TRACKED, given this
+## tick's `effective_range_m` (already scaled by signature/ECM/observer-
+## damage, see _effective_sensor_range_m). Returns INF when `distance_m`
+## is beyond CONFIDENT_TRACK_RANGE_FRACTION of `effective_range_m` (or
+## `effective_range_m` itself is non-positive) -- i.e. "never, at this
+## distance, no matter how long it's watched".
+static func _required_track_time_s(distance_m: float, effective_range_m: float) -> float:
+	if effective_range_m <= 0.0:
+		return INF
+	var confident_radius_m: float = effective_range_m * CONFIDENT_TRACK_RANGE_FRACTION
+	if confident_radius_m <= 0.0 or distance_m > confident_radius_m:
+		return INF
+	var frac: float = clampf(distance_m / confident_radius_m, 0.0, 1.0)
+	return DETECTED_TO_TRACKED_TIME_S * lerpf(1.0, TRACK_TIME_FAR_MULTIPLIER, frac)
 
 ## ASSUMPTION: how long a lost contact is held as ESTIMATED (dead-reckoned
 ## from last known position/velocity) before decaying to LOST.
@@ -200,9 +242,11 @@ static func update_contact(contact: SensorContact, observer_position: Vector3, d
 
 	var sensors_disabled: bool = observer_subsystems != null and observer_subsystems.is_disabled(SubsystemType.Type.SENSORS)
 	var effective_range_m: float = _effective_sensor_range_m(sensor_range_m, target_ecm, observer_subsystems, _signature_strength(target))
-	var in_range: bool = (not sensors_disabled) and observer_position.distance_to(true_position) <= effective_range_m
+	var distance_to_target_m: float = observer_position.distance_to(true_position)
+	var in_range: bool = (not sensors_disabled) and distance_to_target_m <= effective_range_m
 	var emitting: bool = _is_emitting_signature(target)
 	var detected_this_tick: bool = in_range and emitting
+	var required_track_time_s: float = _required_track_time_s(distance_to_target_m, effective_range_m)
 
 	if detected_this_tick:
 		var apparent: Array = _resolve_apparent_return(true_position, true_velocity, observer_position, target_ecm)
@@ -228,13 +272,21 @@ static func update_contact(contact: SensorContact, observer_position: Vector3, d
 				contact.state = ContactState.Type.DETECTED
 				contact.continuous_detection_s = dt
 			ContactState.Type.DETECTED:
-				if contact.continuous_detection_s >= DETECTED_TO_TRACKED_TIME_S:
+				if contact.continuous_detection_s >= required_track_time_s:
 					contact.state = ContactState.Type.TRACKED
 			ContactState.Type.ESTIMATED, ContactState.Type.UNCERTAIN:
 				contact.state = ContactState.Type.DETECTED
 				contact.continuous_detection_s = dt
 			ContactState.Type.TRACKED:
-				pass
+				# Still being freshly detected each tick, but drifted back
+				# out past the confident radius (required_track_time_s is
+				# now INF): the lock degrades to a rough DETECTED contact
+				# rather than staying sticky forever just because raw
+				# detection never fully lapsed. Re-earns TRACKED from
+				# scratch if it closes back inside the confident radius.
+				if is_inf(required_track_time_s):
+					contact.state = ContactState.Type.DETECTED
+					contact.continuous_detection_s = dt
 	else:
 		contact.continuous_detection_s = 0.0
 

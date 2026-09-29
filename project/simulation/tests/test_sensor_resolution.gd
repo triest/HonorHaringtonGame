@@ -168,6 +168,57 @@ func _test_full_burn_missile_detectable_farther_than_extended_range_missile() ->
 	SensorResolution.update_contact(extended_contact, Vector3.ZERO, 1.0, 1_000_000.0)
 	_assert(extended_contact.state == ContactState.Type.UNKNOWN, "min-throttle (extended range) missile should NOT be detected at the same 0.5x base range distance")
 
+func _make_full_thrust_ship(pos: Vector3, wedge_up: bool = true) -> ShipPhysicsState:
+	# Full rated thrust -> _signature_strength() == 1.0, so effective
+	# range == the base sensor_range_m passed to update_contact with no
+	# extra scaling to account for -- makes the confident-radius/
+	# track-time-scaling tests below exact instead of approximate.
+	var s := _make_ship(pos, wedge_up)
+	s.acceleration = Vector3(s.effective_max_acceleration(), 0, 0)
+	return s
+
+func _test_required_track_time_scales_with_distance_inside_confident_radius() -> void:
+	# base range 1,000,000 m, full thrust -> effective range 1,000,000 m,
+	# confident radius (0.6x) == 600,000 m.
+	var close := _make_full_thrust_ship(Vector3(10_000, 0, 0))
+	var close_contact := SensorContact.new(close)
+	for i in range(8):
+		SensorResolution.update_contact(close_contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(close_contact.state == ContactState.Type.TRACKED, "close target (small fraction of confident radius) should reach TRACKED well before a far one")
+
+	var far := _make_full_thrust_ship(Vector3(550_000, 0, 0))
+	var far_contact := SensorContact.new(far)
+	for i in range(8):
+		SensorResolution.update_contact(far_contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(far_contact.state == ContactState.Type.DETECTED, "far target (near the edge of the confident radius) should still be a rough DETECTED contact after the same 8s a close target already tracked in")
+
+	for i in range(17):
+		SensorResolution.update_contact(far_contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(far_contact.state == ContactState.Type.TRACKED, "far target should eventually reach TRACKED too, just after a longer scaled required time (25s total here)")
+
+func _test_beyond_confident_radius_never_reaches_tracked() -> void:
+	# 700,000 m: inside the 1,000,000 m effective range (still DETECTED
+	# every tick) but beyond the 600,000 m confident radius.
+	var far := _make_full_thrust_ship(Vector3(700_000, 0, 0))
+	var contact := SensorContact.new(far)
+	for i in range(60):
+		SensorResolution.update_contact(contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(contact.state == ContactState.Type.DETECTED, "a target beyond the confident radius should stay a rough DETECTED contact no matter how long it is watched, never TRACKED")
+
+func _test_tracked_contact_downgrades_when_target_drifts_past_confident_radius() -> void:
+	var target := _make_full_thrust_ship(Vector3(10_000, 0, 0))
+	var contact := SensorContact.new(target)
+	for i in range(8):
+		SensorResolution.update_contact(contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(contact.state == ContactState.Type.TRACKED, "setup: target should be TRACKED before drifting out")
+
+	# Target moves out past the confident radius (still well inside the
+	# 1,000,000 m effective range, so it is still detected every tick --
+	# this is a soft demotion, not a loss of raw detection).
+	target.position = Vector3(700_000, 0, 0)
+	SensorResolution.update_contact(contact, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(contact.state == ContactState.Type.DETECTED, "a TRACKED contact that drifts past the confident radius while still detected should degrade back to a rough DETECTED contact, not stay sticky at TRACKED")
+
 func _init() -> void:
 	_test_detection_when_in_range_and_emitting()
 	_test_no_detection_when_wedge_down()
@@ -180,6 +231,9 @@ func _init() -> void:
 	_test_coasting_ship_has_shorter_effective_range_than_burning_ship()
 	_test_signature_strength_scales_continuously_with_thrust_ratio()
 	_test_full_burn_missile_detectable_farther_than_extended_range_missile()
+	_test_required_track_time_scales_with_distance_inside_confident_radius()
+	_test_beyond_confident_radius_never_reaches_tracked()
+	_test_tracked_contact_downgrades_when_target_drifts_past_confident_radius()
 
 	print("")
 	print("Passed: ", _passed, " Failed: ", _failures)

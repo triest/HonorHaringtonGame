@@ -541,3 +541,19 @@ the 3 files for git per the user's own follow-up instruction, then stopped work
 entirely per "сейчас ничего не делай, только в файлах фиксируй" -- no code
 changed this pass, no .exe rebuild needed. §56.3 unaffected. "Мало простора"
 still open.
+FOLLOW-UP #14 (2026-09-29, user: "Попробуй разнообразить игру" -> in the picker chose "Сам бой + Миссии/сценарии + удиви
+сам", then "давай сценарии и контрракеты. И их запас"): FIRST real answer to the long-open "мало простора" thread.
+Counter-missiles are now a launchable, FINITE-stock weapon with a recurring player decision (policy auto/flagship/
+salvo/hold, per ship, via the command bar "ПРТР" button and the weapon panel), and six scenarios (Scenarios.ORDER)
+change geometry / forces / stock / enemy doctrine. Details: CHANGELOG 2026-09-29 and ASSUMPTIONS "Контрракеты" /
+"Сценарии". Key facts for the next pass: sim is in simulation_world.gd (cm_tubes, _resolve_counter_missile_launch_ai,
+_update_counter_missiles, check_intercept_swept); scenario data is pure data in scripts/scenarios.gd; kill radius is
+40 km (see ASSUMPTIONS for why); probes: probe_counter_missiles.gd (env CM_SCENARIO/CM_ARMS/CM_SEEDS/CM_SECONDS),
+probe_cm_trace.gd / probe_cm_trace2.gd. NOTE background processes do not survive a device_bash call -- run probes
+inside one call (<=180 s: ~2-3 battle runs of 420-500 s each).
+Not done / next honest options: (a) probabilistic CM miss (they currently kill ~100% while stock lasts); (b) real
+scenario objectives (escape distance, protect a convoy) -- today every scenario is "destroy or drive off"; (c) the
+graphics plans still deferred (FOLLOW-UP #13: wedge bright/subtle toggle, audit only when asked); (d) formation
+shape choice. No player has confirmed any of this live yet.
+Last pass finished: 2026-09-29 ~11:00 UTC (interactive, feedback #14): counter-missiles + stock + 6 scenarios, editor
+centred with scenario picker, 52 tests + probe_mission_editor green, smoke 128, .exe re-exported.

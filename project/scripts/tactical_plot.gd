@@ -207,6 +207,8 @@ func update(world: SimulationWorld, ship_id: String) -> void:
 		var is_missile: bool = contact.target is MissileState
 		if is_missile and not contact.target.is_active():
 			continue  # destroyed/detonated missile: stale contact, not a threat
+		if is_missile and world.counter_missile_ids.has(contact_id):
+			continue  # 2026-09-29: counter-missiles are not threats -- keep them off the radar
 		var range_m: float = _pov_position.distance_to(contact.estimated_position)
 		farthest_m = maxf(farthest_m, range_m)
 		_contacts.append({

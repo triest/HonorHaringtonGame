@@ -27,6 +27,12 @@ func _presim() -> void:
 	_presimmed = true
 	var main: Node = get_child(0)
 	var world: SimulationWorld = main.get("world")
+	# 2026-09-29: SCREENSHOT_SCENARIO=<Scenarios id> rebuilds the mission as
+	# that scenario (its default forces) before the presim, like picking it
+	# in the mission editor and pressing "В бой".
+	if OS.get_environment("SCREENSHOT_SCENARIO") != "":
+		main.mission_editor.on_confirm.call({"scenario": OS.get_environment("SCREENSHOT_SCENARIO")})
+		main.get("mission_panel").visible = false
 	var secs: float = float(OS.get_environment("SCREENSHOT_PRESIM_S")) if OS.get_environment("SCREENSHOT_PRESIM_S") != "" else 0.0
 	var dt: float = 0.1
 	for i in range(int(secs / dt)):

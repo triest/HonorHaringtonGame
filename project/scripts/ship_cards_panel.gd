@@ -240,6 +240,15 @@ func _process(_d: float) -> void:
 		var free: bool = directive == null or directive.weapons_free
 		var pd_hold: bool = world.ship_pd_hold.get(sid, false)
 		var line: String = "[color=#9fd]ракет %d · трубы %d/%d · огонь %s · ПРО %s[/color]" % [ammo, ready, tubes.size(), "своб." if free else "[color=#ffd24a]СТОП[/color]", "[color=#ffd24a]СТОП[/color]" if pd_hold else "авто"]
+		# 2026-09-29: counter-missile stock ("n/N") + policy, only for ships
+		# that actually carry counter-missile tubes.
+		if world.cm_tubes.has(sid) and not world.cm_tubes[sid].is_empty():
+			var cm_left: int = world.cm_ammo_remaining(sid)
+			var cm_all: int = int(world.cm_start_ammo.get(sid, 0))
+			var cm_pol: String = world.cm_policy_of(sid)
+			var cm_pol_ru: Dictionary = {"auto": "авто", "flagship": "только флагман", "salvo": "только залпы", "hold": "СТОП"}
+			var cm_col: String = "#9fd" if cm_left > 0 else "#ff6a5a"
+			line += "\n[color=%s]ПРТР %d/%d · %s[/color]" % [cm_col, cm_left, cm_all, cm_pol_ru.get(cm_pol, cm_pol)]
 		var att: String = String(world.ship_attitude.get(sid, ""))
 		var eff: String = String(world.ship_effective_attitude.get(sid, att))
 		var att_ru: Dictionary = {"auto": "авто", "broadside": "бортом", "wedge": "[color=#ffd24a]КЛИНОМ[/color]", "course": "по курсу"}

@@ -112,6 +112,33 @@ var _disengage_seen: Dictionary = {}
 ## the first one.
 var ship_hold_the_line: Dictionary = {}
 
+## 2026-09-29 (user: "давай сценарии и контрракеты. И их запас"): counter-
+## missiles as a real, LAUNCHABLE weapon. Before this pass CounterMissileResolution
+## only ever RESOLVED an already-flying counter-missile; nothing decided to
+## launch one (see weapon_panel_controller.gd's old "HONEST GAPS" note).
+## Each ship may carry a separate counter-missile magazine (`cm_tubes`,
+## MissileTube instances reused for ammo/reload bookkeeping) that is
+## SCARCE by design -- the player's recurring decision is how to spend it
+## (`ship_cm_policy`: "auto" = engage every inbound threat, "flagship" =
+## only threats aimed at a formation guide, "salvo" = only once a big
+## salvo (>= CM_SALVO_MIN_INBOUND missiles) is inbound, "hold" = never).
+var cm_tubes: Dictionary = {}         # ship_id -> Array[MissileTube] (counter-missile launchers)
+var cm_start_ammo: Dictionary = {}    # ship_id -> int (initial total counter-missile stock, for "n/N" UI)
+var ship_cm_policy: Dictionary = {}   # ship_id -> "auto" | "flagship" | "salvo" | "hold" (absent = "auto")
+var counter_missile_ids: Dictionary = {}  # missile_id -> true (marks counter-missiles inside `missiles`)
+var _cm_assigned: Dictionary = {}     # incoming missile_id -> counter-missile id already launched at it
+var _missile_prev_pos: Dictionary = {}  # missile object -> position at START of this tick (swept CM intercept)
+
+## Counter-missile design values. ASSUMPTIONS (ASSUMPTIONS.md "контрракеты"):
+## drive figures are the CANON Mark-31-style example already quoted in
+## test_counter_missile.gd (~130,000 g, ~75 s burn); range/reload/reserve
+## threshold are pacing choices, not canon numbers.
+const CM_ACCEL_MPS2: float = 130_000.0 * 9.80665
+const CM_BURN_S: float = 75.0
+const CM_MAX_LIFETIME_S: float = 90.0
+const CM_MIN_TIME_TO_GO_S: float = 2.0
+const CM_SALVO_MIN_INBOUND: int = 10
+
 func set_ship_hold_the_line(ship_id: String, hold: bool) -> void:
 	_record_command("set_ship_hold_the_line", {"ship_id": ship_id, "hold": hold})
 	if hold:
@@ -346,6 +373,25 @@ func add_missile_tube(ship_id: String, tube) -> void:
 func add_pd_mount(ship_id: String, mount) -> void:
 	pd_mounts[ship_id].append(mount)
 
+func add_cm_tube(ship_id: String, tube) -> void:
+	if not cm_tubes.has(ship_id):
+		cm_tubes[ship_id] = []
+	cm_tubes[ship_id].append(tube)
+	cm_start_ammo[ship_id] = int(cm_start_ammo.get(ship_id, 0)) + int(tube.ammo_count)
+
+## Remaining counter-missile stock across all of a ship's CM tubes.
+func cm_ammo_remaining(ship_id: String) -> int:
+	var n: int = 0
+	for t in cm_tubes.get(ship_id, []):
+		n += int(t.ammo_count)
+	return n
+
+func cm_policy_of(ship_id: String) -> String:
+	return String(ship_cm_policy.get(ship_id, "auto"))
+
+func is_counter_missile(missile_id: String) -> bool:
+	return counter_missile_ids.has(missile_id)
+
 func set_ecm(ship_id: String, ecm_state) -> void:
 	ecm_states[ship_id] = ecm_state
 
@@ -575,6 +621,7 @@ func add_missile(missile_id: String, missile, owner_ship_id: String = "") -> voi
 func remove_missile(missile_id: String) -> void:
 	missiles.erase(missile_id)
 	missile_owners.erase(missile_id)
+	counter_missile_ids.erase(missile_id)
 
 ## ТЗ §45 Replay (Milestone 12): begin recording every command issued
 ## through this world's public order-issuing API and every event
@@ -637,6 +684,12 @@ func reset_ships() -> void:
 	_pending_command_transmissions.clear()
 	missiles.clear()
 	missile_owners.clear()
+	cm_tubes.clear()
+	cm_start_ammo.clear()
+	ship_cm_policy.clear()
+	counter_missile_ids.clear()
+	_cm_assigned.clear()
+	_missile_prev_pos.clear()
 	_next_ai_missile_id = 0
 	last_tick_weapon_shots.clear()
 	_tick_index = 0
@@ -835,6 +888,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_ship_destruction()
 	_update_sensors(dt)
 	_update_missiles(dt)
+	_update_counter_missiles(dt)
 	_resolve_counter_missile_intercepts()
 	_resolve_point_defense(dt)
 	_resolve_formation_orders(dt)
@@ -845,6 +899,7 @@ func tick_simulation(dt: float) -> void:
 	_resolve_missile_tot_coordination(dt)
 	_resolve_weapons_ai(dt)
 	_resolve_missile_launch_ai(dt)
+	_resolve_counter_missile_launch_ai(dt)
 	_resolve_crossing_t_maneuver(dt)
 	_resolve_attitudes(dt)
 	_integrate_ships(dt)
@@ -882,6 +937,8 @@ func _sync_subsystem_driven_conditions() -> void:
 			mount.condition = ship.subsystems.get_condition(SubsystemType.Type.POINT_DEFENSE)
 		for tube in missile_tubes.get(ship_id, []):
 			tube.condition = ship.subsystems.get_condition(SubsystemType.Type.MISSILE_SYSTEMS)
+		for tube in cm_tubes.get(ship_id, []):
+			tube.condition = ship.subsystems.get_condition(SubsystemType.Type.COUNTER_MISSILE_SYSTEMS)
 		if subsystem_damage_model:
 			_apply_extended_subsystem_effects(ship_id, ship)
 			var hull_sync = hulls.get(ship_id)
@@ -900,6 +957,8 @@ func _apply_extended_subsystem_effects(ship_id: String, ship: ShipPhysicsState) 
 	for mount in pd_mounts.get(ship_id, []):
 		mount.condition *= pf
 	for tube in missile_tubes.get(ship_id, []):
+		tube.condition *= pf
+	for tube in cm_tubes.get(ship_id, []):
 		tube.condition *= pf
 	ship.propulsion_condition = pf
 	var d = ship.defense
@@ -937,6 +996,7 @@ func _cleanup_inactive_missiles() -> void:
 		if not missile.is_active():
 			missiles.erase(missile_id)
 			missile_owners.erase(missile_id)
+			counter_missile_ids.erase(missile_id)
 
 ## ТЗ §23: every ship updates its own sensor picture of every OTHER ship
 ## and every active missile, reading its own SENSORS subsystem condition
@@ -999,10 +1059,15 @@ func _update_sensors(dt: float) -> void:
 ## another MissileState is now explicitly excluded from this laserhead
 ## detonation path, regardless of its own warhead_armed flag.
 func _update_missiles(dt: float) -> void:
+	_missile_prev_pos.clear()
+	for pm_id in missiles.keys():
+		_missile_prev_pos[missiles[pm_id]] = missiles[pm_id].position
 	for missile_id in missiles.keys():
 		var missile = missiles[missile_id]
 		if not missile.is_active():
 			continue
+		if missile.target is MissileState:
+			continue  # counter-missiles are flown in the second pass below
 
 		var thrust_dir: Vector3 = MissileGuidance.resolve_thrust_direction(missile, dt, sensor_range_m)
 		missile.integrate(dt, thrust_dir)
@@ -1028,6 +1093,31 @@ func _update_missiles(dt: float) -> void:
 						break
 				_battle_event("missile_detonation", {"attacker_ship_id": missile_owners.get(missile_id, ""), "target_ship_id": tgt_id, "damage_dealt": det.damage_dealt, "outcome": det.outcome, "subsystems": det.subsystem_damage.keys()})
 
+## 2026-09-29: counter-missiles are flown AFTER every offensive missile
+## has moved this tick, and are guided from their target's CURRENT true
+## state (terminal seeker / fire-control uplink) instead of a per-tick
+## SensorContact estimate. Found with probe_cm_trace2.gd: at ~90,000 km/s
+## closing speed a crossing target moves tens of km sideways per 0.1 s
+## tick, so a one-tick-old estimate (which is what a sequential per-missile
+## loop hands the second missile of a pair, depending on dict order) made
+## the counter-missile miss by more than the kill radius on geometry alone
+## -- red and blue sides even differed. The LAUNCH decision still uses the
+## launching ship's own sensor contacts (no cheat vision there).
+func _update_counter_missiles(dt: float) -> void:
+	for missile_id in missiles.keys():
+		var missile = missiles[missile_id]
+		if not missile.is_active() or not (missile.target is MissileState):
+			continue
+		var target = missile.target
+		var thrust_dir: Vector3
+		if target.is_active():
+			thrust_dir = MissileGuidance.compute_thrust_direction(missile, target.position, target.velocity, MissileState.SensorState.TRACKED)
+		elif missile.velocity.length_squared() > 0.0:
+			thrust_dir = missile.velocity.normalized()  # target already gone: coast on
+		else:
+			thrust_dir = Vector3.FORWARD
+		missile.integrate(dt, thrust_dir)
+
 ## ТЗ §20: any missile whose target is itself another (incoming) missile
 ## is a counter-missile -- check whether it has closed to kill radius.
 ## ТЗ §25: the effective kill radius is scaled by the counter-missile's
@@ -1047,7 +1137,14 @@ func _resolve_counter_missile_intercepts() -> void:
 			var cm_condition: float = 1.0
 			if owner_ship != null and owner_ship.subsystems != null:
 				cm_condition = owner_ship.subsystems.get_condition(SubsystemType.Type.COUNTER_MISSILE_SYSTEMS)
-			CounterMissileResolution.check_intercept(missile, missile.target, cm_condition)
+			var incoming = missile.target
+			var res = CounterMissileResolution.check_intercept_swept(
+				missile, incoming,
+				_missile_prev_pos.get(missile, missile.position),
+				_missile_prev_pos.get(incoming, incoming.position),
+				cm_condition)
+			if res.outcome == CounterMissileResolution.Outcome.INTERCEPTED:
+				_battle_event("cm_intercept", {"ship_id": missile_owners.get(missile_id, ""), "cm_id": missile_id})
 
 ## ТЗ §22 Point Defense + §26 Tactical AI. Target selection now goes
 ## through `TacticalAI.select_pd_target()`, which reads ONLY this ship's
@@ -2569,6 +2666,125 @@ func _launch_missile_from_tube(attacker_ship_id: String, attacker: ShipPhysicsSt
 	add_missile(missile_id, missile, attacker_ship_id)
 	tube.mark_launched()
 	_record_event("missile_launched", {"attacker_ship_id": attacker_ship_id, "missile_id": missile_id})
+
+## 2026-09-29: automatic counter-missile launch decision, per ship, from
+## THAT SHIP's own sensor contacts only (no cheat vision -- a threat is a
+## usable contact on a missile owned by a hostile ship). A threat counts
+## when it is aimed at any ship of this ship's own team (fleet-level
+## defence: a ship with spare CMs covers a neighbour), is closing, and has
+## at least CM_MIN_TIME_TO_GO_S left. Most urgent first; one counter-
+## missile per threat (`_cm_assigned`); each launch spends a round from a
+## ready tube -- the stock is finite, that is the whole point.
+func _resolve_counter_missile_launch_ai(dt: float) -> void:
+	if cm_tubes.is_empty():
+		return
+	for incoming_id in _cm_assigned.keys():
+		var cm_id: String = _cm_assigned[incoming_id]
+		if not missiles.has(incoming_id) or not missiles[incoming_id].is_active() or not missiles.has(cm_id) or not missiles[cm_id].is_active():
+			_cm_assigned.erase(incoming_id)
+	var ship_by_obj: Dictionary = {}
+	for sid in ships.keys():
+		ship_by_obj[ships[sid]] = sid
+	for ship_id in cm_tubes.keys():
+		var tubes: Array = cm_tubes[ship_id]
+		for tube in tubes:
+			tube.advance(dt)
+		var ship: ShipPhysicsState = ships.get(ship_id)
+		if ship == null or ship.is_wreck:
+			continue
+		var team: String = String(teams.get(ship_id, ""))
+		if team == "":
+			continue
+		var policy: String = cm_policy_of(ship_id)
+		if policy == "hold":
+			continue
+		var guide_ids: Dictionary = {}
+		if policy == "flagship":
+			for fid in formations.keys():
+				guide_ids[formations[fid].guide_ship_id] = true
+		var ready: Array = []
+		for tube in tubes:
+			if tube.is_ready():
+				ready.append(tube)
+		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
+		var threats: Array = []
+		var inbound_total: int = 0
+		for cid in contacts.keys():
+			if counter_missile_ids.has(cid):
+				continue
+			var contact = contacts[cid]
+			if not TacticalAI._is_usable(contact.state):
+				continue
+			var m = contact.target
+			if not (m is MissileState) or not m.is_active():
+				continue
+			var victim_id: String = String(ship_by_obj.get(m.target, ""))
+			if victim_id == "" or String(teams.get(victim_id, "")) != team:
+				continue
+			var owner_id: String = String(missile_owners.get(cid, ""))
+			if owner_id != "" and String(teams.get(owner_id, "")) == team:
+				continue
+			var victim: ShipPhysicsState = ships[victim_id]
+			var to_v: Vector3 = victim.position - contact.estimated_position
+			var dist: float = to_v.length()
+			if dist <= 0.0:
+				continue
+			var closing: float = (contact.estimated_velocity - victim.velocity).dot(to_v / dist)
+			if closing <= 0.0:
+				continue
+			var ttg: float = dist / closing
+			if ttg < CM_MIN_TIME_TO_GO_S:
+				continue
+			inbound_total += 1
+			if _cm_assigned.has(cid):
+				continue
+			if policy == "flagship" and not guide_ids.has(victim_id):
+				continue
+			threats.append({"id": cid, "missile": m, "ttg": ttg, "pos": contact.estimated_position})
+		if ready.is_empty() or threats.is_empty():
+			continue
+		if policy == "salvo" and inbound_total < CM_SALVO_MIN_INBOUND:
+			continue
+		threats.sort_custom(func(a, b): return a["ttg"] < b["ttg"])
+		for th in threats:
+			var chosen = null
+			for tube in ready:
+				if tube.is_ready() and ship.position.distance_to(th["pos"]) <= tube.effective_max_range_m():
+					chosen = tube
+					break
+			if chosen == null:
+				continue
+			_launch_counter_missile(ship_id, ship, String(th["id"]), th["missile"], chosen)
+
+func _launch_counter_missile(ship_id: String, ship: ShipPhysicsState, threat_id: String, threat, tube) -> void:
+	var cm := MissileState.new()
+	cm.position = ship.position
+	cm.velocity = ship.velocity
+	cm.target = threat
+	cm.drive_max_acceleration_mps2 = CM_ACCEL_MPS2
+	cm.drive_burn_time_s = CM_BURN_S
+	cm.drive_burn_remaining_s = CM_BURN_S
+	cm.max_lifetime_s = CM_MAX_LIFETIME_S
+	cm.use_zem_guidance = true
+	_next_ai_missile_id += 1
+	var cm_id: String = "ai_cm_%d" % _next_ai_missile_id
+	add_missile(cm_id, cm, ship_id)
+	counter_missile_ids[cm_id] = true
+	_cm_assigned[threat_id] = cm_id
+	tube.mark_launched()
+	_battle_event("cm_launched", {"ship_id": ship_id, "missile_id": cm_id, "left": cm_ammo_remaining(ship_id)})
+
+## Player order: counter-missile policy for one ship
+## ("auto"/"flagship"/"salvo"/"hold").
+func set_ship_cm_policy(ship_id: String, policy: String) -> void:
+	_record_command("set_ship_cm_policy", {"ship_id": ship_id, "policy": policy})
+	if policy != "auto" and policy != "flagship" and policy != "salvo" and policy != "hold":
+		policy = "auto"
+	ship_cm_policy[ship_id] = policy
+
+func transmit_ship_cm_policy(ship_id: String, policy: String) -> void:
+	_record_command("transmit_ship_cm_policy", {"ship_id": ship_id, "policy": policy})
+	_queue_command_transmission(ship_id, Callable(self, "set_ship_cm_policy").bind(ship_id, policy))
 
 func _integrate_ships(dt: float) -> void:
 	for ship_id in ships.keys():

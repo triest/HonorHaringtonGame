@@ -154,6 +154,10 @@ func _count(e: Dictionary) -> void:
 			_bump(_side(d.get("attacker_ship_id", "")) + "_launched")
 		"pd_intercept":
 			_bump(_side(d.get("ship_id", "")) + "_pd_kills")
+		"cm_launched":
+			_bump(_side(d.get("ship_id", "")) + "_cm_launched")
+		"cm_intercept":
+			_bump(_side(d.get("ship_id", "")) + "_cm_kills")
 		"missile_detonation":
 			var a: String = _side(d.get("attacker_ship_id", ""))
 			if float(d.get("damage_dealt", 0.0)) > 0.0:
@@ -178,6 +182,7 @@ func _show_debrief(result: String, own_alive: int, en_alive: int) -> void:
 	body += "[cell][b] [/b][/cell][cell][b][color=#8cf2ff]Мантикора[/color]   [/b][/cell][cell][b][color=#ff6a5a]Хевен[/color][/b][/cell]"
 	body += "[cell]Ракет выпущено   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_launched"), s.call("en_launched")]
 	body += "[cell]Сбито ПРО (своей)   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_pd_kills"), s.call("en_pd_kills")]
+	body += "[cell]Контрракет пущено / сбито   [/cell][cell]%d / %d[/cell][cell]%d / %d[/cell]" % [s.call("own_cm_launched"), s.call("own_cm_kills"), s.call("en_cm_launched"), s.call("en_cm_kills")]
 	body += "[cell]Попаданий ракет   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_hits"), s.call("en_hits")]
 	body += "[cell]Остановлено клином/стеной   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_blocked"), s.call("en_blocked")]
 	body += "[cell]Лучевых попаданий   [/cell][cell]%d[/cell][cell]%d[/cell]" % [s.call("own_beam_hits"), s.call("en_beam_hits")]

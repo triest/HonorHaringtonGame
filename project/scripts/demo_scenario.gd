@@ -58,6 +58,18 @@ const MISSILE_MAX_LIFETIME_S: float = 240.0
 ## Fraction of a laserhead that penetrates even an intact sidewall (books:
 ## sidewalls degrade laserheads, they do not stop them). ASSUMPTION.
 const LASERHEAD_SIDEWALL_FLOOR: float = 0.35
+## Counter-missile launcher figures (ASSUMPTIONS.md "контрракеты"): a CM is
+## launched when a hostile missile aimed at the fleet is within
+## CM_ENGAGE_RANGE_M of the launching ship; a tube cycles every CM_RELOAD_S.
+const CM_ENGAGE_RANGE_M: float = 1.6e9       # 1.6 million km
+const CM_RELOAD_S: float = 3.0
+static var _cm_stock_mult: float = 1.0
+static var _cm_side_mult: float = 1.0
+
+## Scenario/tuning hook (also used by probes): multiplier on every ship's
+## counter-missile rounds. Reset to the scenario's own value by build().
+static func set_cm_stock_mult(m: float) -> void:
+	_cm_stock_mult = m
 const PD_RANGE_M: float = 2.0e8              # 200,000 km
 const PD_REACTION_S: float = 0.7
 const PD_RECHARGE_S: float = 0.5
@@ -84,8 +96,22 @@ static func _slot_x(i: int, count: int) -> float:
 ## {"red_ids": Array[String], "blue_ids": Array[String]} -- the actual ids
 ## built, in formation order (index 0 = flagship/guide of that side).
 static func build(world: SimulationWorld, setup: Dictionary = {}) -> Dictionary:
+	# 2026-09-29: `setup["scenario"]` (a Scenarios.ORDER id) selects the
+	# initial geometry / doctrine / counter-missile stock; missing = the
+	# original "intercept" scenario, and a missing red/blue composition
+	# falls back to that scenario's own default force (for "intercept" that
+	# is exactly ShipClasses.default_setup(), the old 4x4 heavy cruisers).
+	var scenario_id: String = String(setup.get("scenario", "intercept"))
+	if not Scenarios.DATA.has(scenario_id):
+		scenario_id = "intercept"
+	var scn: Dictionary = Scenarios.get_data(scenario_id)
+	var scn_setup: Dictionary = Scenarios.default_setup_for(scenario_id)
 	if setup.is_empty():
 		setup = ShipClasses.default_setup()
+	if not setup.has("red"):
+		setup["red"] = scn_setup["red"]
+	if not setup.has("blue"):
+		setup["blue"] = scn_setup["blue"]
 
 	var red_classes: Array = ShipClasses.flatten_side(setup.get("red", []))
 	var blue_classes: Array = ShipClasses.flatten_side(setup.get("blue", []))
@@ -130,15 +156,19 @@ static func build(world: SimulationWorld, setup: Dictionary = {}) -> Dictionary:
 	# "broadside" for both sides (the book's classic missile duel,
 	# broadside to broadside); "auto"/"wedge" are the player's choices.
 	# The player can override per ship from the command bar.
-	var att: String = OS.get_environment("DEMO_ATTITUDE") if OS.get_environment("DEMO_ATTITUDE") != "" else "broadside"
-	for sid in red_ids + blue_ids:
-		world.set_ship_attitude(sid, att)
+	var env_att: String = OS.get_environment("DEMO_ATTITUDE")
+	for sid in red_ids:
+		world.set_ship_attitude(sid, env_att if env_att != "" else String(scn["red_attitude"]))
+	for sid in blue_ids:
+		world.set_ship_attitude(sid, env_att if env_att != "" else String(scn["blue_attitude"]))
 
 	# Player squadron starts at the world origin (not symmetric about it):
 	# float32 positions are most precise near 0, and the player zooms into
 	# their own ships far more than the enemy's (see RenderOrigin).
-	_build_side(world, red_ids, red_classes, "red", 0.0, false)
-	_build_side(world, blue_ids, blue_classes, "blue", -SEPARATION_M, true)
+	_build_side(world, red_ids, red_classes, "red", Vector3.ZERO, Scenarios.red_yaw_rad(scenario_id), float(scn["red_speed"]), float(scn["red_thrust"]), float(scn["red_cm_mult"]) * _cm_stock_mult)
+	_build_side(world, blue_ids, blue_classes, "blue", Scenarios.blue_center(scenario_id), Scenarios.blue_yaw_rad(scenario_id), float(scn["blue_speed"]), float(scn["blue_thrust"]), float(scn["blue_cm_mult"]) * _cm_stock_mult)
+	for bid in blue_ids:
+		world.set_ship_cm_policy(bid, String(scn["blue_cm_policy"]))
 	_make_formation(world, PLAYER_FORMATION_ID, red_ids)
 	_make_formation(world, ENEMY_FORMATION_ID, blue_ids)
 	world.add_command_echelon(PLAYER_ECHELON_ID, "Squadron 1")
@@ -167,45 +197,65 @@ static func _composition_text(side_setup: Array) -> String:
 		return "неизвестного состава"
 	return ", ".join(parts)
 
+## Scenario title for the briefing panel / mission editor.
+static func title_for(setup: Dictionary) -> String:
+	return Scenarios.title_of(String(setup.get("scenario", "intercept")))
+
 ## Briefing text templated with the ACTUAL chosen composition (both
-## sides) and the flagship names build() just generated -- called by
-## main.gd right after build() returns, using the same `setup` passed in.
+## sides), the flagship names build() just generated and the chosen
+## scenario's situation/geometry/task paragraphs -- called by main.gd
+## right after build() returns, using the same `setup` passed in.
 static func mission_briefing(setup: Dictionary, red_ids: Array, blue_ids: Array) -> String:
+	var scn: Dictionary = Scenarios.get_data(String(setup.get("scenario", "intercept")))
 	var red_flag: String = ShipNames.of(red_ids[0])
 	var blue_flag: String = ShipNames.of(blue_ids[0])
 	var red_comp: String = _composition_text(setup.get("red", []))
 	var blue_comp: String = _composition_text(setup.get("blue", []))
-	return """[b]1904 г. П.Д., система Сент-Лоран, граница Звёздного королевства Мантикора.[/b]
+	var situation: String = String(scn["situation"]).replace("{blue}", blue_comp).replace("{red}", red_comp)
+	var red_cm: int = ShipClasses.side_cm_stock(setup.get("red", []))
+	var blue_cm: int = ShipClasses.side_cm_stock(setup.get("blue", []))
+	red_cm = int(round(float(red_cm) * float(scn["red_cm_mult"])))
+	blue_cm = int(round(float(blue_cm) * float(scn["blue_cm_mult"])))
+	return """[b]%s[/b]
 
-Разведка засекла рейдовую эскадру Народного флота Хевена: %s идут к транспортам, стоящим у местной станции. Официально войны нет, но «неопознанные» корабли уже дважды нападали на мантикорские конвои в этом секторе.
+%s
 
 [b]Ваши силы:[/b] эскадра Королевского флота Мантикоры (%s), флагман — [color=#8cf2ff]%s[/color]. Строй — фронт, дистанция между кораблями 20 км.
-[b]Противник:[/b] %s, флагман — [color=#ff6a5a]%s[/color]. Дистанция ~5,3 млн км, сближение ~600 км/с.
+[b]Противник:[/b] %s, флагман — [color=#ff6a5a]%s[/color]. %s
 
-[b]Задача:[/b] не допустить противника к транспортам — уничтожить эскадру или вынудить её отойти, сохранив как можно больше своих кораблей.
+[b]Задача:[/b] %s
 
-[b]Обстановка боя:[/b] ракеты с лазерными боеголовками бьют с 5 млн км, подлёт около двух с половиной минут. Клин (импеллерное поле) над и под кораблём непробиваем — но пока корабль повёрнут к врагу клином, его собственные трубы молчат. Борт прикрыт боковой стеной, она ослабляет, но не останавливает лазерные головки. Лазерная ПРО сбивает часть залпа на последних секундах. Лучевое оружие вступит в дело, только если сойтись на 400 тыс. км. Более тяжёлые корабли несут больше труб и ПРО, но медленнее разворачиваются.
+[b]Обстановка боя:[/b] ракеты с лазерными боеголовками бьют с миллионов км. Клин (импеллерное поле) над и под кораблём непробиваем — но пока корабль повёрнут к врагу клином, его собственные трубы молчат. Борт прикрыт боковой стеной, она ослабляет, но не останавливает лазерные головки. Лазерная ПРО сбивает часть залпа на последних секундах. Лучевое оружие вступит в дело, только если сойтись на 400 тыс. км.
 
-[b]Управление:[/b] ЛКМ — выделить (рамкой — несколько), ЛКМ по врагу — приказ, ПКМ — курс в точку. F — камера к кораблю, F2 — эскадра, F1 — весь бой, Esc — назад. Space — пауза, [ ] — скорость времени. Кнопки приказов — внизу.""" % [blue_comp, red_comp, red_flag, blue_comp, blue_flag]
+[b]Контрракеты:[/b] у каждого корабля ограниченный запас (у вас ~%d на эскадру, у противника ~%d). Пуск автоматический, но вы решаете, на что их тратить: АВТО — по любой ракете, ТОЛЬКО ФЛАГМАН — по ракетам, идущим на флагман, ТОЛЬКО ЗАЛПЫ — по крупным залпам от 10 ракет, СТОП — беречь. Кончились — остаётся одна ПРО.
 
-static func _build_side(world: SimulationWorld, ids: Array, class_ids: Array, team: String, z: float, flipped: bool) -> void:
-	# Red sits at +Z facing -Z (identity orientation: bow is -Z, see
-	# AttackGeometry); blue at -Z rotated PI about Y so its bow faces +Z.
-	# Both therefore approach bow-on, the classic opening geometry.
-	var toward_enemy: Vector3 = Vector3(0, 0, 1) if flipped else Vector3(0, 0, -1)
+[b]Управление:[/b] ЛКМ — выделить (рамкой — несколько), ЛКМ по врагу — приказ, ПКМ — курс в точку. F — камера к кораблю, F2 — эскадра, F1 — весь бой, Esc — назад. Space — пауза, [ ] — скорость времени. Кнопки приказов — внизу.""" % [String(scn["place"]), situation, red_comp, red_flag, blue_comp, blue_flag, String(scn["geometry"]), String(scn["task"]), red_cm, blue_cm]
+
+static func _build_side(world: SimulationWorld, ids: Array, class_ids: Array, team: String, center: Vector3, yaw_rad: float, speed: float, thrust_frac: float, cm_mult: float) -> void:
+	_cm_side_mult = cm_mult
+	var heading: Vector3 = Scenarios.heading_of(yaw_rad)
+	var orient: Quaternion = Quaternion.IDENTITY
+	var y: float = fposmod(yaw_rad, TAU)  # -PI and PI are the same heading
+	var axis_aligned: bool = y < 1e-6 or absf(y - TAU) < 1e-6 or absf(y - PI) < 1e-6
+	if absf(y - PI) < 1e-6:
+		orient = Quaternion(Vector3.UP, PI)
+	elif not axis_aligned:
+		orient = Quaternion(Vector3.UP, -yaw_rad)
+	var lateral: Vector3 = Vector3(1, 0, 0)
+	if not axis_aligned:
+		lateral = orient * Vector3(1, 0, 0)
 	var count: int = ids.size()
 	for i in range(count):
 		var ship_id: String = ids[i]
 		var cls: Dictionary = ShipClasses.CLASSES[class_ids[i]]
 		var phys := ShipPhysicsState.new()
-		phys.position = Vector3(_slot_x(i, count), 0.0, z)
-		if flipped:
-			phys.orientation = Quaternion(Vector3.UP, PI)
-		phys.velocity = toward_enemy * INITIAL_CLOSING_SPEED_MPS
-		# Accelerating toward the enemy at 80% of rated max -- canon
+		phys.position = center + lateral * _slot_x(i, count)
+		phys.orientation = orient
+		phys.velocity = heading * speed
+		# Accelerating along the heading at a fraction of rated max (canon
 		# squadrons hold back a margin below the slowest ship's maximum so
-		# members have thrust left over to keep station (ASSUMPTION).
-		phys.commanded_thrust_local = Vector3(0.0, 0.0, -0.8)
+		# members have thrust left over to keep station -- ASSUMPTION).
+		phys.commanded_thrust_local = Vector3(0.0, 0.0, -thrust_frac)
 		phys.mass_kg = cls["mass_kg"]
 		phys.max_thrust_n = cls["max_thrust_n"]
 		phys.max_angular_speed_rad_s = cls["max_angular_speed_rad_s"]
@@ -232,6 +282,15 @@ static func _build_side(world: SimulationWorld, ids: Array, class_ids: Array, te
 			tube.reload_time_s = float(cls["reload_s"])
 			tube.max_range_m = MISSILE_LAUNCH_RANGE_M
 			world.add_missile_tube(ship_id, tube)
+
+		# 2026-09-29: counter-missile magazine (scarce, see SimulationWorld
+		# cm_tubes). `cm_stock_mult` (scenario) scales rounds per tube.
+		for _k in range(int(cls.get("cm_tubes", 0))):
+			var cmt := MissileTube.new()
+			cmt.ammo_count = maxi(0, int(round(float(cls.get("cm_rounds_per_tube", 0)) * _cm_side_mult)))
+			cmt.reload_time_s = CM_RELOAD_S
+			cmt.max_range_m = CM_ENGAGE_RANGE_M
+			world.add_cm_tube(ship_id, cmt)
 
 		for _p in range(int(cls["pd_mounts"])):
 			var pd := PointDefenseMount.new()

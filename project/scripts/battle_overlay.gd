@@ -104,6 +104,8 @@ func _visible_objects() -> Array:
 		var m = world.missiles[mid]
 		if not m.is_active():
 			continue
+		if world.counter_missile_ids.has(mid):
+			continue  # counter-missiles are not salvo symbols (2026-09-29)
 		var tgt_id: String = ship_by_obj.get(m.target, "") if m.target != null else ""
 		var owner_team: String = String(world.teams.get(world.missile_owners.get(mid, ""), ""))
 		var own_m: bool = owner_team == player_team

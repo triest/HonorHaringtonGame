@@ -265,6 +265,8 @@ func _test_pd_hold_prevents_engagement_this_tick() -> void:
 	_assert(mount.cooldown_remaining_s > 0.0, "sanity check: with hold cleared, the same setup must actually engage")
 
 func _test_counter_missiles_never_shown() -> void:
+	# Ship WITHOUT counter-missile tubes: the row must not appear (§1.10.8,
+	# never show a weapon the ship does not have).
 	var world := _basic_two_side_world()
 	world.add_weapon_mount("alpha", _make_laser_mount())
 	world.add_missile_tube("alpha", MissileTube.new())
@@ -273,4 +275,17 @@ func _test_counter_missiles_never_shown() -> void:
 	selection.select_only(["alpha"])
 	var controller := _make_controller(world, selection)
 	controller.sync()
-	_assert(not _any_label_contains(controller.rows, "COUNTER-MISSILE"), "§56.3 item E honest gap: COUNTER-MISSILES has no backing launch-decision mechanic and must never appear, even with every other section present")
+	_assert(not _any_label_contains(controller.rows, "COUNTER-MISSILE"), "a ship with no counter-missile tubes must not show a COUNTER-MISSILES row")
+
+	# 2026-09-29: WITH tubes the row appears, and clicking it cycles the
+	# policy auto -> flagship -> salvo -> hold (via the comm-delayed order).
+	var cmt := MissileTube.new()
+	cmt.ammo_count = 8
+	world.add_cm_tube("alpha", cmt)
+	controller.sync()
+	_assert(_any_label_contains(controller.rows, "COUNTER-MISSILE"), "a ship WITH counter-missile tubes must show the row")
+	_assert(_any_label_contains(controller.rows, "8/8"), "the row must show remaining/starting stock")
+	controller.execute_row("CM_CYCLE")
+	for _i in range(200):
+		world.tick_simulation(1.0 / 60.0)
+	_assert(world.cm_policy_of("alpha") == "flagship", "first click moves auto -> flagship")

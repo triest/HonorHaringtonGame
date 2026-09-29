@@ -45,6 +45,7 @@ var _active_beams: Array = []  # Array[Dictionary]: {node: MeshInstance3D, mater
 var _missile_markers: Dictionary = {}  # missile_id -> MeshInstance3D
 var _missile_marker_mesh: SphereMesh
 var _missile_marker_material: StandardMaterial3D
+var _cm_marker_material: StandardMaterial3D  # 2026-09-29: counter-missiles read as cyan, not the yellow of offensive missiles
 
 func _ready() -> void:
 	_missile_marker_mesh = SphereMesh.new()
@@ -54,6 +55,9 @@ func _ready() -> void:
 	_missile_marker_material = StandardMaterial3D.new()
 	_missile_marker_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_missile_marker_material.albedo_color = Color(1.0, 0.85, 0.2)  # bright yellow -- distinct from beam/wedge/sidewall colours
+	_cm_marker_material = StandardMaterial3D.new()
+	_cm_marker_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_cm_marker_material.albedo_color = Color(0.3, 1.0, 0.9)
 
 ## Call once per simulation tick (after SimulationWorld.tick_simulation()
 ## has already run for that tick -- main.gd's connection order guarantees
@@ -122,7 +126,7 @@ func _sync_missile_markers(world: SimulationWorld) -> void:
 		if marker == null:
 			marker = MeshInstance3D.new()
 			marker.mesh = _missile_marker_mesh
-			marker.material_override = _missile_marker_material
+			marker.material_override = _cm_marker_material if world.counter_missile_ids.has(missile_id) else _missile_marker_material
 			add_child(marker)
 			_missile_markers[missile_id] = marker
 		marker.global_position = RenderOrigin.to_render(missile.position)

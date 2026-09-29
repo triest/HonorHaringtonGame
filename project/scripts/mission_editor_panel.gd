@@ -22,6 +22,13 @@ const UiTheme = preload("res://scripts/ui_theme.gd")
 
 var on_confirm: Callable = Callable()
 
+## 2026-09-29: the chosen scenario (Scenarios.ORDER id). Picking one also
+## loads that scenario's default force composition into the steppers below
+## (still fully editable afterwards).
+var scenario_id: String = "intercept"
+var _scenario_buttons: Dictionary = {}  # scenario id -> Button
+var _tagline_label: Label
+
 var counts: Dictionary = {"red": {}, "blue": {}}  # side -> class_id -> int
 var _count_labels: Dictionary = {"red": {}, "blue": {}}  # side -> class_id -> Label
 var _summary_labels: Dictionary = {}  # side -> Label
@@ -68,6 +75,35 @@ func _ready() -> void:
 	sub.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR_DIM)
 	root.add_child(sub)
 
+	var scen_row := HFlowContainer.new()
+	scen_row.add_theme_constant_override("h_separation", 6)
+	scen_row.add_theme_constant_override("v_separation", 6)
+	scen_row.alignment = FlowContainer.ALIGNMENT_CENTER
+	root.add_child(scen_row)
+	var scen_lbl := Label.new()
+	scen_lbl.text = "Сценарий:"
+	scen_lbl.add_theme_color_override("font_color", UiTheme.ACCENT_COLOR_DIM)
+	scen_row.add_child(scen_lbl)
+	var scen_group := ButtonGroup.new()
+	for scen_id in Scenarios.ORDER:
+		var sid_cap: String = scen_id
+		var b: Button = _btn(scen_row, Scenarios.short_of(sid_cap), func(): _select_scenario(sid_cap), Scenarios.tagline_of(sid_cap))
+		b.toggle_mode = true
+		b.button_group = scen_group
+		var pressed_sb := UiTheme.panel_stylebox(UiTheme.ACCENT_COLOR)
+		pressed_sb.set_content_margin_all(5)
+		pressed_sb.bg_color = Color(0.15, 0.35, 0.4, 0.95)
+		b.add_theme_stylebox_override("pressed", pressed_sb)
+		b.add_theme_color_override("font_pressed_color", Color.WHITE)
+		_scenario_buttons[sid_cap] = b
+	_tagline_label = Label.new()
+	_tagline_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tagline_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tagline_label.custom_minimum_size = Vector2(700, 0)
+	_tagline_label.add_theme_font_size_override("font_size", 13)
+	_tagline_label.add_theme_color_override("font_color", Color(0.75, 0.95, 1.0))
+	root.add_child(_tagline_label)
+
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 28)
 	root.add_child(columns)
@@ -78,13 +114,24 @@ func _ready() -> void:
 	buttons.add_theme_constant_override("separation", 10)
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	root.add_child(buttons)
+	_btn(buttons, "Случайный сценарий", _randomize_scenario, "Случайный сценарий с его составом сил")
 	_btn(buttons, "Случайный состав", _randomize, "Случайно подобрать оба состава")
-	_btn(buttons, "По умолчанию", _reset_default, "4 тяжёлых крейсера на сторону")
+	_btn(buttons, "По умолчанию", _reset_default, "Состав по умолчанию выбранного сценария")
 	var start := _btn(buttons, "В бой", _confirm)
 	start.add_theme_font_size_override("font_size", 18)
 	start.custom_minimum_size = Vector2(160, 44)
 
 	_refresh()
+	# Centre the panel on screen (2026-09-29: it used to sit in the
+	# top-left corner); sizes are only known after the first layout pass.
+	call_deferred("_center")
+	get_viewport().size_changed.connect(_center)
+
+func _center() -> void:
+	if _panel == null or not is_inside_tree():
+		return
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	_panel.position = ((vp - _panel.size) * 0.5).max(Vector2.ZERO)
 
 func _build_column(parent: Node, side: String, title_text: String, color: Color) -> void:
 	var col := VBoxContainer.new()
@@ -172,15 +219,33 @@ func _refresh() -> void:
 		var ships: int = ShipClasses.side_total(s)
 		var tubes: int = ShipClasses.side_stat_sum(s, "tubes")
 		var pd: int = ShipClasses.side_stat_sum(s, "pd_mounts")
-		_summary_labels[side].text = "кораблей: %d  ·  труб: %d  ·  ПРО: %d" % [ships, tubes, pd]
+		var cm_mult: float = float(Scenarios.get_data(scenario_id)["%s_cm_mult" % side])
+		var cm: int = int(round(float(ShipClasses.side_cm_stock(s)) * cm_mult))
+		_summary_labels[side].text = "кораблей: %d  ·  труб: %d  ·  ПРО: %d  ·  контрракет: %d" % [ships, tubes, pd, cm]
+	for scen_key in _scenario_buttons.keys():
+		_scenario_buttons[scen_key].set_pressed_no_signal(scen_key == scenario_id)
+	if _tagline_label != null:
+		_tagline_label.text = "%s — %s" % [Scenarios.title_of(scenario_id), Scenarios.tagline_of(scenario_id)]
 
-func _reset_default() -> void:
-	var d: Dictionary = ShipClasses.default_setup()
+func _select_scenario(id: String) -> void:
+	scenario_id = id
+	_apply_setup(Scenarios.default_setup_for(id))
+	_refresh()
+
+func _randomize_scenario() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	_select_scenario(Scenarios.ORDER[rng.randi() % Scenarios.ORDER.size()])
+
+func _apply_setup(d: Dictionary) -> void:
 	for side in ["red", "blue"]:
 		for cid in ShipClasses.ORDER:
 			counts[side][cid] = 0
 		for entry in d.get(side, []):
 			counts[side][String(entry["class_id"])] = int(entry["count"])
+
+func _reset_default() -> void:
+	_apply_setup(Scenarios.default_setup_for(scenario_id))
 	_refresh()
 
 func _randomize() -> void:
@@ -197,14 +262,14 @@ func _randomize() -> void:
 	_refresh()
 
 func _confirm() -> void:
-	var setup: Dictionary = {"red": _setup_side("red"), "blue": _setup_side("blue")}
+	var setup: Dictionary = {"scenario": scenario_id, "red": _setup_side("red"), "blue": _setup_side("blue")}
 	# Guard against an empty side (a degenerate, ship-less mission) --
 	# fall back to the default composition for that side rather than
 	# handing DemoScenario an empty force.
 	if ShipClasses.side_total(setup["red"]) <= 0:
-		setup["red"] = ShipClasses.default_setup()["red"]
+		setup["red"] = Scenarios.default_setup_for(scenario_id)["red"]
 	if ShipClasses.side_total(setup["blue"]) <= 0:
-		setup["blue"] = ShipClasses.default_setup()["blue"]
+		setup["blue"] = Scenarios.default_setup_for(scenario_id)["blue"]
 	visible = false
 	if on_confirm.is_valid():
 		on_confirm.call(setup)

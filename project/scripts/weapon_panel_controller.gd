@@ -35,6 +35,10 @@ extends Node
 ##    (simulation/missile_tube.gd) has no "type" field at all, and no
 ##    ship in this codebase is ever loaded with more than one tube type,
 ##    so there is nothing distinct to choose between yet.
+##  - [CLOSED 2026-09-29: counter-missiles now have an automatic launch
+##    decision + finite stock + AUTO/FLAGSHIP/SALVO/HOLD policy, and this
+##    panel shows a cycle row for ships that carry CM tubes -- the note
+##    below is the ORIGINAL gap text, kept for history.]
 ##  - COUNTER-MISSILES (AUTO/MANUAL DESIGNATION/HOLD): NOT shown at all,
 ##    not even a disabled row -- there is no automatic counter-missile
 ##    LAUNCH decision anywhere in simulation/*.gd (grep-confirmed before
@@ -123,6 +127,8 @@ func execute_row(kind: String) -> void:
 			_fire_missiles()
 		"PD_TOGGLE":
 			_toggle_pd_hold()
+		"CM_CYCLE":
+			_cycle_cm_policy()
 	# Rebuild immediately so the panel reflects the new state the same
 	# tick, rather than waiting for the next scheduled sync() call.
 	rows = _build_rows(ship_id)
@@ -173,6 +179,15 @@ func _fire_missiles() -> void:
 	if selection != null and selection.has_designated_target():
 		target_id = selection.designated_target_id
 	world.order_missile_launch(ship_id, target_id, salvo_size, throttle)
+
+## 2026-09-29: counter-missile policy cycle auto -> flagship -> salvo -> hold.
+const CM_POLICY_ORDER: Array = ["auto", "flagship", "salvo", "hold"]
+const CM_POLICY_LABEL: Dictionary = {"auto": "AUTO", "flagship": "FLAGSHIP ONLY", "salvo": "BIG SALVOS ONLY", "hold": "HOLD"}
+
+func _cycle_cm_policy() -> void:
+	var cur: int = CM_POLICY_ORDER.find(world.cm_policy_of(ship_id))
+	var nxt: String = CM_POLICY_ORDER[(cur + 1) % CM_POLICY_ORDER.size()]
+	world.transmit_ship_cm_policy(ship_id, nxt)
 
 func _toggle_pd_hold() -> void:
 	var is_held: bool = bool(world.ship_pd_hold.get(ship_id, false))
@@ -250,5 +265,14 @@ func _build_rows(for_ship_id: String) -> Array:
 	if not pd.is_empty():
 		var is_held: bool = bool(world.ship_pd_hold.get(for_ship_id, false))
 		result.append({"label": "-- POINT DEFENSE: %s (click to toggle) --" % ("HOLD" if is_held else "AUTO"), "kind": "PD_TOGGLE"})
+
+	# 2026-09-29: counter-missiles now have a real launch decision
+	# (SimulationWorld._resolve_counter_missile_launch_ai), so the honest
+	# gap recorded in this class's doc comment is closed: shown ONLY for a
+	# ship that actually carries counter-missile tubes (§1.10.8).
+	var cmt: Array = world.cm_tubes.get(for_ship_id, [])
+	if not cmt.is_empty():
+		var pol: String = world.cm_policy_of(for_ship_id)
+		result.append({"label": "-- COUNTER-MISSILES: %s, %d/%d left (click to cycle) --" % [CM_POLICY_LABEL.get(pol, pol), world.cm_ammo_remaining(for_ship_id), int(world.cm_start_ammo.get(for_ship_id, 0))], "kind": "CM_CYCLE"})
 
 	return result

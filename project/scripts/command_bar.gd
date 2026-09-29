@@ -75,6 +75,7 @@ var _attitude_buttons: Dictionary = {}  # mode -> Button
 var _pd_btn: Button
 var _fire_btn: Button
 var _hold_btn: Button
+var _cm_btn: Button
 var _radar_btn: Button
 var _panel: PanelContainer
 var _status_text: String = ""
@@ -149,6 +150,7 @@ func _ready() -> void:
 	_btn(fire_row, "Добить слабейшего", _attack_weakest, "Все выделенные корабли переключаются на самый повреждённый обнаруженный корабль противника -- концентрация огня реально ускоряет уничтожение эскадры противника")
 	_fire_btn = _toggle_btn(fire_row, "Огонь: свободный", _on_fire_toggled, "Переключатель: свободный огонь / прекратить огонь")
 	_pd_btn = _toggle_btn(fire_row, "ПРО: авто", _on_pd_toggled, "Переключатель: ПРО автоматически / ПРО стоп")
+	_cm_btn = _btn(fire_row, "ПРТР: авто", _cycle_cm_policy, "Контрракеты выделенных кораблей (запас конечный!): АВТО — по любой ракете, ТОЛЬКО ФЛАГМАН — по ракетам на флагман, ТОЛЬКО ЗАЛПЫ — по залпам от 10 ракет, СТОП — беречь. Нажатие переключает по кругу.")
 	_hold_btn = _toggle_btn(fire_row, "Драться до конца: выкл", _on_hold_toggled, "Приказ игнорировать критические повреждения корпуса: корабль продолжает стрелять и НЕ уходит на автоматический отход, пока экипаж может держать боевой пост")
 
 	var radar_row := _group_row(groups, "РАДАР")
@@ -310,7 +312,7 @@ func sync() -> void:
 	var tgt: String = selection.designated_target_id if selection != null else ""
 	var msl: int = 0
 	for mid in world.missiles.keys():
-		if world.missiles[mid].is_active() and String(world.teams.get(world.missile_owners.get(mid, ""), "")) != player_team:
+		if world.missiles[mid].is_active() and not world.counter_missile_ids.has(mid) and String(world.teams.get(world.missile_owners.get(mid, ""), "")) != player_team:
 			msl += 1
 	var ammo_own: int = 0
 	var ammo_en: int = 0
@@ -322,7 +324,11 @@ func sync() -> void:
 				ammo_own += tube.ammo_count
 			else:
 				ammo_en += tube.ammo_count
-	_fire_label.text = "Цель: %s   входящих ракет: %d   боезапас: %d (у врага ~%d)%s" % [ShipNames.of(tgt) if tgt != "" else "—", msl, ammo_own, ammo_en, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
+	var cm_own: int = 0
+	for csid in world.cm_tubes.keys():
+		if String(world.teams.get(csid, "")) == player_team and world.ships.has(csid) and not world.ships[csid].is_wreck:
+			cm_own += world.cm_ammo_remaining(csid)
+	_fire_label.text = "Цель: %s   входящих ракет: %d   боезапас: %d (у врага ~%d)   контрракет: %d%s" % [ShipNames.of(tgt) if tgt != "" else "—", msl, ammo_own, ammo_en, cm_own, ("   " + _status_text) if Time.get_ticks_msec() < _status_until_ms else ""]
 
 	# ОГОНЬ / ПОЛОЖЕНИЕ toggles mirror the first own selected ship's
 	# CURRENT order state (a group order still applies to the whole
@@ -338,6 +344,11 @@ func sync() -> void:
 		var rep_pd: bool = world.ship_pd_hold.get(rep, false)
 		_pd_btn.set_pressed_no_signal(rep_pd)
 		_pd_btn.text = "ПРО: СТОП" if rep_pd else "ПРО: авто"
+		var cm_stock: int = 0
+		for csid in own:
+			cm_stock += world.cm_ammo_remaining(csid)
+		_cm_btn.text = "ПРТР: %s (%d)" % [CM_POLICY_RU.get(world.cm_policy_of(rep), "авто"), cm_stock]
+		_cm_btn.modulate = Color(1.0, 0.55, 0.5) if (cm_stock <= 0 and world.cm_tubes.has(rep)) else Color.WHITE
 		var rep_hold: bool = world.ship_hold_the_line.get(rep, false)
 		_hold_btn.set_pressed_no_signal(rep_hold)
 		_hold_btn.text = "Драться до конца: ВКЛ" if rep_hold else "Драться до конца: выкл"
@@ -412,7 +423,7 @@ func _on_slowdown_toggled(pressed: bool) -> void:
 func _missiles_closing() -> bool:
 	for mid in world.missiles.keys():
 		var m = world.missiles[mid]
-		if m.is_active() and m.target != null and m.position.distance_to(m.target.position) < SLOWDOWN_RANGE_M:
+		if m.is_active() and m.target != null and not world.counter_missile_ids.has(mid) and m.position.distance_to(m.target.position) < SLOWDOWN_RANGE_M:
 			return true
 	return false
 
@@ -720,6 +731,28 @@ func _hold_the_line(hold: bool) -> void:
 ## state right back so it doesn't silently claim an order that never
 ## went out. sync() takes over the visual state again the moment there
 ## IS a selection.
+## 2026-09-29: counter-missile policy cycle for the selection, driven by the
+## first selected ship's current policy: авто -> только флагман -> только
+## залпы -> стоп -> авто. Comm-delayed like every other order.
+const CM_POLICY_ORDER: Array = ["auto", "flagship", "salvo", "hold"]
+const CM_POLICY_RU: Dictionary = {"auto": "авто", "flagship": "только флагман", "salvo": "только залпы", "hold": "СТОП"}
+
+func _cycle_cm_policy() -> void:
+	if not _need_selection():
+		return
+	var own: Array = _own_selected()
+	var cur: int = CM_POLICY_ORDER.find(world.cm_policy_of(own[0]))
+	var nxt: String = CM_POLICY_ORDER[(cur + 1) % CM_POLICY_ORDER.size()]
+	var n: int = 0
+	for sid in own:
+		if world.cm_tubes.has(sid) and not world.cm_tubes[sid].is_empty():
+			world.transmit_ship_cm_policy(sid, nxt)
+			n += 1
+	if n == 0:
+		_say("у выделенных кораблей нет контрракет")
+		return
+	_say("контрракеты: " + String(CM_POLICY_RU.get(nxt, nxt)))
+
 func _on_fire_toggled(pressed: bool) -> void:
 	if not _need_selection():
 		_fire_btn.set_pressed_no_signal(not pressed)

@@ -165,6 +165,26 @@ func _ingest(e: Dictionary) -> void:
 			var l2 := _merge("pd:" + s, t)
 			l2["count"] += 1
 			l2["bb"] = "[color=%s]ПРО %s[/color]: сбито ракет %d" % [_col(s), ShipNames.of(s), l2["count"]]
+		"cm_launched":
+			# 2026-09-29: counter-missile launches, aggregated per ship. The
+			# remaining stock is shown for OWN ships only (no cheat vision
+			# into the enemy magazine).
+			var cs: String = d.get("ship_id", "")
+			var lc := _merge("cm:" + cs, t)
+			lc["count"] += 1
+			if _own(cs):
+				var left: int = int(d.get("left", 0))
+				lc["bb"] = "[color=%s]ПРТР %s[/color]: пущено контрракет %d, осталось %d" % [_col(cs), ShipNames.of(cs), lc["count"], left]
+				if left <= 0:
+					_lines.append({"key": "cmout:" + cs, "t": t, "bb": "[color=%s]%s[/color]: [color=%s]запас контрракет исчерпан[/color]" % [_col(cs), ShipNames.of(cs), WARN_HEX]})
+					_trim()
+			else:
+				lc["bb"] = "[color=%s]ПРТР %s[/color]: противник пустил контрракет %d" % [_col(cs), ShipNames.of(cs), lc["count"]]
+		"cm_intercept":
+			var ci: String = d.get("ship_id", "")
+			var lci := _merge("cmk:" + ci, t)
+			lci["count"] += 1
+			lci["bb"] = "[color=%s]ПРТР %s[/color]: перехвачено ракет %d" % [_col(ci), ShipNames.of(ci), lci["count"]]
 		"missile_detonation":
 			var tg: String = d.get("target_ship_id", "")
 			var dmg: float = float(d.get("damage_dealt", 0.0))

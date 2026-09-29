@@ -374,7 +374,7 @@ func _start_mission(setup: Dictionary) -> void:
 	mission_panel = MissionPanel.new()
 	mission_panel.world = world
 	mission_panel.player_team = player_team
-	mission_panel.briefing_title = DemoScenario.MISSION_TITLE
+	mission_panel.briefing_title = DemoScenario.title_for(setup)
 	mission_panel.briefing_bbcode = DemoScenario.mission_briefing(setup, red_ids, blue_ids)
 	add_child(mission_panel)
 	if OS.get_environment("SKIP_BRIEFING") != "1":

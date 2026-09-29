@@ -126,22 +126,22 @@ func _test_missile_tube_condition_synced_and_gates_readiness() -> void:
 
 func _test_counter_missile_kill_radius_scaled_by_owner_condition() -> void:
 	var incoming := MissileState.new()
-	incoming.position = Vector3(0, 0, -4000.0)
+	incoming.position = Vector3(0, 0, -CounterMissileResolution.INTERCEPT_KILL_RADIUS_M * 0.8)
 	var cm := MissileState.new()
 	cm.target = incoming
 	cm.position = Vector3.ZERO
 	# Distance is 4000m: within the full 5000m radius, but not within a
 	# radius halved by a degraded COUNTER_MISSILE_SYSTEMS condition.
 	var result_undamaged := CounterMissileResolution.check_intercept(cm, incoming, 1.0)
-	_assert(result_undamaged.outcome == CounterMissileResolution.Outcome.INTERCEPTED, "full COUNTER_MISSILE_SYSTEMS condition should intercept at 4000m (within the 5000m nominal radius)")
+	_assert(result_undamaged.outcome == CounterMissileResolution.Outcome.INTERCEPTED, "full COUNTER_MISSILE_SYSTEMS condition should intercept at 0.8x the nominal radius")
 
 	var incoming2 := MissileState.new()
-	incoming2.position = Vector3(0, 0, -4000.0)
+	incoming2.position = Vector3(0, 0, -CounterMissileResolution.INTERCEPT_KILL_RADIUS_M * 0.8)
 	var cm2 := MissileState.new()
 	cm2.target = incoming2
 	cm2.position = Vector3.ZERO
 	var result_damaged := CounterMissileResolution.check_intercept(cm2, incoming2, 0.5)
-	_assert(result_damaged.outcome == CounterMissileResolution.Outcome.TOO_FAR, "halved COUNTER_MISSILE_SYSTEMS condition should shrink the effective kill radius to 2500m, missing at 4000m")
+	_assert(result_damaged.outcome == CounterMissileResolution.Outcome.TOO_FAR, "halved COUNTER_MISSILE_SYSTEMS condition should shrink the effective kill radius to half, missing at 0.8x the nominal radius")
 
 func _test_counter_missile_default_condition_backward_compatible() -> void:
 	# Every pre-existing caller (test_counter_missile.gd, etc.) calls

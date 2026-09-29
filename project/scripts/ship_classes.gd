@@ -26,6 +26,7 @@ const ORDER: Array = ["destroyer", "light_cruiser", "heavy_cruiser", "battlecrui
 
 const CLASSES: Dictionary = {
 	"destroyer": {
+		"cm_tubes": 1, "cm_rounds_per_tube": 6,
 		"label": "эсминец",
 		"tubes": 2, "rounds_per_tube": 30, "reload_s": 15.0,
 		"pd_mounts": 2,
@@ -33,6 +34,7 @@ const CLASSES: Dictionary = {
 		"mass_kg": 4.0e8, "max_thrust_n": 3.0e11, "max_angular_speed_rad_s": 0.5,
 	},
 	"light_cruiser": {
+		"cm_tubes": 1, "cm_rounds_per_tube": 8,
 		"label": "лёгкий крейсер",
 		"tubes": 3, "rounds_per_tube": 35, "reload_s": 18.0,
 		"pd_mounts": 2,
@@ -40,6 +42,7 @@ const CLASSES: Dictionary = {
 		"mass_kg": 7.0e8, "max_thrust_n": 4.0e11, "max_angular_speed_rad_s": 0.4,
 	},
 	"heavy_cruiser": {
+		"cm_tubes": 2, "cm_rounds_per_tube": 8,
 		"label": "тяжёлый крейсер",
 		"tubes": 4, "rounds_per_tube": 40, "reload_s": 20.0,
 		"pd_mounts": 3,
@@ -49,6 +52,7 @@ const CLASSES: Dictionary = {
 		"mass_kg": 1.0e9, "max_thrust_n": 5.0e11, "max_angular_speed_rad_s": 0.3,
 	},
 	"battlecruiser": {
+		"cm_tubes": 2, "cm_rounds_per_tube": 12,
 		"label": "линейный крейсер",
 		"tubes": 6, "rounds_per_tube": 45, "reload_s": 22.0,
 		"pd_mounts": 4,
@@ -56,6 +60,7 @@ const CLASSES: Dictionary = {
 		"mass_kg": 1.6e9, "max_thrust_n": 7.0e11, "max_angular_speed_rad_s": 0.22,
 	},
 	"dreadnought": {
+		"cm_tubes": 3, "cm_rounds_per_tube": 12,
 		"label": "дредноут",
 		"tubes": 8, "rounds_per_tube": 50, "reload_s": 24.0,
 		"pd_mounts": 5,
@@ -63,6 +68,7 @@ const CLASSES: Dictionary = {
 		"mass_kg": 2.4e9, "max_thrust_n": 9.5e11, "max_angular_speed_rad_s": 0.16,
 	},
 	"superdreadnought": {
+		"cm_tubes": 4, "cm_rounds_per_tube": 12,
 		"label": "супердредноут",
 		"tubes": 10, "rounds_per_tube": 55, "reload_s": 26.0,
 		"pd_mounts": 6,
@@ -132,4 +138,14 @@ static func side_stat_sum(side_setup: Array, field: String) -> int:
 	for entry in side_setup:
 		var cid: String = String(entry.get("class_id", "heavy_cruiser"))
 		n += int(CLASSES.get(cid, {}).get(field, 0)) * int(entry.get("count", 0))
+	return n
+
+## Total counter-missile stock of a side (tubes x rounds per tube, summed
+## over ships) -- shown in the mission editor summary. 2026-09-29.
+static func side_cm_stock(side_setup: Array) -> int:
+	var n: int = 0
+	for entry in side_setup:
+		var cid: String = String(entry.get("class_id", "heavy_cruiser"))
+		var c: Dictionary = CLASSES.get(cid, {})
+		n += int(c.get("cm_tubes", 0)) * int(c.get("cm_rounds_per_tube", 0)) * int(entry.get("count", 0))
 	return n

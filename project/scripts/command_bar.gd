@@ -44,12 +44,18 @@ class_name CommandBar
 
 const UiTheme = preload("res://scripts/ui_theme.gd")
 
-const TIME_SCALES: Array = [1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0]
+const TIME_SCALES: Array = [1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0, 20000.0, 100000.0]
 ## Auto-slowdown: while any missile is within this distance of its target,
 ## time is capped to SLOWDOWN_CAP so the terminal phase (PD, hits) can be
 ## watched and the simulation keeps its fine tick there. Toggleable.
 const SLOWDOWN_RANGE_M: float = 1.5e9
 const SLOWDOWN_CAP: float = 10.0
+## Перемотка до сближения (TODO): адаптивный множитель, пока расстояние до
+## противника больше WARP_STOP_RANGE_M; затем возврат к WARP_RESUME_SCALE.
+const WARP_STOP_RANGE_M: float = 6.0e8        # 1.5 x ENERGY_RANGE_M (4e8)
+const WARP_TARGET_REAL_S: float = 5.0
+const WARP_MAX_DT_MULT: int = 600             # тик до 10 с симуляции при перемотке
+const WARP_RESUME_SCALE: float = 10.0
 const TURN_STEP_RAD: float = deg_to_rad(15.0)
 const SPEED_STEP_MPS: float = 50_000.0      # 50 km/s per click
 const FULL_THRUST_FRACTION: float = 0.8     # same 80% margin DemoScenario uses
@@ -65,6 +71,11 @@ var camera_focus_controller: CameraFocusController
 var battle_log = null
 
 var auto_slowdown: bool = true
+var warp_active: bool = false
+var _warp_btn: Button
+var _warp_prev_d: float = -1.0
+var _warp_prev_t: float = 0.0
+var _warp_saved_dt_mult: int = 1
 var _slow_btn: Button
 var _slowdown_active: bool = false
 var _clock_label: Label
@@ -116,6 +127,7 @@ func _ready() -> void:
 		_time_buttons[sc] = _toggle_btn(time_row, "x%d" % int(sc), Callable(self, "_on_time_toggled").bind(sc), "", time_group)
 	_slow_btn = _toggle_btn(time_row, "Авто-замедл.: ВКЛ", _on_slowdown_toggled, "Замедлять до x10, пока ракеты подлетают к целям")
 	_slow_btn.set_pressed_no_signal(auto_slowdown)
+	_warp_btn = _toggle_btn(time_row, "Перемотка до сближения", _on_warp_toggled, "Сильно ускоряет время, пока противник дальше дальности энергооружия, затем возвращает x10")
 
 	var select_row := _group_row(groups, "ВЫБОР")
 	_btn(select_row, "Эскадра", _select_squadron, "Выделить все свои корабли")
@@ -283,6 +295,7 @@ func sync() -> void:
 		return
 	var clk: SimClock = world.clock
 	var t: int = int(world.world_sim_time)
+	_update_warp()
 	_slowdown_active = auto_slowdown and _missiles_closing()
 	clk.scale_cap = SLOWDOWN_CAP if _slowdown_active else 0.0
 	var speed_txt: String = "ПАУЗА" if clk.paused else "x%d (факт x%.0f)" % [int(clk.time_scale), clk.effective_time_scale]
@@ -415,6 +428,58 @@ func _step_time(dir: int) -> void:
 		cur = 0
 	_set_time(TIME_SCALES[clampi(cur + dir, 0, TIME_SCALES.size() - 1)])
 
+func _on_warp_toggled(pressed: bool) -> void:
+	if pressed:
+		if world == null or _enemy_distance_m() <= WARP_STOP_RANGE_M:
+			_warp_btn.set_pressed_no_signal(false)
+			return
+		warp_active = true
+		_warp_saved_dt_mult = world.clock.max_dt_multiplier
+		world.clock.max_dt_multiplier = maxi(_warp_saved_dt_mult, WARP_MAX_DT_MULT)
+		world.clock.paused = false
+		_warp_prev_d = -1.0
+		_say("Перемотка до сближения: ВКЛ")
+	else:
+		_end_warp(false)
+
+func _end_warp(resume: bool) -> void:
+	if not warp_active:
+		return
+	warp_active = false
+	world.clock.max_dt_multiplier = _warp_saved_dt_mult
+	if _warp_btn != null:
+		_warp_btn.set_pressed_no_signal(false)
+	if resume:
+		_set_time(WARP_RESUME_SCALE)
+		_say("Сближение достигнуто: время x%d" % int(WARP_RESUME_SCALE))
+
+## Подбирает множитель так, чтобы остаток пути уложился в ~WARP_TARGET_REAL_S.
+func _update_warp() -> void:
+	if not warp_active:
+		return
+	var clk: SimClock = world.clock
+	var d: float = _enemy_distance_m()
+	if d < 0.0 or d <= WARP_STOP_RANGE_M:
+		_end_warp(true)
+		return
+	if clk.paused:
+		_end_warp(false)
+		return
+	var t: float = clk.sim_time
+	var closing: float = 0.0
+	if _warp_prev_d >= 0.0 and t > _warp_prev_t:
+		closing = (_warp_prev_d - d) / (t - _warp_prev_t)
+	_warp_prev_d = d
+	_warp_prev_t = t
+	if closing < 1.0e4:
+		closing = 1.0e5  # 100 км/с: оценка, пока скорость сближения не измерена
+	var want: float = (d - WARP_STOP_RANGE_M) / closing / WARP_TARGET_REAL_S
+	var pick: float = TIME_SCALES[0]
+	for s in TIME_SCALES:
+		if float(s) <= want:
+			pick = float(s)
+	clk.set_time_scale(pick)
+
 func _on_slowdown_toggled(pressed: bool) -> void:
 	auto_slowdown = pressed
 	_slow_btn.text = "Авто-замедл.: %s" % ("ВКЛ" if auto_slowdown else "ВЫКЛ")
@@ -439,6 +504,7 @@ func _set_time(scale: float) -> void:
 ## off is the OTHER button's own press, handled by ITS bound call).
 func _on_time_toggled(pressed: bool, scale: float) -> void:
 	if pressed:
+		_end_warp(false)
 		_set_time(scale)
 
 # ---------------------------------------------------------------- selection

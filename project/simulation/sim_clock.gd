@@ -13,7 +13,7 @@ class_name SimClock
 const FIXED_DT: float = 1.0 / 60.0
 
 ## Time scale multipliers supported by the UI (ТЗ §44 Time Control).
-const ALLOWED_TIME_SCALES: Array[float] = [0.0, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0]
+const ALLOWED_TIME_SCALES: Array[float] = [0.0, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0, 20000.0, 100000.0]
 
 var time_scale: float = 1.0
 var paused: bool = false

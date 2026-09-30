@@ -16,6 +16,7 @@ func _init() -> void:
 	failures += _test_wedge_blocks_top_shot()
 	failures += _test_broadside_hits_and_damages_hull()
 	failures += _test_cooldown_consumed_on_fire()
+	failures += _test_accuracy_model()
 
 	if failures == 0:
 		print("ALL TESTS PASSED")
@@ -116,3 +117,34 @@ func _test_cooldown_consumed_on_fire() -> int:
 		printerr("FAIL cooldown_consumed_on_fire: cooldown=%s" % mount.cooldown_remaining_s)
 		return 1
 	return 0
+
+
+func _test_accuracy_model() -> int:
+	var f := 0
+	var los := Vector3(0, 0, -100_000.0)
+	var near: float = WeaponResolution.compute_hit_chance(100_000.0, 500_000.0, Vector3.ZERO, los, 1.0)
+	var far: float = WeaponResolution.compute_hit_chance(500_000.0, 500_000.0, Vector3.ZERO, los, 1.0)
+	var fast: float = WeaponResolution.compute_hit_chance(100_000.0, 500_000.0, Vector3(2000, 0, 0), los, 1.0)
+	var along: float = WeaponResolution.compute_hit_chance(100_000.0, 500_000.0, Vector3(0, 0, 2000), los, 1.0)
+	var det: float = WeaponResolution.compute_hit_chance(100_000.0, 500_000.0, Vector3.ZERO, los, WeaponResolution.track_quality_factor(1000))
+	var checks := {
+		"near full": is_equal_approx(near, 1.0),
+		"far worse": far < near and is_equal_approx(far, 0.5),
+		"transverse worse": fast < near,
+		"radial speed no penalty": is_equal_approx(along, 1.0),
+		"poor track worse": det < near,
+	}
+	for k in checks.keys():
+		if not checks[k]:
+			printerr("FAIL accuracy: " + k)
+			f += 1
+	# MISS via roll, still consumes cooldown
+	var attacker := ShipPhysicsState.new()
+	var target := ShipPhysicsState.new()
+	target.position = Vector3(10_000.0, 0, 0)
+	var mount := WeaponMount.new(_make_weapon(), WeaponMount.broadside_arc())
+	var r := WeaponResolution.fire(attacker, mount, target, null, null, {}, 0.5, 0.9)
+	if r.outcome != WeaponResolution.Outcome.MISS or mount.is_ready():
+		printerr("FAIL accuracy: miss should consume cooldown")
+		f += 1
+	return f

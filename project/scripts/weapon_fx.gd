@@ -114,6 +114,8 @@ static func _beam_color(outcome: int) -> Color:
 			return Color(0.95, 0.75, 0.15, 0.75)  # attenuated by sidewall -- amber, matches ShipView's sidewall colour
 		WeaponResolution.Outcome.FORMATION_COVERED:
 			return Color(0.6, 0.6, 0.65, 0.5)  # covered by a formation-mate -- dim grey
+		WeaponResolution.Outcome.MISS:
+			return Color(0.55, 0.55, 0.5, 0.35)  # missed -- faint grey
 		_:
 			return Color(1.0, 1.0, 1.0, 0.7)  # unrecognized outcome -- neutral white rather than silently guessing
 

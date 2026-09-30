@@ -18,8 +18,9 @@ class_name WeaponResolution
 const AttackGeometry = preload("res://simulation/attack_geometry.gd")
 const ShipDefenseState = preload("res://simulation/ship_defense_state.gd")
 const SubsystemDamageResolution = preload("res://simulation/subsystem_damage_resolution.gd")
+const ContactState = preload("res://simulation/contact_state.gd")
 
-enum Outcome { OUT_OF_RANGE, NOT_READY, NO_ARC, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, FORMATION_COVERED, HIT_UNPROTECTED }
+enum Outcome { OUT_OF_RANGE, NOT_READY, NO_ARC, WEDGE_BLOCKED, SIDEWALL_ATTENUATED, FORMATION_COVERED, HIT_UNPROTECTED, MISS }
 
 class ShotResult:
 	var outcome: int
@@ -44,7 +45,12 @@ class ShotResult:
 ## keys -- whether a formation neighbor currently covers target_ship's
 ## bow/stern gap this tick. Missing keys default to false, so every
 ## pre-existing caller/test (which never passes this) is unaffected.
-static func fire(attacker_ship, mount, target_ship, target_hull, target_subsystems = null, target_formation_coverage: Dictionary = {}) -> ShotResult:
+## 2026-09-30 (TODO "Точность огня"): `hit_chance` (0..1) and `hit_roll`
+## (0..1, supplied by the CALLER from a deterministic hash -- ТЗ §43, no RNG
+## here) make the shot MISS when hit_roll >= hit_chance. Defaults (1.0/0.0)
+## = always hits, so every pre-existing caller/test is unaffected. A miss
+## still consumes the recharge cycle (the shot was fired).
+static func fire(attacker_ship, mount, target_ship, target_hull, target_subsystems = null, target_formation_coverage: Dictionary = {}, hit_chance: float = 1.0, hit_roll: float = 0.0) -> ShotResult:
 	if mount == null or mount.weapon == null:
 		return ShotResult.new(Outcome.NOT_READY)
 
@@ -64,6 +70,9 @@ static func fire(attacker_ship, mount, target_ship, target_hull, target_subsyste
 	# The shot is fired: consume the recharge cycle regardless of whether it
 	# penetrates (CLOUD.md §2.2: "limited by weapon charging cycles").
 	mount.trigger_cooldown()
+
+	if hit_roll >= hit_chance:
+		return ShotResult.new(Outcome.MISS, 0.0, firing_sector)
 
 	# Defense check: which sector, in the TARGET's own frame, does the
 	# attacker occupy? That determines wedge/sidewall interaction (§9, §10).
@@ -91,3 +100,39 @@ static func fire(attacker_ship, mount, target_ship, target_hull, target_subsyste
 
 	var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, damage, resolution.sector)
 	return ShotResult.new(outcome, damage, resolution.sector, sub_damage)
+
+
+# --- Accuracy model (TODO "Точность огня от дистанции, скорости цели и качества трека") ---
+# ASSUMPTION (no canon numbers): engineering placeholders, see ASSUMPTIONS.md "Точность огня".
+const FULL_ACCURACY_RANGE_FRACTION: float = 0.5   # up to this fraction of max range: no range penalty
+const RANGE_FACTOR_AT_MAX: float = 0.5            # factor at exactly max range
+const TRANSVERSE_RATE_SCALE_RAD_S: float = 0.01   # angular rate at which the factor halves
+const MIN_TRANSVERSE_FACTOR: float = 0.3
+const TRACKED_FACTOR: float = 1.0
+const DETECTED_FACTOR: float = 0.6
+const OTHER_TRACK_FACTOR: float = 0.3             # ESTIMATED/UNCERTAIN/etc: firing on a stale guess
+const MIN_HIT_CHANCE: float = 0.05
+
+## Pure. `track_factor` from track_quality_factor(). Returns 0..1.
+static func compute_hit_chance(distance_m: float, max_range_m: float, relative_velocity: Vector3, line_of_sight: Vector3, track_factor: float) -> float:
+	var range_factor: float = 1.0
+	if max_range_m > 0.0:
+		var f: float = clampf(distance_m / max_range_m, 0.0, 1.0)
+		if f > FULL_ACCURACY_RANGE_FRACTION:
+			var t: float = (f - FULL_ACCURACY_RANGE_FRACTION) / (1.0 - FULL_ACCURACY_RANGE_FRACTION)
+			range_factor = lerpf(1.0, RANGE_FACTOR_AT_MAX, t)
+	var transverse_factor: float = 1.0
+	if distance_m > 1.0 and line_of_sight.length_squared() > 0.0:
+		var los: Vector3 = line_of_sight.normalized()
+		var transverse: Vector3 = relative_velocity - los * relative_velocity.dot(los)
+		var rate: float = transverse.length() / distance_m
+		transverse_factor = maxf(MIN_TRANSVERSE_FACTOR, 1.0 / (1.0 + rate / TRANSVERSE_RATE_SCALE_RAD_S))
+	return clampf(range_factor * transverse_factor * track_factor, MIN_HIT_CHANCE, 1.0)
+
+## Maps a ContactState.Type to the accuracy factor (TRACKED = best).
+static func track_quality_factor(contact_state: int) -> float:
+	if contact_state == ContactState.Type.TRACKED:
+		return TRACKED_FACTOR
+	if contact_state == ContactState.Type.DETECTED:
+		return DETECTED_FACTOR
+	return OTHER_TRACK_FACTOR

@@ -40,6 +40,7 @@ func _make_ship(pos: Vector3) -> ShipPhysicsState:
 
 func _test_weapon_mount_condition_synced_and_reduces_damage() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	# Attacker at +Z, target at origin: per AttackGeometry's convention
 	# (-Z = bow), the target sits at the attacker's BOW, so a bow-chaser
 	# mount can bear on it.
@@ -74,6 +75,7 @@ func _test_weapon_mount_condition_synced_and_reduces_damage() -> void:
 
 func _test_weapon_mount_disabled_when_weapons_subsystem_destroyed() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var attacker := _make_ship(Vector3(0, 0, -100.0))
 	var target := _make_ship(Vector3.ZERO)
 	world.add_ship("attacker", attacker)
@@ -91,6 +93,7 @@ func _test_weapon_mount_disabled_when_weapons_subsystem_destroyed() -> void:
 
 func _test_ship_with_no_subsystems_leaves_mount_condition_untouched() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var attacker := ShipPhysicsState.new()  # subsystems left null, pre-§25 behavior
 	world.add_ship("attacker", attacker)
 	var mount := WeaponMount.new(WeaponData.new(), WeaponMount.bow_chaser_arc())
@@ -102,6 +105,7 @@ func _test_ship_with_no_subsystems_leaves_mount_condition_untouched() -> void:
 
 func _test_point_defense_mount_condition_synced_and_gates_readiness() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var ship := _make_ship(Vector3.ZERO)
 	world.add_ship("defender", ship)
 	var pd := PointDefenseMount.new()
@@ -114,6 +118,7 @@ func _test_point_defense_mount_condition_synced_and_gates_readiness() -> void:
 
 func _test_missile_tube_condition_synced_and_gates_readiness() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var ship := _make_ship(Vector3.ZERO)
 	world.add_ship("launcher", ship)
 	var tube := MissileTube.new()
@@ -156,6 +161,7 @@ func _test_counter_missile_default_condition_backward_compatible() -> void:
 
 func _test_world_resolves_counter_missile_owner_condition_via_missile_owners() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var launcher := _make_ship(Vector3.ZERO)
 	world.add_ship("launcher", launcher)
 	launcher.subsystems.apply_damage(SubsystemType.Type.COUNTER_MISSILE_SYSTEMS, 1.0)  # fully disabled -> radius 0

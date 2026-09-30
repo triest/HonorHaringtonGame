@@ -58,6 +58,8 @@ var clock: SimClock
 
 var ships: Dictionary = {}            # ship_id -> ShipPhysicsState
 var hulls: Dictionary = {}            # ship_id -> HullState (optional)
+## 2026-09-30: beam accuracy model (range/transverse speed/track quality) on/off. Tests about other variables turn it off.
+var accuracy_enabled: bool = true
 var weapon_mounts: Dictionary = {}    # ship_id -> Array[WeaponMount]
 var missile_tubes: Dictionary = {}    # ship_id -> Array[MissileTube] (§26 "launch missiles")
 ## 2026-09-27 canon-scale scenario: per-world sensor range (ship sensors
@@ -854,7 +856,18 @@ func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 	if attacker == null or target == null:
 		return null
 	var formation_coverage: Dictionary = _formation_bow_stern_coverage(target_ship_id)
-	var result = WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems, formation_coverage)
+	# 2026-09-30 accuracy: only when the attacker actually holds a sensor
+	# contact on the target (direct scripted shots with no contact stay
+	# always-hit, as before). Roll is a deterministic hash (ТЗ §43).
+	var hit_chance: float = 1.0
+	var hit_roll: float = 0.0
+	var shot_contact = sensor_contacts.get(attacker_ship_id, {}).get(target_ship_id)
+	if accuracy_enabled and shot_contact != null and mount != null and mount.weapon != null:
+		var los: Vector3 = target.position - attacker.position
+		hit_chance = WeaponResolution.compute_hit_chance(los.length(), mount.weapon.max_range_m, target.velocity - attacker.velocity, los, WeaponResolution.track_quality_factor(shot_contact.state))
+		var mount_index: int = weapon_mounts.get(attacker_ship_id, []).find(mount)
+		hit_roll = SensorResolution._hash01(hash(attacker_ship_id) & 0x7FFFFFFF, (hash(target_ship_id) & 0x7FFFFFFF) ^ (mount_index * 7919), _tick_index)
+	var result = WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems, formation_coverage, hit_chance, hit_roll)
 	if result != null and result.outcome == WeaponResolution.Outcome.HIT_UNPROTECTED and result.damage_dealt > 0.0:
 		_record_event("weapon_hit", {"attacker_ship_id": attacker_ship_id, "target_ship_id": target_ship_id, "damage_dealt": result.damage_dealt})
 	if result != null and result.outcome != WeaponResolution.Outcome.NOT_READY and result.outcome != WeaponResolution.Outcome.OUT_OF_RANGE and result.outcome != WeaponResolution.Outcome.NO_ARC:

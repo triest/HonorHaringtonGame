@@ -61,6 +61,7 @@ func _test_directive_defaults_to_automatic_and_free_fire() -> void:
 
 func _test_no_manual_target_hits_nearest_hostile() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var alpha := _make_ship(Vector3.ZERO)
 	var near := _make_ship(Vector3(0, 0, -500_000.0))
 	var far := _make_ship(Vector3(0, 0, -900_000.0))
@@ -81,6 +82,7 @@ func _test_no_manual_target_hits_nearest_hostile() -> void:
 
 func _test_manual_target_overrides_nearest_selection() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var alpha := _make_ship(Vector3.ZERO)
 	var near := _make_ship(Vector3(0, 0, -500_000.0))
 	var far := _make_ship(Vector3(0, 0, -900_000.0))
@@ -102,6 +104,7 @@ func _test_manual_target_overrides_nearest_selection() -> void:
 
 func _test_clear_ship_target_reverts_to_automatic() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var alpha := _make_ship(Vector3.ZERO)
 	var near := _make_ship(Vector3(0, 0, -500_000.0))
 	var far := _make_ship(Vector3(0, 0, -900_000.0))
@@ -124,6 +127,7 @@ func _test_clear_ship_target_reverts_to_automatic() -> void:
 
 func _test_manual_target_falls_back_when_destroyed_before_tick() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var alpha := _make_ship(Vector3.ZERO)
 	var designated := _make_ship(Vector3(0, 0, -700_000.0))
 	var fallback := _make_ship(Vector3(0, 0, -500_000.0))
@@ -144,6 +148,7 @@ func _test_manual_target_falls_back_when_destroyed_before_tick() -> void:
 
 func _test_hold_fire_suppresses_energy_weapons() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var alpha := _make_ship(Vector3.ZERO)
 	var beta := _make_ship(Vector3(0, 0, -500_000.0))
 	var beta_hull := _make_hull()
@@ -162,6 +167,7 @@ func _test_hold_fire_suppresses_energy_weapons() -> void:
 
 func _test_hold_fire_suppresses_missile_launch_but_still_advances_cooldown() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var alpha := _make_ship(Vector3.ZERO)
 	var beta := _make_ship(Vector3(0, 0, -500_000.0))
 	world.add_ship("alpha", alpha)
@@ -184,6 +190,7 @@ func _test_hold_fire_suppresses_missile_launch_but_still_advances_cooldown() -> 
 
 func _test_manual_target_applies_to_missile_launch_too() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	var alpha := _make_ship(Vector3.ZERO)
 	var near := _make_ship(Vector3(0, 0, -500_000.0))
 	var far := _make_ship(Vector3(0, 0, -900_000.0))
@@ -208,6 +215,7 @@ func _test_manual_target_applies_to_missile_launch_too() -> void:
 
 func _test_set_and_clear_target_mutate_directive_state() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	world.set_ship_target("alpha", "bravo")
 	_assert(world.ship_combat_directives["alpha"].manual_target_ship_id == "bravo", "set_ship_target should record the designation on this ship's combat directive")
 	world.clear_ship_target("alpha")
@@ -215,6 +223,7 @@ func _test_set_and_clear_target_mutate_directive_state() -> void:
 
 func _test_set_weapons_free_mutates_directive_state() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	world.set_ship_weapons_free("alpha", false)
 	_assert(world.ship_combat_directives["alpha"].weapons_free == false, "set_ship_weapons_free(false) should record hold-fire on this ship's combat directive")
 	world.set_ship_weapons_free("alpha", true)
@@ -222,6 +231,7 @@ func _test_set_weapons_free_mutates_directive_state() -> void:
 
 func _test_remove_ship_erases_its_combat_directive() -> void:
 	var world := SimulationWorld.new()
+	world.accuracy_enabled = false  # these tests are about other variables, not hit chance
 	world.set_ship_target("alpha", "bravo")
 	_assert(world.ship_combat_directives.has("alpha"), "sanity check: the directive should exist before removal")
 	world.remove_ship("alpha")

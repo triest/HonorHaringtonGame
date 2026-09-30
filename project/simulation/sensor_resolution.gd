@@ -89,6 +89,42 @@ const CONFIDENT_TRACK_RANGE_FRACTION: float = 0.6
 ## resolve into TRACKED than one close aboard.
 const TRACK_TIME_FAR_MULTIPLIER: float = 4.0
 
+## ASSUMPTION (TODO.md "Ошибка оценки положения/скорости от расстояния"): the
+## estimate is exact inside this fraction of the effective sensor range; past
+## it the error (fraction of distance) grows linearly to ESTIMATE_ERROR_MAX_
+## FRACTION at the effective range edge. A TRACKED contact's error is scaled
+## by TRACKED_ERROR_SCALE. Deterministic direction (see SensorContact.noise_seed).
+const EXACT_ESTIMATE_RANGE_FRACTION: float = 0.1
+const ESTIMATE_ERROR_MAX_FRACTION: float = 0.02
+const TRACKED_ERROR_SCALE: float = 0.1
+## Sim-seconds over which one error direction is held before re-rolling.
+const NOISE_BUCKET_S: float = 5.0
+
+
+## Integer hash -> float in [0,1). Pure/deterministic (no RNG).
+static func _hash01(a: int, b: int, c: int) -> float:
+	var h: int = (a * 73856093) ^ (b * 19349663) ^ (c * 83492791)
+	h = (h ^ (h >> 13)) * 1274126177
+	h = h ^ (h >> 16)
+	return float(h & 0xFFFFFF) / 16777216.0
+
+
+static func _noise_direction(seed_value: int, bucket: int, channel: int) -> Vector3:
+	var u: float = _hash01(seed_value, bucket, channel * 2 + 1) * 2.0 - 1.0
+	var phi: float = _hash01(seed_value, bucket, channel * 2 + 2) * TAU
+	var r: float = sqrt(maxf(0.0, 1.0 - u * u))
+	return Vector3(r * cos(phi), u, r * sin(phi))
+
+
+## Relative estimate error (fraction of distance) for a contact at
+## `distance_m` given `effective_range_m`, before the TRACKED scale.
+static func _estimate_error_fraction(distance_m: float, effective_range_m: float) -> float:
+	if effective_range_m <= 0.0:
+		return 0.0
+	var x: float = distance_m / effective_range_m
+	var t: float = clampf((x - EXACT_ESTIMATE_RANGE_FRACTION) / (1.0 - EXACT_ESTIMATE_RANGE_FRACTION), 0.0, 1.0)
+	return ESTIMATE_ERROR_MAX_FRACTION * t
+
 
 ## Required continuous-detection time (seconds) before a DETECTED contact
 ## at `distance_m` from the observer can upgrade to TRACKED, given this
@@ -252,6 +288,14 @@ static func update_contact(contact: SensorContact, observer_position: Vector3, d
 		var apparent: Array = _resolve_apparent_return(true_position, true_velocity, observer_position, target_ecm)
 		contact.estimated_position = apparent[0]
 		contact.estimated_velocity = apparent[1]
+		var err_frac: float = _estimate_error_fraction(distance_to_target_m, effective_range_m)
+		if contact.state == ContactState.Type.TRACKED:
+			err_frac *= TRACKED_ERROR_SCALE
+		if err_frac > 0.0:
+			var bucket: int = int(contact.noise_clock_s / NOISE_BUCKET_S)
+			contact.estimated_position += _noise_direction(contact.noise_seed, bucket, 0) * (distance_to_target_m * err_frac)
+			contact.estimated_velocity += _noise_direction(contact.noise_seed, bucket, 1) * (contact.estimated_velocity.length() * err_frac)
+		contact.noise_clock_s += dt
 		# ТЗ §23 estimated orientation/angular velocity: same "perfect
 		# within range, nothing outside" honesty level as position/
 		# velocity above (this codebase has no sensor NOISE model at
@@ -314,6 +358,7 @@ static func update_contacts(contacts: Dictionary, contact_id, target, observer_p
 	var contact: SensorContact = contacts.get(contact_id)
 	if contact == null:
 		contact = SensorContact.new(target)
+		contact.noise_seed = hash(contact_id) & 0x7FFFFFFF
 		contacts[contact_id] = contact
 	update_contact(contact, observer_position, dt, sensor_range_m, target_ecm, observer_subsystems)
 	return contact

@@ -82,7 +82,7 @@ func _test_decoy_closer_than_target_is_reported_instead() -> void:
 	var contact := SensorContact.new(target)
 	SensorResolution.update_contact(contact, Vector3.ZERO, 1.0, 20000.0, ecm)
 	_assert(contact.state == ContactState.Type.DETECTED, "should still register a detection (of the decoy)")
-	_assert(contact.estimated_position.is_equal_approx(decoy_pos), "closer decoy should be reported as the apparent contact position instead of the true target")
+	_assert(contact.estimated_position.distance_to(decoy_pos) < 0.02 * 10000.0 + 1.0, "closer decoy should be reported as the apparent contact position instead of the true target")
 
 func _test_decoy_farther_than_target_is_ignored() -> void:
 	var target := _make_ship(Vector3(0, 0, 1000))

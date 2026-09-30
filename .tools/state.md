@@ -619,3 +619,5 @@ Last pass finished: 2026-09-29 ~17:40 UTC (autonomous/scheduled, no live user, f
 now scales with distance + a hard confident-radius cap (contact stays rough beyond it) + soft downgrade on drift-out;
 3 new sensor tests (19->25), headless import/smoke clean at the 128-error baseline, partial live-battle probe shows
 no anomalies, pushed. Position/velocity estimate-error-from-distance is the next honest step on this same TODO item.
+FOLLOW-UP #17 (2026-09-30 ~08:07 UTC, autonomous/scheduled): closed position/velocity estimate-error-from-distance (deterministic hash noise, sensor_resolution.gd; TRACKED x0.1; exact inside 0.1x range). Tests: sensor_resolution 28, ecm, tactical_ai(+retreat), missile*, crossing_t green; smoke at 128-error baseline. Next honest step: TODO.md fire accuracy from range/target speed/track quality (TRACKED bonus), then 6-scenario rebalance via probe_counter_missiles.gd.
+Last pass finished: 2026-09-30 ~08:07 UTC (autonomous, feedback #17)

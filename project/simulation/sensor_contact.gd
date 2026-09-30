@@ -41,6 +41,13 @@ var continuous_detection_s: float = 0.0
 ## Reset to 0 on every fresh detection.
 var time_since_lost_s: float = 0.0
 
+## Deterministic estimate-noise source (ТЗ §43: no unseeded RNG). `noise_seed`
+## is set by SensorResolution.update_contacts() from the caller's contact id
+## (stable String/int hash); `noise_clock_s` accumulates detected sim-seconds
+## so the error direction drifts slowly rather than jittering every tick.
+var noise_seed: int = 0
+var noise_clock_s: float = 0.0
+
 
 func _init(p_target = null) -> void:
 	target = p_target

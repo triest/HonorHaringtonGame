@@ -34,6 +34,22 @@ func _test_detection_when_in_range_and_emitting() -> void:
 	_assert(contact.state == ContactState.Type.DETECTED, "in-range emitting target should become DETECTED")
 	_assert(contact.estimated_position.is_equal_approx(Vector3(1000, 0, 0)), "estimated position should match true position on detection")
 
+func _test_estimate_error_grows_with_distance_deterministic() -> void:
+	var near := _make_ship(Vector3(20_000, 0, 0), true)
+	near.velocity = Vector3(100, 0, 0)
+	var far := _make_ship(Vector3(300_000, 0, 0), true)
+	far.velocity = Vector3(100, 0, 0)
+	var c_near := SensorContact.new(near)
+	var c_far := SensorContact.new(far)
+	var c_far2 := SensorContact.new(far)
+	for c in [c_near, c_far, c_far2]:
+		c.noise_seed = 12345
+		SensorResolution.update_contact(c, Vector3.ZERO, 1.0, 1_000_000.0)
+	_assert(c_near.estimated_position.is_equal_approx(near.position), "within exact-range fraction the estimate stays exact")
+	var err: float = c_far.estimated_position.distance_to(far.position)
+	_assert(err > 1000.0 and err < 0.02 * 300_000.0, "far DETECTED contact has bounded nonzero position error, got %f" % err)
+	_assert(c_far.estimated_position == c_far2.estimated_position, "same seed/time gives identical estimate (deterministic)")
+
 func _test_no_detection_when_wedge_down() -> void:
 	var target := _make_ship(Vector3(1000, 0, 0), false)
 	var contact := SensorContact.new(target)
@@ -221,6 +237,7 @@ func _test_tracked_contact_downgrades_when_target_drifts_past_confident_radius()
 
 func _init() -> void:
 	_test_detection_when_in_range_and_emitting()
+	_test_estimate_error_grows_with_distance_deterministic()
 	_test_no_detection_when_wedge_down()
 	_test_no_detection_when_out_of_range()
 	_test_missile_detectable_while_burning_not_while_coasting()

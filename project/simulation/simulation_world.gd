@@ -2144,6 +2144,29 @@ func _resolve_attitudes(dt: float) -> void:
 		var rate: float = minf(ship.max_angular_speed_rad_s, angle / dt)
 		ship.angular_velocity = err.get_axis() * rate
 
+## TODO.md "Сближение при пустых ракетных трубах": true iff `team` owns at
+## least one living ship with missile tubes, every such tube is empty
+## (ammo_count <= 0), and no missile owned by the team is still flying at a
+## ship. Teams that never had tubes (energy-only) are NOT affected.
+func _team_out_of_missiles(team) -> bool:
+	var had_tubes: bool = false
+	for ship_id in ships.keys():
+		if teams.get(ship_id) != team or ships[ship_id].is_wreck:
+			continue
+		for tube in missile_tubes.get(ship_id, []):
+			had_tubes = true
+			if tube.ammo_count > 0:
+				return false
+	if not had_tubes:
+		return false
+	for mid in missiles.keys():
+		var m = missiles[mid]
+		if not m.is_active() or not (m.target is ShipPhysicsState):
+			continue
+		if teams.get(missile_owners.get(mid, "")) == team:
+			return false
+	return true
+
 func _resolve_crossing_t_maneuver(dt: float) -> void:
 	for ship_id in ships.keys():
 		var ship: ShipPhysicsState = ships[ship_id]
@@ -2167,7 +2190,13 @@ func _resolve_crossing_t_maneuver(dt: float) -> void:
 
 		var contacts: Dictionary = sensor_contacts.get(ship_id, {})
 		var hostile_ids: Array = _hostile_ship_ids(ship_id)
-		var maneuver: Dictionary = TacticalAI.compute_crossing_t_maneuver(ship, contacts, hostile_ids)
+		var maneuver: Dictionary = {}
+		if _team_out_of_missiles(teams[ship_id]):
+			maneuver = TacticalAI.compute_approach_maneuver(ship, contacts, hostile_ids)
+			if maneuver["desired_velocity_world"] == Vector3.ZERO and maneuver["desired_facing_world"] == Vector3.ZERO:
+				maneuver = {}
+		if maneuver.is_empty():
+			maneuver = TacticalAI.compute_crossing_t_maneuver(ship, contacts, hostile_ids)
 		var desired_velocity_world: Vector3 = maneuver["desired_velocity_world"]
 		var desired_facing_world: Vector3 = maneuver["desired_facing_world"]
 		if desired_velocity_world == Vector3.ZERO and desired_facing_world == Vector3.ZERO:

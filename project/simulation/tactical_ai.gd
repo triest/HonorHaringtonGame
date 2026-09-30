@@ -405,6 +405,36 @@ static func compute_crossing_t_maneuver(ship, contacts: Dictionary, hostile_ship
 		"desired_facing_world": bar,
 	}
 
+## Distance (m) at which an out-of-missiles side stops closing and hands
+## movement back to crossing-the-T (energy brawl). ASSUMPTION placeholder,
+## well inside WeaponData's default 1000 km beam range.
+const APPROACH_STOP_RANGE_M: float = 300_000.0
+
+## TODO.md "Сближение при пустых ракетных трубах": pursuit toward the
+## nearest usable hostile contact, sized so the ship cancels the closing
+## speed instead of overshooting (v_close <= sqrt(a * remaining) -- brake
+## at half of max accel). Sensor-honest (estimated position/velocity only).
+## Returns the same shape as compute_crossing_t_maneuver; both ZERO when
+## there is no contact OR the target is already inside APPROACH_STOP_RANGE_M
+## (caller then falls back to crossing-the-T).
+static func compute_approach_maneuver(ship, contacts: Dictionary, hostile_ship_ids: Array) -> Dictionary:
+	var empty := {"desired_velocity_world": Vector3.ZERO, "desired_facing_world": Vector3.ZERO}
+	var contact = select_weapon_target(ship, contacts, hostile_ship_ids)["contact"]
+	if contact == null:
+		return empty
+	var to_target: Vector3 = contact.estimated_position - ship.position
+	var dist: float = to_target.length()
+	if dist <= APPROACH_STOP_RANGE_M:
+		return empty
+	var max_accel: float = ship.effective_max_acceleration()
+	var remaining: float = dist - APPROACH_STOP_RANGE_M
+	var close_speed: float = sqrt(maxf(0.0, max_accel * remaining))
+	var los: Vector3 = to_target / dist
+	return {
+		"desired_velocity_world": contact.estimated_velocity + los * close_speed,
+		"desired_facing_world": los,
+	}
+
 ## Convenience for callers that only need the velocity half.
 static func select_crossing_t_velocity(ship, contacts: Dictionary, hostile_ship_ids: Array) -> Vector3:
 	return compute_crossing_t_maneuver(ship, contacts, hostile_ship_ids)["desired_velocity_world"]

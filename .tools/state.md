@@ -646,3 +646,6 @@ Last pass finished: 2026-10-06 (autonomous, feedback #23)
 
 FOLLOW-UP #24 (2026-10-06, autonomous/scheduled): прежде чем кодить "веселье" (#22), перепроверил probe_player_impact.gd на текущем коде (точность/сенсоры из #15-#18 включены): seed 1904, hands-off 4v4 -> red=4 blue=4, focus-fire "добить слабейшего" -> red=4 blue=3 (приказ по-прежнему даёт измеримый выигрыш; один сид, не статистика). Код не менялся. Next honest step: idea (1) -- player-managed resource (политика контрракет/ПРО с видимым влиянием) или (2) цели сценариев (отрыв/конвой, TODO 'Цели сценариев'); брать один маленький срез.
 Last pass finished: 2026-10-06 (autonomous, feedback #24)
+
+FOLLOW-UP #25 (2026-10-06, autonomous/scheduled): idea (2) slice -- scenario objective "hold": Scenarios.DATA["pursuit"]["hold_s"]=900 (sim s); main.gd passes it to MissionPanel.hold_time_s; MissionPanel result "held" (победа: рубеж удержан) if time reached with own ships alive. Headless smoke: no script errors. 900 s is an UNTUNED guess (не мерил, как долго обычно идёт бой в «Погоне»); briefing text still says old task. Живой проверки нет. Next: probe pursuit duration & tune hold_s / add "отрыв" objective (convoy) / update briefing 'task' text.
+Last pass finished: 2026-10-06 (autonomous, feedback #25)

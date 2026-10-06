@@ -375,6 +375,7 @@ func _start_mission(setup: Dictionary) -> void:
 	mission_panel.world = world
 	mission_panel.player_team = player_team
 	mission_panel.briefing_title = DemoScenario.title_for(setup)
+	mission_panel.hold_time_s = float(Scenarios.get_data(String(setup.get("scenario", "intercept"))).get("hold_s", 0.0))
 	mission_panel.briefing_bbcode = DemoScenario.mission_briefing(setup, red_ids, blue_ids)
 	add_child(mission_panel)
 	if OS.get_environment("SKIP_BRIEFING") != "1":

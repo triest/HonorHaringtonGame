@@ -18,6 +18,8 @@ var world: SimulationWorld
 var player_team: String = ""
 var briefing_title: String = ""
 var briefing_bbcode: String = ""
+## Scenario objective "hold": survive this many sim seconds (0 = annihilation only).
+var hold_time_s: float = 0.0
 
 var _panel: PanelContainer
 var _text: RichTextLabel
@@ -129,6 +131,8 @@ func _process(_d: float) -> void:
 		result = "loss"
 	elif own_alive == 0 and en_alive == 0:
 		result = "draw"
+	elif hold_time_s > 0.0 and world.world_sim_time >= hold_time_s:
+		result = "held"
 	elif own_armed == 0 and en_armed == 0 and _no_missiles_in_flight():
 		result = "spent"
 	if result != "":
@@ -173,7 +177,7 @@ func _count(e: Dictionary) -> void:
 func _show_debrief(result: String, own_alive: int, en_alive: int) -> void:
 	_mode = "debrief"
 	world.clock.paused = true
-	var title: String = {"win": "[color=#8cf2ff]ПОБЕДА — противник выведен из боя[/color]", "loss": "[color=#ff6a5a]ПОРАЖЕНИЕ[/color]", "draw": "ВЗАИМНОЕ УНИЧТОЖЕНИЕ", "spent": "БОЕЗАПАС ИСЧЕРПАН — БОЙ ПРЕКРАЩЁН"}[result]
+	var title: String = {"win": "[color=#8cf2ff]ПОБЕДА — противник выведен из боя[/color]", "loss": "[color=#ff6a5a]ПОРАЖЕНИЕ[/color]", "draw": "ВЗАИМНОЕ УНИЧТОЖЕНИЕ", "held": "[color=#8cf2ff]ПОБЕДА — транспорты ушли, рубеж удержан[/color]", "spent": "БОЕЗАПАС ИСЧЕРПАН — БОЙ ПРЕКРАЩЁН"}[result]
 	var t: int = int(world.world_sim_time)
 	var s := func(k: String) -> int: return int(_stats.get(k, 0.0))
 	var body: String = ""

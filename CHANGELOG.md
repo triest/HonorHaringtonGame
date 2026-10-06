@@ -4655,3 +4655,6 @@ CommandBar: кнопка «Перемотка до сближения», сту�
 
 ## 2026-10-06 (autonomous pass #24)
 - Проба влияния приказов игрока (probe_player_impact, seed 1904): focus-fire даёт blue 3 против 4 при hands-off. Код не менялся; state.md обновлён.
+
+## 2026-10-06 pass #25
+Цель сценария «hold»: в «Погоне» победа при удержании рубежа 900 с (MissionPanel result "held"). hold_s не откалиброван.

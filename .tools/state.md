@@ -643,3 +643,6 @@ Last pass finished: 2026-10-06 (interactive, feedback #22): приоритет �
 
 FOLLOW-UP #23 (2026-10-06, autonomous/scheduled; task prompt said §56.1 but state.md's real phase is §56.3 + fun-priority #22): idea (4) slice -- BattleOverlay._draw_threat_banner: pulsing top-centre banner when hostile missiles (own sensor contacts) head for an own ship within 240 s (count, soonest ETA, victim, "манёвр/ПРО/контрракеты"). View only. Headless smoke: no new script errors. Живой проверки нет. Next honest step: idea (1) -- player-managed resources (когда тратить контрракеты/режим ПРО) or (2) scenario goals (отрыв/конвой); first still probe whether player orders change outcome.
 Last pass finished: 2026-10-06 (autonomous, feedback #23)
+
+FOLLOW-UP #24 (2026-10-06, autonomous/scheduled): прежде чем кодить "веселье" (#22), перепроверил probe_player_impact.gd на текущем коде (точность/сенсоры из #15-#18 включены): seed 1904, hands-off 4v4 -> red=4 blue=4, focus-fire "добить слабейшего" -> red=4 blue=3 (приказ по-прежнему даёт измеримый выигрыш; один сид, не статистика). Код не менялся. Next honest step: idea (1) -- player-managed resource (политика контрракет/ПРО с видимым влиянием) или (2) цели сценариев (отрыв/конвой, TODO 'Цели сценариев'); брать один маленький срез.
+Last pass finished: 2026-10-06 (autonomous, feedback #24)

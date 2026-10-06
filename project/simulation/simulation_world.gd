@@ -2179,8 +2179,16 @@ func _resolve_crossing_t_maneuver(dt: float) -> void:
 		if order_state != null and order_state.is_active():
 			continue
 
+		# 2026-10-06 (user: out of missiles, far apart, nobody closes): the
+		# player's helm stays the player's, EXCEPT an idle ship (no active
+		# order, checked above) of a team with empty tubes: it auto-closes
+		# via the approach maneuver only (never crossing-the-T). Any order
+		# the player gives overrides it.
+		var player_idle_closing: bool = false
 		if player_controlled_teams.has(teams[ship_id]):
-			continue  # helm belongs to the player, see player_controlled_teams
+			if not _team_out_of_missiles(teams[ship_id]):
+				continue  # helm belongs to the player, see player_controlled_teams
+			player_idle_closing = true
 		if _is_station_kept_formation_member(ship_id):
 			continue
 
@@ -2196,6 +2204,8 @@ func _resolve_crossing_t_maneuver(dt: float) -> void:
 			if maneuver["desired_velocity_world"] == Vector3.ZERO and maneuver["desired_facing_world"] == Vector3.ZERO:
 				maneuver = {}
 		if maneuver.is_empty():
+			if player_idle_closing:
+				continue
 			maneuver = TacticalAI.compute_crossing_t_maneuver(ship, contacts, hostile_ids)
 		var desired_velocity_world: Vector3 = maneuver["desired_velocity_world"]
 		var desired_facing_world: Vector3 = maneuver["desired_facing_world"]

@@ -649,3 +649,6 @@ Last pass finished: 2026-10-06 (autonomous, feedback #24)
 
 FOLLOW-UP #25 (2026-10-06, autonomous/scheduled): idea (2) slice -- scenario objective "hold": Scenarios.DATA["pursuit"]["hold_s"]=900 (sim s); main.gd passes it to MissionPanel.hold_time_s; MissionPanel result "held" (победа: рубеж удержан) if time reached with own ships alive. Headless smoke: no script errors. 900 s is an UNTUNED guess (не мерил, как долго обычно идёт бой в «Погоне»); briefing text still says old task. Живой проверки нет. Next: probe pursuit duration & tune hold_s / add "отрыв" objective (convoy) / update briefing 'task' text.
 Last pass finished: 2026-10-06 (autonomous, feedback #25)
+
+FOLLOW-UP #26 (2026-10-06, live user feedback): "ракеты кончились, расстояние большое, корабли не сближаются". Причина: авто-сближение (TODO 2026-09-30) не касалось команды игрока. Фикс: simulation_world._resolve_crossing_t_maneuver -- простаивающие (без активного приказа) корабли игрока при пустых трубах команды идут approach-манёвром (без crossing-T); любой приказ перекрывает. Только headless smoke, живой проверки нет.
+Last pass finished: 2026-10-06 (feedback #26)

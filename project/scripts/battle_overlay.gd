@@ -228,6 +228,7 @@ func _draw() -> void:
 			at.y += 15
 
 	_draw_salvos(objs, font)
+	_draw_threat_banner(objs, font)
 	_draw_formations()
 	_draw_offscreen(objs, font)
 
@@ -311,6 +312,48 @@ func _draw_salvos(objs: Array, font: Font) -> void:
 		if g["eta"] >= 0.0:
 			txt += " · %d с" % int(g["eta"])
 		_outlined(font, c + Vector2(16, 4), txt, 12, col)
+
+## 2026-10-06 (feedback #22 "бой скучный"): a moment that needs a decision
+## must be impossible to miss. Hostile missiles (from the player's own
+## sensor contacts) heading for an own ship -> a top-centre banner with the
+## count, the soonest ETA and the threatened ship, independent of camera
+## framing. Pure view; no order logic.
+const THREAT_BANNER_ETA_S: float = 240.0
+
+func _draw_threat_banner(objs: Array, font: Font) -> void:
+	var n: int = 0
+	var soonest: float = -1.0
+	var victim: String = ""
+	for o in objs:
+		if o["kind"] != "missile" or o["own"]:
+			continue
+		var tgt: String = o.get("target", "")
+		if not world.ships.has(tgt) or String(world.teams.get(tgt, "")) != player_team:
+			continue
+		var rel: Vector3 = world.ships[tgt].position - o["pos3"]
+		if rel.length() < 1.0:
+			continue
+		var closing: float = -(world.ships[tgt].velocity - o["vel3"]).dot(rel.normalized())
+		if closing <= 1.0:
+			continue
+		var eta: float = rel.length() / closing
+		if eta > THREAT_BANNER_ETA_S:
+			continue
+		n += 1
+		if soonest < 0.0 or eta < soonest:
+			soonest = eta
+			victim = tgt
+	if n == 0:
+		return
+	var txt: String = "ВНИМАНИЕ: %d вражеск%s ракет%s → %s · попадание через %d с — решите: манёвр / ПРО / контрракеты" % [
+		n, "ая" if n % 10 == 1 and n % 100 != 11 else "их", _plural_ru(n), ShipNames.of(victim), int(soonest)]
+	var fs: int = 15
+	var w: float = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var pulse: float = 0.75 + 0.25 * sin(Time.get_ticks_msec() / 150.0)
+	var r := Rect2(Vector2((size.x - w) * 0.5 - 12.0, 8.0), Vector2(w + 24.0, 26.0))
+	draw_rect(r, Color(0.35, 0.05, 0.03, 0.7 * pulse), true)
+	draw_rect(r, Color(1.0, 0.45, 0.2, pulse), false, 1.5)
+	_outlined(font, r.position + Vector2(12.0, 18.0), txt, fs, Color(1.0, 0.85, 0.5))
 
 static func _plural_ru(n: int) -> String:
 	var n10: int = n % 10

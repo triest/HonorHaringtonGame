@@ -640,3 +640,6 @@ Last pass finished: 2026-10-05 ~11:00 UTC (autonomous, feedback #21)
 TODO 'Форма построения'); (4) сжатие мёртвого времени (авто-перемотка уже есть, #19) и подсветка моментов, требующих решения.
 Прежде чем кодить -- проверить, что именно из приказов игрока сейчас реально меняет исход (пробой probe с/без приказов).
 Last pass finished: 2026-10-06 (interactive, feedback #22): приоритет переключён на 'веселье'; код не менялся.
+
+FOLLOW-UP #23 (2026-10-06, autonomous/scheduled; task prompt said §56.1 but state.md's real phase is §56.3 + fun-priority #22): idea (4) slice -- BattleOverlay._draw_threat_banner: pulsing top-centre banner when hostile missiles (own sensor contacts) head for an own ship within 240 s (count, soonest ETA, victim, "манёвр/ПРО/контрракеты"). View only. Headless smoke: no new script errors. Живой проверки нет. Next honest step: idea (1) -- player-managed resources (когда тратить контрракеты/режим ПРО) or (2) scenario goals (отрыв/конвой); first still probe whether player orders change outcome.
+Last pass finished: 2026-10-06 (autonomous, feedback #23)

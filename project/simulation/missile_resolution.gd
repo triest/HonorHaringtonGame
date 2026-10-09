@@ -51,11 +51,18 @@ class RodResult:
 	var sector
 	var outcome: int
 	var damage: float
+	## Render-facing facts (ImpactRecord): where this rod sat at detonation and
+	## how much yield it carried BEFORE the defence acted (a fully blocked rod
+	## has damage == 0 but incoming > 0). Defaults keep every older caller valid.
+	var position: Vector3 = Vector3.ZERO
+	var incoming: float = 0.0
 
-	func _init(p_sector, p_outcome: int, p_damage: float) -> void:
+	func _init(p_sector, p_outcome: int, p_damage: float, p_position: Vector3 = Vector3.ZERO, p_incoming: float = 0.0) -> void:
 		sector = p_sector
 		outcome = p_outcome
 		damage = p_damage
+		position = p_position
+		incoming = p_incoming
 
 class DetonationResult:
 	var outcome: int
@@ -138,7 +145,7 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null, f
 	SubsystemDamageResolution.begin_sticky()
 	for rod_position in rod_positions:
 		if defense == null:
-			rod_results.append(RodResult.new(null, Outcome.HIT_UNPROTECTED, damage_per_rod))
+			rod_results.append(RodResult.new(null, Outcome.HIT_UNPROTECTED, damage_per_rod, rod_position, damage_per_rod))
 			total_damage += damage_per_rod
 			any_unprotected = true
 			var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, damage_per_rod, null)
@@ -165,7 +172,7 @@ static func resolve_detonation(missile, target_hull, target_subsystems = null, f
 		else:
 			any_unprotected = true
 
-		rod_results.append(RodResult.new(resolution.sector, rod_outcome, rod_damage))
+		rod_results.append(RodResult.new(resolution.sector, rod_outcome, rod_damage, rod_position, damage_per_rod))
 
 		var sub_damage: Dictionary = SubsystemDamageResolution.apply_hit(target_subsystems, rod_damage, resolution.sector)
 		for k in sub_damage:

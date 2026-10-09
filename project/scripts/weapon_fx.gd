@@ -41,6 +41,9 @@ const BEAM_LIFETIME_S: float = 0.18
 ## not canon" status as BEAM_WIDTH_M above.
 const MISSILE_MARKER_RADIUS_M: float = 25.0
 
+## Set by main.gd: lets beams end at the real strike point (wedge / sidewall /
+## hull surface) instead of the target ship's centre. Null = old behaviour.
+var impact_fx: ImpactFxDirector
 var _active_beams: Array = []  # Array[Dictionary]: {node: MeshInstance3D, material: StandardMaterial3D, base_alpha: float, remaining: float}
 var _missile_markers: Dictionary = {}  # missile_id -> MeshInstance3D
 var _missile_marker_mesh: SphereMesh
@@ -64,7 +67,11 @@ func _ready() -> void:
 ## this, see main.gd doc comment) with the same `world` main.gd owns.
 func update(world: SimulationWorld) -> void:
 	for shot in world.last_tick_weapon_shots:
-		_spawn_beam(RenderOrigin.to_render(shot["attacker_position"]), RenderOrigin.to_render(shot["target_position"]), shot["outcome"])
+		var end: Vector3 = RenderOrigin.to_render(shot["target_position"])
+		var impact_index: int = int(shot.get("impact_index", -1))
+		if impact_fx != null and impact_index >= 0 and impact_index < world.last_tick_impacts.size():
+			end = impact_fx.strike_point_render(world.last_tick_impacts[impact_index])
+		_spawn_beam(RenderOrigin.to_render(shot["attacker_position"]), end, shot["outcome"])
 	_sync_missile_markers(world)
 
 func _spawn_beam(from: Vector3, to: Vector3, outcome: int) -> void:

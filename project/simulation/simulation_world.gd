@@ -52,6 +52,7 @@ const IndividualCommandState = preload("res://simulation/individual_command_stat
 const ShipCombatDirective = preload("res://simulation/ship_combat_directive.gd")
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
 const ReplayLog = preload("res://simulation/replay_log.gd")
+const ImpactRecord = preload("res://simulation/impact_record.gd")
 const KinematicsUtils = preload("res://simulation/kinematics_utils.gd")
 
 var clock: SimClock
@@ -239,6 +240,15 @@ var replay_log: ReplayLog = null
 ## not just that it hit -- a blocked/attenuated shot still gets a visible
 ## beam, it just did not penetrate.
 var last_tick_weapon_shots: Array = []  # Array[Dictionary]: {attacker_ship_id, target_ship_id, attacker_position: Vector3, target_position: Vector3, outcome: int, damage_dealt: float}
+
+## Missile laserhead detonations resolved THIS tick, as ImpactRecord
+## snapshots (plain data, no live references) for the render layer's impact
+## feedback (ImpactFxDirector). Same contract as last_tick_weapon_shots:
+## cleared and rebuilt every tick_simulation() call, populated whether or not
+## replay recording is on, never read back by the simulation itself. Holds
+## missile detonations (kind "missile") AND beam strikes (kind "beam");
+## last_tick_weapon_shots[i]["impact_index"] indexes into it (-1 = none).
+var last_tick_impacts: Array = []  # Array[Dictionary], layout in impact_record.gd
 
 ## Local tick counter, independent of SimClock.tick_count (most
 ## existing tests drive tick_simulation() directly without ever going
@@ -694,6 +704,7 @@ func reset_ships() -> void:
 	_missile_prev_pos.clear()
 	_next_ai_missile_id = 0
 	last_tick_weapon_shots.clear()
+	last_tick_impacts.clear()
 	_tick_index = 0
 	world_sim_time = 0.0
 	player_controlled_teams.clear()
@@ -867,7 +878,9 @@ func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 		hit_chance = WeaponResolution.compute_hit_chance(los.length(), mount.weapon.max_range_m, target.velocity - attacker.velocity, los, WeaponResolution.track_quality_factor(shot_contact.state))
 		var mount_index: int = weapon_mounts.get(attacker_ship_id, []).find(mount)
 		hit_roll = SensorResolution._hash01(hash(attacker_ship_id) & 0x7FFFFFFF, (hash(target_ship_id) & 0x7FFFFFFF) ^ (mount_index * 7919), _tick_index)
-	var result = WeaponResolution.fire(attacker, mount, target, hulls.get(target_ship_id), target.subsystems, formation_coverage, hit_chance, hit_roll)
+	var beam_hull = hulls.get(target_ship_id)
+	var beam_hull_before: float = beam_hull.integrity if beam_hull != null else 0.0
+	var result = WeaponResolution.fire(attacker, mount, target, beam_hull, target.subsystems, formation_coverage, hit_chance, hit_roll)
 	if result != null and result.outcome == WeaponResolution.Outcome.HIT_UNPROTECTED and result.damage_dealt > 0.0:
 		_record_event("weapon_hit", {"attacker_ship_id": attacker_ship_id, "target_ship_id": target_ship_id, "damage_dealt": result.damage_dealt})
 	if result != null and result.outcome != WeaponResolution.Outcome.NOT_READY and result.outcome != WeaponResolution.Outcome.OUT_OF_RANGE and result.outcome != WeaponResolution.Outcome.NO_ARC:
@@ -875,6 +888,15 @@ func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 		# consumed) -- record it for the renderer regardless of whether it
 		# penetrated, mirrors WeaponResolution.fire's own "shot is fired"
 		# comment just above `mount.trigger_cooldown()`.
+		# Beam strikes share the impact pipeline with missiles (ImpactFxDirector);
+		# `impact_index` points the beam renderer at its record so the beam can end
+		# at the real strike point instead of the target's centre (-1 = no record,
+		# e.g. a miss).
+		var impact_index: int = -1
+		var beam_record: Dictionary = ImpactRecord.build_beam(_tick_index, world_sim_time, attacker_ship_id, target_ship_id, attacker, target, beam_hull, beam_hull_before, result, mount.weapon.damage_per_hit * mount.condition)
+		if not beam_record.is_empty():
+			impact_index = last_tick_impacts.size()
+			last_tick_impacts.append(beam_record)
 		last_tick_weapon_shots.append({
 			"attacker_ship_id": attacker_ship_id,
 			"target_ship_id": target_ship_id,
@@ -882,6 +904,7 @@ func fire_weapon(attacker_ship_id: String, mount, target_ship_id: String):
 			"target_position": target.position,
 			"outcome": result.outcome,
 			"damage_dealt": result.damage_dealt,
+			"impact_index": impact_index,
 		})
 	return result
 
@@ -895,6 +918,7 @@ func tick_simulation(dt: float) -> void:
 	_tick_index += 1
 	world_sim_time += dt
 	last_tick_weapon_shots.clear()
+	last_tick_impacts.clear()
 	_resolve_pending_command_transmissions()
 	_sync_subsystem_driven_conditions()
 	_cleanup_inactive_missiles()
@@ -1097,6 +1121,7 @@ func _update_missiles(dt: float) -> void:
 					target_subsystems = ships[ship_id].subsystems
 					target_formation_coverage = _formation_bow_stern_coverage(ship_id)
 					break
+			var hull_before: float = target_hull.integrity if target_hull != null else 0.0
 			var det = MissileResolution.resolve_detonation(missile, target_hull, target_subsystems, target_formation_coverage.get("bow", false), target_formation_coverage.get("stern", false))
 			if det != null:
 				var tgt_id: String = ""
@@ -1104,6 +1129,8 @@ func _update_missiles(dt: float) -> void:
 					if ships[sid] == target:
 						tgt_id = sid
 						break
+				if det.outcome != MissileResolution.Outcome.NOT_ARMED and det.outcome != MissileResolution.Outcome.ALREADY_DETONATED and det.outcome != MissileResolution.Outcome.NO_TARGET:
+					last_tick_impacts.append(ImpactRecord.build(_tick_index, world_sim_time, String(missile_owners.get(missile_id, "")), tgt_id, missile.position, target, target_hull, hull_before, det))
 				_battle_event("missile_detonation", {"attacker_ship_id": missile_owners.get(missile_id, ""), "target_ship_id": tgt_id, "damage_dealt": det.damage_dealt, "outcome": det.outcome, "subsystems": det.subsystem_damage.keys()})
 
 ## 2026-09-29: counter-missiles are flown AFTER every offensive missile

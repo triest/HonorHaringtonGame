@@ -43,6 +43,13 @@ extends Node3D
 var world: SimulationWorld
 var hulls: Dictionary = {}  # String ship_id -> HullState (local, illustrative only -- NOT passed to world.hulls; see world.add_ship's optional hull param, unused here)
 var weapon_fx: WeaponFx
+## Missile-strike feedback (scripts/impact_fx_director.gd): reads
+## world.last_tick_impacts, draws rod lines + wedge ripples. View only.
+var impact_fx: ImpactFxDirector
+var impact_badges: ImpactBadgeOverlay
+var missile_trails: MissileTrailFx
+var camera_fx: CameraFxController
+var ship_views: Dictionary = {}  # String ship_id -> ShipView (render handles for impact_fx)
 var hud: Hud
 var tactical_plot: TacticalPlot
 ## §56.3 item A: single shared selection, injected into TacticalPlot (and
@@ -160,14 +167,19 @@ func _teardown_mission() -> void:
 	for child in get_children():
 		if child is ShipView:
 			child.queue_free()
-	for n in [weapon_fx, hud, tactical_plot, command_group_controller, command_group_panel,
+	for n in [weapon_fx, impact_fx, impact_badges, missile_trails, camera_fx, hud, tactical_plot, command_group_controller, command_group_panel,
 			move_order_controller, order_menu, order_menu_controller, weapon_panel_controller,
 			weapon_panel, camera_focus_controller, player_input, win_lose_screen, battle_overlay,
 			command_bar, ship_cards, battle_log, mission_panel]:
 		if n != null:
 			n.queue_free()
 	hulls.clear()
+	ship_views.clear()
 	weapon_fx = null
+	impact_fx = null
+	impact_badges = null
+	missile_trails = null
+	camera_fx = null
 	hud = null
 	tactical_plot = null
 	command_group_controller = null
@@ -209,10 +221,16 @@ func _start_mission(setup: Dictionary) -> void:
 		var view := ShipView.new()
 		view.bind(world.ships[ship_id])  # builds its own procedural hull + wedge planes
 		add_child(view)
+		ship_views[ship_id] = view
 		hulls[ship_id] = world.hulls.get(ship_id)
 
 	weapon_fx = WeaponFx.new()
 	add_child(weapon_fx)
+
+	impact_fx = ImpactFxDirector.new()
+	add_child(impact_fx)
+	for ship_id in ship_views.keys():
+		impact_fx.register_view(ship_id, ship_views[ship_id])
 
 	hud = Hud.new()
 	add_child(hud)
@@ -240,6 +258,20 @@ func _start_mission(setup: Dictionary) -> void:
 	# composition -- the editor only varies ship counts/types per side,
 	# never which side the player is on.
 	var player_team: String = "red"
+	impact_fx.player_team = player_team
+	weapon_fx.impact_fx = impact_fx
+	impact_badges = ImpactBadgeOverlay.new()
+	impact_badges.director = impact_fx
+	add_child(impact_badges)
+	missile_trails = MissileTrailFx.new()
+	missile_trails.bind(world)
+	add_child(missile_trails)
+	camera_fx = CameraFxController.new()
+	camera_fx.camera = get_node_or_null("Camera3D") as Camera3D
+	camera_fx.world = world
+	camera_fx.player_team = player_team
+	camera_fx.flagship_id = _largest_hull_id(player_team)
+	add_child(camera_fx)
 
 	# §56.3 item C: same shared world/selection as command_group_controller
 	# above.
@@ -324,6 +356,7 @@ func _start_mission(setup: Dictionary) -> void:
 	command_bar.tactical_plot = tactical_plot
 	command_bar.camera_focus_controller = camera_focus_controller
 	add_child(command_bar)
+	impact_fx.impact_cam_requested.connect(command_bar.request_impact_slowmo)
 
 	# 2026-09-27 (user feedback #3): the old debug text dumps (Hud, command
 	# group list) are replaced on screen by per-ship cards and a battle log.
@@ -409,6 +442,8 @@ func _on_tick(dt: float, _tick: int, _sim_time: float) -> void:
 		for mount in world.weapon_mounts[ship_id]:
 			mount.tick(dt)
 	weapon_fx.update(world)
+	impact_fx.update(world)
+	camera_fx.update(world)
 	hud.update(world, HUD_POV_SHIP_ID)
 	tactical_plot.update(world, HUD_POV_SHIP_ID)
 	# §56.3 item F: Hud's own current measured height feeds
@@ -471,3 +506,23 @@ func _frame_camera_on_ships() -> void:
 	camera.global_position = midpoint + view_dir * required_distance
 	camera.look_at(midpoint, Vector3.UP)
 	camera.far = required_distance * 3.0 + 10000.0
+
+## Ship of `team` with the biggest hull (the "flagship" for camera shake
+## weighting). Reads world.hulls only; "" when none.
+func _largest_hull_id(team: String) -> String:
+	var best_id: String = ""
+	var best: float = -1.0
+	for ship_id in world.ships.keys():
+		if String(world.teams.get(ship_id, "")) != team:
+			continue
+		var hull = world.hulls.get(ship_id)
+		var size: float = hull.max_integrity if hull != null else 0.0
+		if size > best:
+			best = size
+			best_id = ship_id
+	return best_id
+
+## Render-only per-frame hook: close missile passes shake the camera a little.
+func _process(delta: float) -> void:
+	if camera_fx != null and world != null:
+		camera_fx.update_pass_bys(world, delta)

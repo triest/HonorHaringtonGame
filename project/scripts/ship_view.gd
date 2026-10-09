@@ -54,6 +54,22 @@ const HullMeshBuilder = preload("res://scripts/hull_mesh_builder.gd")
 const WedgeMeshBuilder = preload("res://scripts/wedge_mesh_builder.gd")
 const SidewallMeshBuilder = preload("res://scripts/sidewall_mesh_builder.gd")
 const SubsystemType = preload("res://simulation/subsystem_type.gd")
+const WEDGE_SHADER = preload("res://scripts/wedge_impact.gdshader")
+const SIDEWALL_SHADER = preload("res://scripts/sidewall_crackle.gdshader")
+const HULL_SHADER = preload("res://scripts/capital_hull.gdshader")
+const ImpactGeometry = preload("res://scripts/impact_geometry.gd")
+const ShipDamageFx = preload("res://scripts/ship_damage_fx.gd")
+const AttackGeometry = preload("res://simulation/attack_geometry.gd")
+
+## Concurrent crackle sources per sidewall panel (matches sidewall_crackle.gdshader).
+const MAX_SIDEWALL_HITS: int = 6
+
+## Concurrent strike ripples the wedge shader can show (must match the
+## uniform array size in wedge_impact.gdshader). Oldest is overwritten.
+const MAX_WEDGE_HITS: int = 8
+## Wall-clock epoch for effect timing (see fx_clock_s). A recent epoch keeps
+## the float32 shader uniforms precise during long sessions.
+static var _fx_epoch_msec: int = Time.get_ticks_msec()
 
 var sim_state: ShipPhysicsState
 var hull_mesh_instance: MeshInstance3D
@@ -66,6 +82,17 @@ var sidewall_stern: MeshInstance3D
 var impeller_ring_bow: MeshInstance3D
 var impeller_ring_stern: MeshInstance3D
 var _greebles: Array = []
+var wedge_material: ShaderMaterial
+var _wedge_hits: Array = []        # Array[Vector4]: xyz local centre, w wall-clock start
+var _wedge_hit_params: Array = []  # Array[Vector4]: x energy (0 = unused)
+var _wedge_hit_cursor: int = 0
+var _wedge_fx_until_s: float = 0.0
+var damage_fx: ShipDamageFx
+var hull_material: ShaderMaterial
+var _hull_damage: float = 0.0
+var _wedge_fresnel: bool = false
+## sector (AttackGeometry.Sector) -> {mesh, material, hits, params, cursor, until_s, last_condition}
+var _sidewall_fx: Dictionary = {}
 
 func bind(state: ShipPhysicsState) -> void:
 	sim_state = state
@@ -74,6 +101,14 @@ func bind(state: ShipPhysicsState) -> void:
 	_build_sidewall_panels()
 	_build_greebles()
 	_build_impeller_rings()
+	_build_damage_fx()
+
+func _build_damage_fx() -> void:
+	if damage_fx != null and is_instance_valid(damage_fx):
+		damage_fx.queue_free()
+	damage_fx = ShipDamageFx.new()
+	add_child(damage_fx)
+	damage_fx.setup(sim_state.length_m)
 
 func _build_hull() -> void:
 	if hull_mesh_instance != null:
@@ -82,16 +117,14 @@ func _build_hull() -> void:
 	hull_mesh_instance = MeshInstance3D.new()
 	hull_mesh_instance.mesh = HullMeshBuilder.build(sim_state.length_m, sim_state.max_width_m, sim_state.max_height_m)
 
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.55, 0.58, 0.62)  # dull hull-plate grey; no branding/IP-derived livery
-	material.vertex_color_use_as_albedo = true  # picks up HullMeshBuilder's baked shading/seam gradient
-	material.metallic = 0.35
-	material.roughness = 0.45
-	# Cheap fresnel edge highlight -- makes a low-poly procedural hull
-	# read as a lit solid instead of a flat-shaded blob from most angles.
-	material.rim_enabled = true
-	material.rim = 0.35
-	material.rim_tint = 0.5
+	# 2026-10-09: capital_hull.gdshader -- procedural plating, emissive strips /
+	# windows / thrusters and a damage mask, on top of the same baked vertex
+	# colours (HullMeshBuilder light-from-above gradient) as before.
+	var material := ShaderMaterial.new()
+	material.shader = HULL_SHADER
+	material.set_shader_parameter("half_extents", Vector3(sim_state.max_width_m * 0.5, sim_state.max_height_m * 0.5, sim_state.length_m * 0.5))
+	material.set_shader_parameter("plate_color", Color(0.55, 0.58, 0.62))  # dull hull-plate grey; no branding/IP-derived livery
+	hull_material = material
 	hull_mesh_instance.material_override = material
 
 	add_child(hull_mesh_instance)
@@ -103,20 +136,100 @@ func _build_wedge_planes() -> void:
 	var hull_half_width: float = sim_state.max_width_m * 1.1  # slightly proud of the hull envelope
 	var ridge_height: float = sim_state.max_height_m * 0.9
 
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.35, 0.65, 1.0, 1.0)
-	material.vertex_color_use_as_albedo = true  # WedgeMeshBuilder's ridge->edge + lengthwise glow gradient
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD  # reads as a glowing field, not a flat translucent card
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# 2026-10-09: the wedge material is now wedge_impact.gdshader (same
+	# additive/unshaded look, plus strike ripples driven by add_wedge_impact).
+	wedge_material = ShaderMaterial.new()
+	wedge_material.shader = WEDGE_SHADER
+	wedge_material.set_shader_parameter("ship_size", sim_state.length_m)
+	_wedge_hits.clear()
+	_wedge_hit_params.clear()
+	for i in range(MAX_WEDGE_HITS):
+		_wedge_hits.append(Vector4.ZERO)
+		_wedge_hit_params.append(Vector4.ZERO)
+	wedge_material.set_shader_parameter("hits", _wedge_hits)
+	wedge_material.set_shader_parameter("hit_params", _wedge_hit_params)
+	var material: ShaderMaterial = wedge_material
 
 	wedge_top = _make_flat_wedge_mesh(hull_half_width, ridge_height, 1.0, material)
 	wedge_bottom = _make_flat_wedge_mesh(hull_half_width, ridge_height, -1.0, material)
 	add_child(wedge_top)
 	add_child(wedge_bottom)
 
-func _make_flat_wedge_mesh(hull_half_width: float, ridge_height: float, sign: float, material: StandardMaterial3D) -> MeshInstance3D:
+## Wall-clock seconds used by every impact effect (never sim time: at x2000
+## a detonation lasts one tick, the player still needs ~1 s to read it).
+static func fx_clock_s() -> float:
+	return float(Time.get_ticks_msec() - _fx_epoch_msec) * 0.001
+
+## Wedge geometry the strike-centre maths needs, mirroring
+## _build_wedge_planes()/WedgeMeshBuilder (hull_half_width, ridge_height,
+## wedge_half_length). Read-only convenience for ImpactFxDirector.
+func wedge_geometry() -> Dictionary:
+	return {
+		"half_length": sim_state.length_m * 0.5 * 1.15,
+		"half_width": sim_state.max_width_m * 1.1,
+		"ridge_height": sim_state.max_height_m * 0.9,
+	}
+
+## Starts one strike ripple on the wedge. `local_center` is in this ship's
+## local frame; `energy` 0..1 (>0); `start_s`/`life_s` on fx_clock_s().
+## Purely visual state -- writes shader uniforms only, nothing in the sim.
+func add_wedge_impact(local_center: Vector3, energy: float, start_s: float, life_s: float) -> void:
+	if wedge_material == null or energy <= 0.0:
+		return
+	_wedge_hits[_wedge_hit_cursor] = Vector4(local_center.x, local_center.y, local_center.z, start_s)
+	_wedge_hit_params[_wedge_hit_cursor] = Vector4(clampf(energy, 0.0, 1.0), 0.0, 0.0, 0.0)
+	_wedge_hit_cursor = (_wedge_hit_cursor + 1) % MAX_WEDGE_HITS
+	wedge_material.set_shader_parameter("hits", _wedge_hits)
+	wedge_material.set_shader_parameter("hit_params", _wedge_hit_params)
+	wedge_material.set_shader_parameter("ripple_life", life_s)
+	_wedge_fx_until_s = maxf(_wedge_fx_until_s, start_s + life_s)
+
+## Full dimension bundle for ImpactGeometry (hull ellipsoid, wedge, panels).
+func ship_geometry() -> Dictionary:
+	return ImpactGeometry.dims_for(sim_state.length_m, sim_state.max_width_m, sim_state.max_height_m)
+
+## Cumulative hull fraction lost (0..1) from ImpactRecord snapshots: darkens
+## the hull plating and drives venting. Visual state only.
+func set_hull_damage(fraction: float) -> void:
+	_hull_damage = clampf(fraction, 0.0, 1.0)
+	if hull_material != null:
+		hull_material.set_shader_parameter("damage", _hull_damage)
+	if damage_fx != null:
+		damage_fx.set_damage_fraction(_hull_damage)
+
+func hull_damage() -> float:
+	return _hull_damage
+
+## BRIGHT (false, default) or FRESNEL "almost invisible until hit" (true).
+func set_wedge_fresnel(on: bool) -> void:
+	_wedge_fresnel = on
+	if wedge_material != null:
+		wedge_material.set_shader_parameter("fresnel_mode", 1.0 if on else 0.0)
+
+func is_wedge_fresnel() -> bool:
+	return _wedge_fresnel
+
+## Starts a crackle burst on one sidewall panel. `ship_center` is in the SHIP's
+## local frame (converted to the panel's frame here). Visual state only.
+func add_sidewall_impact(sector: int, ship_center: Vector3, energy: float, start_s: float, life_s: float) -> void:
+	var fx: Dictionary = _sidewall_fx.get(sector, {})
+	if fx.is_empty() or energy <= 0.0:
+		return
+	var panel: MeshInstance3D = fx["mesh"]
+	var local: Vector3 = ship_center - panel.position
+	var hits: Array = fx["hits"]
+	var params: Array = fx["params"]
+	var cursor: int = fx["cursor"]
+	hits[cursor] = Vector4(local.x, local.y, local.z, start_s)
+	params[cursor] = Vector4(clampf(energy, 0.0, 1.0), 0.0, 0.0, 0.0)
+	fx["cursor"] = (cursor + 1) % MAX_SIDEWALL_HITS
+	var material: ShaderMaterial = fx["material"]
+	material.set_shader_parameter("hits", hits)
+	material.set_shader_parameter("hit_params", params)
+	material.set_shader_parameter("crackle_life", life_s)
+	fx["until_s"] = maxf(float(fx["until_s"]), start_s + life_s)
+
+func _make_flat_wedge_mesh(hull_half_width: float, ridge_height: float, sign: float, material: Material) -> MeshInstance3D:
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = WedgeMeshBuilder.build(sim_state.length_m, hull_half_width, ridge_height, sign)
 	mesh_instance.material_override = material
@@ -130,45 +243,36 @@ func _make_flat_wedge_mesh(hull_half_width: float, ridge_height: float, sign: fl
 func _build_sidewall_panels() -> void:
 	var broadside_half_width: float = sim_state.max_width_m * 0.55  # sits just outside the hull flank
 	var bow_stern_half_length: float = sim_state.length_m * 0.5
+	var broadside_color := Color(0.95, 0.75, 0.15, 0.22)
+	var bow_stern_color := Color(0.95, 0.35, 0.15, 0.22)
 
-	var broadside_material := StandardMaterial3D.new()
-	broadside_material.albedo_color = Color(0.95, 0.75, 0.15, 0.22)
-	broadside_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	broadside_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	broadside_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-
-	sidewall_port = MeshInstance3D.new()
-	sidewall_port.mesh = SidewallMeshBuilder.build_broadside(sim_state.length_m, sim_state.max_height_m)
-	sidewall_port.material_override = broadside_material
-	sidewall_port.position = Vector3(-broadside_half_width, 0.0, 0.0)
-	add_child(sidewall_port)
-
-	var starboard_material := broadside_material.duplicate()
-	sidewall_starboard = MeshInstance3D.new()
-	sidewall_starboard.mesh = SidewallMeshBuilder.build_broadside(sim_state.length_m, sim_state.max_height_m)
-	sidewall_starboard.material_override = starboard_material
-	sidewall_starboard.position = Vector3(broadside_half_width, 0.0, 0.0)
-	add_child(sidewall_starboard)
-
-	var bow_stern_material := StandardMaterial3D.new()
-	bow_stern_material.albedo_color = Color(0.95, 0.35, 0.15, 0.22)
-	bow_stern_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bow_stern_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	bow_stern_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-
+	sidewall_port = _make_sidewall_panel(SidewallMeshBuilder.build_broadside(sim_state.length_m, sim_state.max_height_m), Vector3(-broadside_half_width, 0.0, 0.0), broadside_color, AttackGeometry.Sector.PORT)
+	sidewall_starboard = _make_sidewall_panel(SidewallMeshBuilder.build_broadside(sim_state.length_m, sim_state.max_height_m), Vector3(broadside_half_width, 0.0, 0.0), broadside_color, AttackGeometry.Sector.STARBOARD)
 	# -Z = bow (attack_geometry.gd convention).
-	sidewall_bow = MeshInstance3D.new()
-	sidewall_bow.mesh = SidewallMeshBuilder.build_bow_stern(sim_state.max_width_m, sim_state.max_height_m)
-	sidewall_bow.material_override = bow_stern_material
-	sidewall_bow.position = Vector3(0.0, 0.0, -bow_stern_half_length)
-	add_child(sidewall_bow)
+	sidewall_bow = _make_sidewall_panel(SidewallMeshBuilder.build_bow_stern(sim_state.max_width_m, sim_state.max_height_m), Vector3(0.0, 0.0, -bow_stern_half_length), bow_stern_color, AttackGeometry.Sector.BOW)
+	sidewall_stern = _make_sidewall_panel(SidewallMeshBuilder.build_bow_stern(sim_state.max_width_m, sim_state.max_height_m), Vector3(0.0, 0.0, bow_stern_half_length), bow_stern_color, AttackGeometry.Sector.STERN)
 
-	var stern_material := bow_stern_material.duplicate()
-	sidewall_stern = MeshInstance3D.new()
-	sidewall_stern.mesh = SidewallMeshBuilder.build_bow_stern(sim_state.max_width_m, sim_state.max_height_m)
-	sidewall_stern.material_override = stern_material
-	sidewall_stern.position = Vector3(0.0, 0.0, bow_stern_half_length)
-	add_child(sidewall_stern)
+## One sidewall panel with its own sidewall_crackle.gdshader material (own
+## condition + strike ring buffer), registered under its AttackGeometry sector.
+func _make_sidewall_panel(mesh: Mesh, panel_position: Vector3, color: Color, sector: int) -> MeshInstance3D:
+	var panel := MeshInstance3D.new()
+	panel.mesh = mesh
+	panel.position = panel_position
+	var material := ShaderMaterial.new()
+	material.shader = SIDEWALL_SHADER
+	material.set_shader_parameter("base_color", color)
+	material.set_shader_parameter("ship_size", sim_state.length_m)
+	var hits: Array = []
+	var params: Array = []
+	for i in range(MAX_SIDEWALL_HITS):
+		hits.append(Vector4.ZERO)
+		params.append(Vector4.ZERO)
+	material.set_shader_parameter("hits", hits)
+	material.set_shader_parameter("hit_params", params)
+	panel.material_override = material
+	add_child(panel)
+	_sidewall_fx[sector] = {"mesh": panel, "material": material, "hits": hits, "params": params, "cursor": 0, "until_s": 0.0, "last_condition": 1.0}
+	return panel
 
 ## Small static "greeble" meshes (bridge/sensor mast, flank blisters) so
 ## the hull silhouette isn't a perfectly smooth surface of revolution.
@@ -296,6 +400,11 @@ func _process(_delta: float) -> void:
 	global_position = RenderOrigin.to_render(sim_state.position)
 	global_basis = Basis(sim_state.orientation)
 
+	if wedge_material != null:
+		var now_s: float = fx_clock_s()
+		if now_s <= _wedge_fx_until_s:
+			wedge_material.set_shader_parameter("fx_time", now_s)
+
 	var defense: ShipDefenseState = sim_state.defense
 	var wedge_visible: bool = defense != null and defense.wedge_up
 	if wedge_top != null:
@@ -307,6 +416,9 @@ func _process(_delta: float) -> void:
 		if sim_state.subsystems != null:
 			propulsion_condition = sim_state.subsystems.get_condition(SubsystemType.Type.PROPULSION)
 		var glow: Color = _impeller_glow_color(propulsion_condition)
+		if hull_material != null:
+			hull_material.set_shader_parameter("engine_glow", propulsion_condition)
+			hull_material.set_shader_parameter("fx_time", fx_clock_s())
 		for ring in [impeller_ring_bow, impeller_ring_stern]:
 			var mat: StandardMaterial3D = ring.material_override
 			mat.emission = glow
@@ -321,6 +433,8 @@ func _process(_delta: float) -> void:
 			sidewall_stern.visible = false
 		return
 
+	_update_sidewall_fx(defense)
+
 	if sidewall_port != null:
 		sidewall_port.visible = _broadside_sidewall_visible(defense.port_sidewall_condition)
 	if sidewall_starboard != null:
@@ -329,3 +443,24 @@ func _process(_delta: float) -> void:
 		sidewall_bow.visible = _bow_stern_sidewall_visible(defense.bow_sidewall_raised, defense.bow_sidewall_condition)
 	if sidewall_stern != null:
 		sidewall_stern.visible = _bow_stern_sidewall_visible(defense.stern_sidewall_raised, defense.stern_sidewall_condition)
+
+## Pushes each panel's live condition (read-only from the sim) and the wall
+## clock into its shader, so a failing panel flickers on its own and a struck
+## one crackles. fx_time is only written while something needs animating.
+func _update_sidewall_fx(defense: ShipDefenseState) -> void:
+	var now_s: float = fx_clock_s()
+	var conditions: Dictionary = {
+		AttackGeometry.Sector.PORT: defense.port_sidewall_condition,
+		AttackGeometry.Sector.STARBOARD: defense.starboard_sidewall_condition,
+		AttackGeometry.Sector.BOW: defense.bow_sidewall_condition,
+		AttackGeometry.Sector.STERN: defense.stern_sidewall_condition,
+	}
+	for sector in _sidewall_fx.keys():
+		var fx: Dictionary = _sidewall_fx[sector]
+		var material: ShaderMaterial = fx["material"]
+		var condition: float = conditions[sector]
+		if not is_equal_approx(condition, float(fx["last_condition"])):
+			material.set_shader_parameter("condition", condition)
+			fx["last_condition"] = condition
+		if condition < 0.999 or now_s <= float(fx["until_s"]):
+			material.set_shader_parameter("fx_time", now_s)

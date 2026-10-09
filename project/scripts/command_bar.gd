@@ -50,6 +50,11 @@ const TIME_SCALES: Array = [1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0
 ## watched and the simulation keeps its fine tick there. Toggleable.
 const SLOWDOWN_RANGE_M: float = 1.5e9
 const SLOWDOWN_CAP: float = 10.0
+## Impact cam (ImpactFxDirector.impact_cam_requested): after a strike on a
+## player ship the clock is held at or below this scale for the requested
+## wall-clock time, so a follow-up salvo is watched hit by hit. Obeys the
+## same "Авто-замедл." toggle as SLOWDOWN_CAP.
+const IMPACT_SLOWMO_CAP: float = 2.0
 ## Перемотка до сближения (TODO): адаптивный множитель, пока расстояние до
 ## противника больше WARP_STOP_RANGE_M; затем возврат к WARP_RESUME_SCALE.
 const WARP_STOP_RANGE_M: float = 6.0e8        # 1.5 x ENERGY_RANGE_M (4e8)
@@ -78,6 +83,8 @@ var _warp_prev_t: float = 0.0
 var _warp_saved_dt_mult: int = 1
 var _slow_btn: Button
 var _slowdown_active: bool = false
+var _impact_hold_until_ms: int = 0
+var _impact_hold_active: bool = false
 var _clock_label: Label
 var _sel_label: Label
 var _fire_label: Label
@@ -290,17 +297,27 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	sync()
 
+## Slot for ImpactFxDirector.impact_cam_requested: hold the clock near real
+## time for `hold_s` wall-clock seconds (see IMPACT_SLOWMO_CAP). Extends, never
+## shortens, an already running hold.
+func request_impact_slowmo(hold_s: float) -> void:
+	_impact_hold_until_ms = maxi(_impact_hold_until_ms, Time.get_ticks_msec() + int(hold_s * 1000.0))
+
 func sync() -> void:
 	if world == null:
 		return
 	var clk: SimClock = world.clock
 	var t: int = int(world.world_sim_time)
 	_update_warp()
-	_slowdown_active = auto_slowdown and _missiles_closing()
-	clk.scale_cap = SLOWDOWN_CAP if _slowdown_active else 0.0
+	_impact_hold_active = auto_slowdown and Time.get_ticks_msec() < _impact_hold_until_ms
+	_slowdown_active = auto_slowdown and (_impact_hold_active or _missiles_closing())
+	if _impact_hold_active:
+		clk.scale_cap = IMPACT_SLOWMO_CAP
+	else:
+		clk.scale_cap = SLOWDOWN_CAP if _slowdown_active else 0.0
 	var speed_txt: String = "ПАУЗА" if clk.paused else "x%d (факт x%.0f)" % [int(clk.time_scale), clk.effective_time_scale]
 	if _slowdown_active and not clk.paused and clk.time_scale > SLOWDOWN_CAP:
-		speed_txt += " [замедление: ракеты у целей]"
+		speed_txt += " [замедление: попадание]" if _impact_hold_active else " [замедление: ракеты у целей]"
 	var sep_txt: String = ""
 	var d: float = _enemy_distance_m()
 	if d > 0.0:

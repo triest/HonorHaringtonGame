@@ -1,5 +1,20 @@
 # CHANGELOG.md
 
+## 2026-10-09 -- обратная связь по попаданиям (срез 2: боковые стенки, корпус, лучи, значки, следы, тряска)
+- Sim: `ImpactRecord.build_beam` -- лучевые попадания в `last_tick_impacts` (kind "beam"); `last_tick_weapon_shots[*].impact_index` связывает выстрел с записью. Только данные, replay не затронут.
+- Render: `sidewall_crackle.gdshader` (треск растёт с потерей состояния панели), `hull_scorch.gdshader` + `ShipDamageFx` (вспышка, искры, кольцо плазмы, стойкий ожог, утечка газа/дыма по доле потерянного корпуса при HIT_UNPROTECTED), `capital_hull.gdshader` (обшивка/огни/двигатели/повреждения), режим Френеля «почти невидим до попадания» (F9) + кадровая вспышка при поглощении, линии стержней и лучи оканчиваются в реальной точке попадания (`ImpactGeometry`).
+- UI: значок «xN» склеивает залп (`ImpactBadgeModel`/`ImpactBadgeOverlay`).
+- Доп.: `MissileTrailFx` (процедурные следы, MultiMesh), `CameraFxController` (тряска/fov), `SpaceEnvironment` (ACES/glow/туман; пока НЕ подключён к main.tscn).
+- Тесты: test_impact_fx.gd (64 проверки), полный набор и test_replay_log зелёные.
+- НЕ проверено/не сделано: живой бой; следы ракет не подтверждены рендером (в llvmpipe GL-compat кадр пустой, 180 сегментов в буфере -- проверить в Forward+); вершинное искажение клина; визуал FORMATION_COVERED; применение SpaceEnvironment.
+
+## 2026-10-09 -- обратная связь по попаданиям ракет (feedback #22, срез 1: клин)
+- Sim: `ImpactRecord` (simulation/impact_record.gd) + `SimulationWorld.last_tick_impacts` (снимок попадания лазерной боеголовки: стержни, сектора, исходы, hull до/после; только данные, без ссылок на живые объекты). `MissileResolution.RodResult` получил `position`/`incoming` (необязательные аргументы, старые вызовы не затронуты).
+- Render: `ImpactFxDirector` (scripts/impact_fx_director.gd) -- линии стержней + рябь на клине (`wedge_impact.gdshader`, `ShipView.add_wedge_impact`); время эффектов по настенным часам. Только чтение состояния (ТЗ §42).
+- UI: `CommandBar.request_impact_slowmo` -- после попадания по кораблю игрока замедление до x2 на 1.5 с реального времени (подчиняется «Авто-замедл.»).
+- Тесты: simulation/tests/test_impact_fx.gd (29 проверок); регрессия missile_resolution/simulation_world/replay_log/scenarios/subsystem_damage_consumers/counter_missile -- зелёные. Шейдер проверен рендером под llvmpipe (GL compatibility); живой проверки игроком нет.
+- НЕ сделано (следующие срезы): хлопки боковых стенок, взрыв/шрам при HIT_UNPROTECTED, всплывающие теги урона, склейка залпа в значок xN, вершинное искажение клина (сетка клина слишком грубая), бой лучами.
+
 ## 2026-09-30 ~19:02 UTC — сближение при пустых ракетных трубах
 - TacticalAI.compute_approach_maneuver (погоня с торможением sqrt(a*остаток), стоп на APPROACH_STOP_RANGE_M=300 км) + SimulationWorld._team_out_of_missiles (все трубы ammo=0, своих ракет в полёте нет; команды без труб не затрагиваются); ИИ-корабли без приказов идут на сближение, внутри стоп-дистанции возвращается crossing-the-T. Тест test_out_of_missiles_approach.gd (3 кейса), crossing_t и tactical_ai зелёные, смоук 128 (база).
 
